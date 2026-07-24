@@ -76,7 +76,7 @@ void lamp_array_init(void) {
 }
 
 void lamp_array_apply(void) {
-    if (game_connected) {
+    if (io_connected) {
         return;
     }
     if(!(ControllerConfig.cfg0 & CFG0_BIT_ENABLE_LAMPARRAY)){

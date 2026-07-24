@@ -83,7 +83,7 @@ void hid_task_chuni_input() {
 
 extern uint8_t touchData32[32];
 
-bool game_connected;
+bool io_connected;
 uint32_t connected_time;
 
 struct NyanithmInput {
@@ -124,7 +124,7 @@ void serial_io() {
     syncInputState();
 
     while(tud_cdc_available()) {
-        game_connected = true;
+        io_connected = true;
         connected_time = to_ms_since_boot(get_absolute_time());
         uint8_t cmd = getchar();
         if(cmd == CMD_GET_API_LEVEL) {
@@ -187,6 +187,6 @@ void serial_io() {
         }
     }
     if(to_ms_since_boot(get_absolute_time()) - connected_time > 2000) {
-        game_connected = false;
+        io_connected = false;
     }
 }

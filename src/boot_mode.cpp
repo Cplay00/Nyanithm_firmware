@@ -43,7 +43,7 @@ void boot_normalMode() {
     sleep_ms(10);
     hid_working = true;
     while(true) {
-        if(!game_connected) {
+        if(!io_connected) {
             if(!(ControllerConfig.cfg0 & CFG0_BIT_ENABLE_LAMPARRAY)) {
                 update_rainbow_frame();
             }

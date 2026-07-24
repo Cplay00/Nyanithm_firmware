@@ -15,7 +15,7 @@ void serial_io();
 
 void hid_task_chuni_input();
 
-extern bool game_connected;
+extern bool io_connected;
 extern bool hid_working ;
 
 #endif
