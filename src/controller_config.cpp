@@ -25,7 +25,7 @@ controller_config defaultConfig{
     .controller_mode = MODE_NORMAL,      //
     .airMax = 400,                       //
     .airMin = 50,                        //
-    .heightOffset = {0, 0, 0, 0, 0},        //
+    .heightOffset = {0, 0, 0, 0, 0},     //
     .lightLimit = 255,                   //
     .latency = 0,                        //
     .xorSum = 0,                         // 前127字节异或和
@@ -52,7 +52,6 @@ void saveConfigSafe(void* param) {
 
 void saveConfig() {
     int result = flash_safe_execute(saveConfigSafe, nullptr, 10);
-    // printf("saveConfig result: %d, currentPage = %d\n", result, currentPage);
 }
 
 void eraseConfigSectorSafe(void* param) {
@@ -62,7 +61,6 @@ void eraseConfigSectorSafe(void* param) {
 
 void eraseConfigSector() {
     int result = flash_safe_execute(eraseConfigSectorSafe, nullptr, 10);
-    // printf("eraseConfig result: %d\n", result);
 }
 
 void readConfigSafe(void* param) {
@@ -124,12 +122,9 @@ void setConfig() {
  */
 bool checkConfigBuf(controller_config* config) {
     if(config->magic != CONTROLLER_CONFIG_MAGIC) {
-        // printf("magic number wrong\n");
         return false;
     }
     if(config->cfgVer != CONTROLLER_CONFIG_VERSION) {
-        // printf("config version wrong\n");
-        // printf("should be %d but read %d\n", CONTROLLER_CONFIG_VERSION, config->cfgVer);
         return false;
     }
     uint8_t* ptr = (uint8_t*)config;
@@ -139,7 +134,6 @@ bool checkConfigBuf(controller_config* config) {
         ptr++;
     }
     if(sum != config->xorSum) {
-        // printf("xorSum wrong\n");
         return false;
     }
     return true;

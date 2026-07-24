@@ -134,6 +134,7 @@ void updateIR() {
 
 bool detect3116(uint8_t addr) {
     // 尝试读取地址寄存器值
+    // I2C_ADDR_ADDRESS 是 3116 内部寄存器地址
     uint8_t buf[1] = {I2C_ADDR_ADDRESS};
     i2c_write(0, addr, buf, 1, true);
     buf[0] = 0;

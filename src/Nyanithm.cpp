@@ -16,13 +16,9 @@
 
 
 int main() {
-
     sleep_ms(10);
     initUSBDevice();
-         
-
     sleep_ms(10);
-    
     boot_switch();
-
+    return 0;
 }
