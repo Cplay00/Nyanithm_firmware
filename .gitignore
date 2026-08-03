@@ -1,0 +1,16 @@
+build
+.vscode/*
+.clang-format
+build_*
+*.uf2
+*.csv
+__pycache__/
+*.pyc
+*.pdb
+*.dll
+*.lib
+*.dis
+*.elf
+*.map
+chain_report.txt
+AGENTS.md
