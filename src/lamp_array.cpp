@@ -84,7 +84,7 @@ void lamp_array_apply(void) {
     }
 
     if (g_lampCount < kMaxLampCount) {
-        RGB_LED.fill(0, g_lampCount, kMaxLampCount - g_lampCount);
+        RGB_LED.fill(0, 0, 0, g_lampCount, kMaxLampCount - g_lampCount);
     }
 
     for (uint8_t i = 0; i < g_lampCount; i++) {
@@ -105,9 +105,9 @@ void lamp_array_apply(void) {
             b >>= 2;
         }
 
-        RGB_LED.setPixelColor((g_lampCount - 1) - i, WS2812::RGB(r, g, b));
+        RGB_LED.setColor((g_lampCount - 1) - i, r, g, b);
     }
-    RGB_LED.show();
+    RGB_LED.flush();
     s_dirty = false;
 }
 

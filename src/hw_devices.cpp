@@ -30,7 +30,7 @@ MPR121 mpr2(0, 0x5C);
 
 PCA954X mux0(1, 0x70, GPIO_PCA9545_RESET);
 
-WS2812 RGB_LED(GPIO_RGB, 31, pio0, 0, WS2812::FORMAT_GRB);
+WS2812 RGB_LED(pio0, 0, GPIO_RGB, 31);
 
 uint8_t g_lampCount = 31;
 
@@ -262,7 +262,7 @@ void initHwDevices() {
     // updateInputState() calls watchdog_update() every cycle.
     watchdog_enable(2000, true);
     g_lampCount = (ControllerConfig.cfg0 & CFG0_BIT_FORCE16LEDS) ? 16 : 31;
-    RGB_LED.fill(0);
+    RGB_LED.fill(0, 0, 0);
     initI2C();
     detectIR();
     if (usingIR) {

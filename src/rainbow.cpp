@@ -66,14 +66,14 @@ void update_rainbow_frame() {
         static uint8_t offset = 0;  // 每次调用偏移色相
 
         if (g_lampCount < 31) {
-            RGB_LED.fill(0, g_lampCount, 31 - g_lampCount);
+            RGB_LED.fill(0, 0, 0, g_lampCount, 31 - g_lampCount);
         }
         for (int i = 0; i < g_lampCount; i++) {
             uint8_t hue = (i * 256 / g_lampCount + offset) & 0xFF;  // 0-255 循环
             RGB rgb = hsv_to_rgb(hue);
-            RGB_LED.setPixelColor((g_lampCount - 1) - i, WS2812::RGB((rgb.r * ControllerConfig.lightLimit) / 255, (rgb.g * ControllerConfig.lightLimit) / 255, (rgb.b * ControllerConfig.lightLimit) / 255));
+            RGB_LED.setColor((g_lampCount - 1) - i, (rgb.r * ControllerConfig.lightLimit) / 255, (rgb.g * ControllerConfig.lightLimit) / 255, (rgb.b * ControllerConfig.lightLimit) / 255);
         }
-        RGB_LED.show();
+        RGB_LED.flush();
 
         offset++;  // 改变偏移量，形成流动
     } else {

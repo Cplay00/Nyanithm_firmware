@@ -50,16 +50,16 @@ void boot_productionMode() {
     hid_working = false;
     game_connected = true;
     initI2CBus(0, GPIO_I2C_0_SDA, GPIO_I2C_0_SCL, BR200K);
-    RGB_LED.fill(WS2812::RGB(0xff, 0xff, 0xff));
-    RGB_LED.show();
+    RGB_LED.fill(0xff, 0xff, 0xff);
+    RGB_LED.flush();
 
     productionMode();
 
 }
 
 void boot_appLinkMode() {
-    RGB_LED.fill(WS2812::RGB(0x00, 0x0f, 0x00));
-    RGB_LED.show();
+    RGB_LED.fill(0x00, 0x0f, 0x00);
+    RGB_LED.flush();
 
     hid_working = false;
 
@@ -73,8 +73,8 @@ void boot_appLinkMode() {
 }
 
 void boot_normalMode() {
-    RGB_LED.fill(WS2812::RGB(0x0f, 0x0f, 0x0f));
-    RGB_LED.show();
+    RGB_LED.fill(0x0f, 0x0f, 0x0f);
+    RGB_LED.flush();
 
     sleep_ms(10);
     readConfig();
@@ -124,26 +124,26 @@ void boot_otherModes() {
 
     sleep_ms(10);
     hid_working = false;
-    RGB_LED.fill(WS2812::RGB(0, 0, 0));
+    RGB_LED.fill(0, 0, 0);
     if (g_lampCount == 16) {
         for (int j = 0; j < 4; j++)
-            RGB_LED.setPixelColor(15 - j, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
+            RGB_LED.setColor(15 - j, 0, 0, ControllerConfig.lightLimit);
         for (int j = 0; j < 4; j++)
-            RGB_LED.setPixelColor(11 - j, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
+            RGB_LED.setColor(11 - j, 0, ControllerConfig.lightLimit, 0);
     } else {
         for (int j = 0; j < 7; j++)
-            RGB_LED.setPixelColor(30 - j, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
+            RGB_LED.setColor(30 - j, 0, 0, ControllerConfig.lightLimit);
         for (int j = 0; j < 7; j++)
-            RGB_LED.setPixelColor(22 - j, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
+            RGB_LED.setColor(22 - j, 0, ControllerConfig.lightLimit, 0);
     }
     // // F
     //     for (int j = 0; j < 7; j++)
-    //         RGB_LED.setPixelColor(14 - j, WS2812::RGB(255, 255, 0));
+    //         RGB_LED.setColor(14 - j, 255, 255, 0);
     // // D
     //     for (int j = 0; j < 7; j++)
-    //         RGB_LED.setPixelColor(6 - j, WS2812::RGB(255, 255, 0));
+    //         RGB_LED.setColor(6 - j, 255, 255, 0);
 
-    RGB_LED.show();
+    RGB_LED.flush();
     while (true) {
         updateInputState();
         updateTouchData4k();

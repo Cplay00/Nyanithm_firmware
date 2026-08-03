@@ -1,0 +1,19 @@
+; This Source Code Form is subject to the terms of the Mozilla Public
+; License, v. 2.0. If a copy of the MPL was not distributed with this
+; file, You can obtain one at https://mozilla.org/MPL/2.0/.
+;
+; Copyright (c) 2026 Catium2006
+
+; 时钟5分频，每时钟40ns
+.program ws2812
+loop:
+    out x, 1            ; 取1位到X寄存器
+    jmp !x send0        ; 如果是0则发0, 否则发1
+send1:
+    set pins, 1 [16]    ; 高电平, 并等待16时钟
+    set pins, 0 [14]    ; 低电平, 并等待14时钟
+    jmp loop            ; 
+send0:
+    set pins, 1 [8]     ; 高电平, 并等待8时钟
+    set pins, 0 [22]    ; 低电平, 并等待22时钟
+    jmp loop            ;

@@ -57,10 +57,10 @@ add_executable(Nyanithm
         src/tca9539.cpp
         src/lamp_array.cpp
         src/production_mode.cpp
-        lib/Pico_WS2812-master/WS2812.cpp
+        src/ws2812.cpp
         )
 
-pico_generate_pio_header(Nyanithm ${CMAKE_CURRENT_LIST_DIR}/lib/Pico_WS2812-master/WS2812.pio)
+pico_generate_pio_header(Nyanithm ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 
 pico_set_program_name(Nyanithm "Nyanithm")
@@ -89,7 +89,7 @@ target_include_directories(Nyanithm PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/include/config/
         ${CMAKE_CURRENT_LIST_DIR}/include/share/
         ${CMAKE_CURRENT_LIST_DIR}/include/software/
-        ${CMAKE_CURRENT_LIST_DIR}/lib/Pico_WS2812-master/
+        ${CMAKE_CURRENT_LIST_DIR}/include/pio/
         )
 
 # Add any user requested libraries

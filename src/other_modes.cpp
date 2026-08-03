@@ -20,56 +20,56 @@ void start_4kMode() {
         updateInputState();
         updateTouchData4k();
         if (g_lampCount == 16) {
-            RGB_LED.fill(WS2812::RGB(0x08, 0x08, 0x08));
-            RGB_LED.setPixelColor(3, WS2812::RGB(ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit));
-            RGB_LED.setPixelColor(7, WS2812::RGB(ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit));
-            RGB_LED.setPixelColor(11, WS2812::RGB(ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit));
+            RGB_LED.fill(0x08, 0x08, 0x08);
+            RGB_LED.setColor(3, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
+            RGB_LED.setColor(7, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
+            RGB_LED.setColor(11, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
 
             if (touchData4k[0]) {
                 for (int j = 0; j < 4; j++)
-                    RGB_LED.setPixelColor(15 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(15 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
             if (touchData4k[1]) {
                 for (int j = 0; j < 4; j++)
-                    RGB_LED.setPixelColor(11 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(11 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
             if (touchData4k[2]) {
                 for (int j = 0; j < 4; j++)
-                    RGB_LED.setPixelColor(7 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(7 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
             if (touchData4k[3]) {
                 for (int j = 0; j < 4; j++)
-                    RGB_LED.setPixelColor(3 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(3 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
         } else {
-            RGB_LED.fill(WS2812::RGB(0x08, 0x08, 0x08));
-            RGB_LED.setPixelColor(7, WS2812::RGB(ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit));
-            RGB_LED.setPixelColor(15, WS2812::RGB(ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit));
-            RGB_LED.setPixelColor(23, WS2812::RGB(ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit));
+            RGB_LED.fill(0x08, 0x08, 0x08);
+            RGB_LED.setColor(7, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
+            RGB_LED.setColor(15, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
+            RGB_LED.setColor(23, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
 
             // K
             if (touchData4k[0]) {
                 for (int j = 0; j < 7; j++)
-                    RGB_LED.setPixelColor(30 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(30 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
             // J
             if (touchData4k[1]) {
                 for (int j = 0; j < 7; j++)
-                    RGB_LED.setPixelColor(22 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(22 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
             // F
             if (touchData4k[2]) {
                 for (int j = 0; j < 7; j++)
-                    RGB_LED.setPixelColor(14 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(14 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
             // D
             if (touchData4k[3]) {
                 for (int j = 0; j < 7; j++)
-                    RGB_LED.setPixelColor(6 - j, WS2812::RGB(ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0));
+                    RGB_LED.setColor(6 - j, ControllerConfig.lightLimit, ControllerConfig.lightLimit, 0);
             }
         }
 
-        RGB_LED.show();
+        RGB_LED.flush();
 
         /*------------- Keyboard -------------*/
         if (tud_hid_n_ready(0)) {
@@ -120,116 +120,116 @@ void start_6kMode() {
     while (true) {
         updateInputState();
         updateTouchData6k();
-        RGB_LED.fill(WS2812::RGB(0, 0, 0));
+        RGB_LED.fill(0, 0, 0);
 
         if (g_lampCount == 16) {
-            RGB_LED.setPixelColor(0, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(1, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(2, WS2812::RGB(25, 0, 0));
+            RGB_LED.setColor(0, 25, 0, 0);
+            RGB_LED.setColor(1, 25, 0, 0);
+            RGB_LED.setColor(2, 25, 0, 0);
 
-            RGB_LED.setPixelColor(3, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(4, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(5, WS2812::RGB(0, 25, 0));
+            RGB_LED.setColor(3, 0, 25, 0);
+            RGB_LED.setColor(4, 0, 25, 0);
+            RGB_LED.setColor(5, 0, 25, 0);
 
-            RGB_LED.setPixelColor(6, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(7, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(8, WS2812::RGB(0, 0, 25));
+            RGB_LED.setColor(6, 0, 0, 25);
+            RGB_LED.setColor(7, 0, 0, 25);
+            RGB_LED.setColor(8, 0, 0, 25);
 
-            RGB_LED.setPixelColor(9, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(10, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(11, WS2812::RGB(25, 0, 0));
+            RGB_LED.setColor(9, 25, 0, 0);
+            RGB_LED.setColor(10, 25, 0, 0);
+            RGB_LED.setColor(11, 25, 0, 0);
 
-            RGB_LED.setPixelColor(12, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(13, WS2812::RGB(0, 25, 0));
+            RGB_LED.setColor(12, 0, 25, 0);
+            RGB_LED.setColor(13, 0, 25, 0);
 
-            RGB_LED.setPixelColor(14, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(15, WS2812::RGB(0, 0, 25));
+            RGB_LED.setColor(14, 0, 0, 25);
+            RGB_LED.setColor(15, 0, 0, 25);
 
             if (touchData6k[0]) {
-                RGB_LED.setPixelColor(0, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(1, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(2, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
+                RGB_LED.setColor(0, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(1, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(2, ControllerConfig.lightLimit, 0, 0);
             }
             if (touchData6k[1]) {
-                RGB_LED.setPixelColor(3, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(4, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(5, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
+                RGB_LED.setColor(3, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(4, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(5, 0, ControllerConfig.lightLimit, 0);
             }
             if (touchData6k[2]) {
-                RGB_LED.setPixelColor(6, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(7, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(8, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
+                RGB_LED.setColor(6, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(7, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(8, 0, 0, ControllerConfig.lightLimit);
             }
             if (touchData6k[3]) {
-                RGB_LED.setPixelColor(9, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(10, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(11, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
+                RGB_LED.setColor(9, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(10, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(11, ControllerConfig.lightLimit, 0, 0);
             }
             if (touchData6k[4]) {
-                RGB_LED.setPixelColor(12, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(13, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
+                RGB_LED.setColor(12, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(13, 0, ControllerConfig.lightLimit, 0);
             }
             if (touchData6k[5]) {
-                RGB_LED.setPixelColor(14, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(15, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
+                RGB_LED.setColor(14, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(15, 0, 0, ControllerConfig.lightLimit);
             }
         } else {
-            RGB_LED.setPixelColor(2, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(3, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(4, WS2812::RGB(25, 0, 0));
+            RGB_LED.setColor(2, 25, 0, 0);
+            RGB_LED.setColor(3, 25, 0, 0);
+            RGB_LED.setColor(4, 25, 0, 0);
 
-            RGB_LED.setPixelColor(6, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(7, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(8, WS2812::RGB(0, 25, 0));
+            RGB_LED.setColor(6, 0, 25, 0);
+            RGB_LED.setColor(7, 0, 25, 0);
+            RGB_LED.setColor(8, 0, 25, 0);
 
-            RGB_LED.setPixelColor(10, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(11, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(12, WS2812::RGB(0, 0, 25));
+            RGB_LED.setColor(10, 0, 0, 25);
+            RGB_LED.setColor(11, 0, 0, 25);
+            RGB_LED.setColor(12, 0, 0, 25);
 
-            RGB_LED.setPixelColor(18, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(19, WS2812::RGB(25, 0, 0));
-            RGB_LED.setPixelColor(20, WS2812::RGB(25, 0, 0));
+            RGB_LED.setColor(18, 25, 0, 0);
+            RGB_LED.setColor(19, 25, 0, 0);
+            RGB_LED.setColor(20, 25, 0, 0);
 
-            RGB_LED.setPixelColor(22, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(23, WS2812::RGB(0, 25, 0));
-            RGB_LED.setPixelColor(24, WS2812::RGB(0, 25, 0));
+            RGB_LED.setColor(22, 0, 25, 0);
+            RGB_LED.setColor(23, 0, 25, 0);
+            RGB_LED.setColor(24, 0, 25, 0);
 
-            RGB_LED.setPixelColor(26, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(27, WS2812::RGB(0, 0, 25));
-            RGB_LED.setPixelColor(28, WS2812::RGB(0, 0, 25));
+            RGB_LED.setColor(26, 0, 0, 25);
+            RGB_LED.setColor(27, 0, 0, 25);
+            RGB_LED.setColor(28, 0, 0, 25);
 
             if (touchData6k[0]) {
-                RGB_LED.setPixelColor(2, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(3, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(4, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
+                RGB_LED.setColor(2, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(3, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(4, ControllerConfig.lightLimit, 0, 0);
             }
             if (touchData6k[1]) {
-                RGB_LED.setPixelColor(6, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(7, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(8, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
+                RGB_LED.setColor(6, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(7, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(8, 0, ControllerConfig.lightLimit, 0);
             }
             if (touchData6k[2]) {
-                RGB_LED.setPixelColor(10, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(11, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(12, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
+                RGB_LED.setColor(10, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(11, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(12, 0, 0, ControllerConfig.lightLimit);
             }
             if (touchData6k[3]) {
-                RGB_LED.setPixelColor(18, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(19, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
-                RGB_LED.setPixelColor(20, WS2812::RGB(ControllerConfig.lightLimit, 0, 0));
+                RGB_LED.setColor(18, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(19, ControllerConfig.lightLimit, 0, 0);
+                RGB_LED.setColor(20, ControllerConfig.lightLimit, 0, 0);
             }
             if (touchData6k[4]) {
-                RGB_LED.setPixelColor(22, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(23, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
-                RGB_LED.setPixelColor(24, WS2812::RGB(0, ControllerConfig.lightLimit, 0));
+                RGB_LED.setColor(22, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(23, 0, ControllerConfig.lightLimit, 0);
+                RGB_LED.setColor(24, 0, ControllerConfig.lightLimit, 0);
             }
             if (touchData6k[5]) {
-                RGB_LED.setPixelColor(26, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(27, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
-                RGB_LED.setPixelColor(28, WS2812::RGB(0, 0, ControllerConfig.lightLimit));
+                RGB_LED.setColor(26, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(27, 0, 0, ControllerConfig.lightLimit);
+                RGB_LED.setColor(28, 0, 0, ControllerConfig.lightLimit);
             }
         }
-        RGB_LED.show();
+        RGB_LED.flush();
 
         /*------------- Keyboard -------------*/
         if (tud_hid_n_ready(0)) {

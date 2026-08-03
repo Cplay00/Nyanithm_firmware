@@ -37,4 +37,6 @@ Nyanithm 触摸控制器固件 -- hw_v1 硬件兼容版本
 
 [CypressCY8CMBR3116](https://github.com/sebastianregelmann/CypressCY8CMBR3116)
 
-[Pico_WS2812](https://github.com/ForsakenNGS/Pico_WS2812)
+## 更新日志
+
+详见 [更新日志_固件.md](更新日志_固件.md)。

@@ -469,7 +469,7 @@ void cdc_respond() {
             }
         }
         if (g_lampCount < 31) {
-            RGB_LED.fill(0, g_lampCount, 31 - g_lampCount);
+            RGB_LED.fill(0, 0, 0, g_lampCount, 31 - g_lampCount);
         }
         // 16 灯模式: DLL 仍按 31 颗发送(含 15 颗间隙灯)，偶数索引(0,2,...,30)
         //           是 16 颗判定灯，stride=2 跳过间隙灯
@@ -491,13 +491,13 @@ void cdc_respond() {
                 g >>= 2;
                 b >>= 2;
             }
-            RGB_LED.setPixelColor((g_lampCount - 1) - i, WS2812::RGB(r, g, b));
+            RGB_LED.setColor((g_lampCount - 1) - i, r, g, b);
         }
-        RGB_LED.show();
+        RGB_LED.flush();
     }
     if (cmd == CMD_CONFIG_MODE) {
-        RGB_LED.fill(WS2812::RGB(0x00, 0x0f, 0x00));
-        RGB_LED.show();
+        RGB_LED.fill(0x00, 0x0f, 0x00);
+        RGB_LED.flush();
         hid_working = false;
         in_config_mode = true;  // Core1 stops reading CDC; Core0 handleCommand takes over
         // Delegate to Core0: handleCommand() needs flash_safe_execute context
