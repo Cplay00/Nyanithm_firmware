@@ -110,11 +110,6 @@ static uint8_t electrodeBaseTouchTh(uint8_t m, uint8_t e) {
 #if UNIFIED_THRESHOLD_V1
     (void)m;
     (void)e;
-    // round47c: M2E0 (cell 17) dedicated threshold.
-    // Touch test data: min real touch diff=14, max idle noise=+8, deep dips=10-18.
-    // TH=13 filters diff<13 noise (10-12 dips) while letting light touch (14+) through.
-    // REL stays at global 9 (hysteresis 4 LSB: release needs diff<9, safe with FDLT freeze).
-    if (m == 2 && e == 0) return 13;
     return 0;  // unified: fall back to global ControllerConfig.th_touch
 #else
     // round45b: per-electrode elevated touch threshold for high-idle-noise electrodes.
