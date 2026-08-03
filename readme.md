@@ -1,3 +1,18 @@
+# Nyanithm Firmware
+
+Nyanithm 触摸控制器固件 -- hw_v1 硬件兼容版本
+
+## Contributors
+
+| 角色 | 贡献者 | GitHub |
+|------|--------|--------|
+| 原开发者 | Catium2006 | [https://github.com/Catium2006](https://github.com/Catium2006) |
+| 再维护者 | Cplay00 | [https://github.com/Cplay00](https://github.com/Cplay00) |
+
+本固件由 [Catium2006](https://github.com/Catium2006) 原创开发，[Cplay00](https://github.com/Cplay00) 负责 hw_v1 硬件版本的兼容性维护。
+
+完整贡献者列表见 [AUTHORS](AUTHORS)。
+
 # License
 
 本仓库大部分代码使用 `MPL 2.0` 许可发布

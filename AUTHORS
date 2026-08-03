@@ -1,0 +1,22 @@
+# Authors
+
+## Original Developer
+
+**Catium2006** - Nyanithm 触摸控制器固件原开发者
+GitHub: https://github.com/Catium2006
+
+## Maintainer
+
+**Cplay00** - hw_v1 分支再维护者
+GitHub: https://github.com/Cplay00
+
+## Contributors
+
+- [Catium2006](https://github.com/Catium2006) - 原开发者，创建了 Nyanithm 固件项目
+- [Cplay00](https://github.com/Cplay00) - 再维护者，负责 hw_v1 硬件版本兼容性维护
+- [ZCM111111](https://github.com/ZCM111111) - 贡献者
+
+## License
+
+本项目基于 MPL 2.0 许可发布，详见 [LICENSE](LICENSE)。
+部分第三方文件按原版权人要求保留原始许可内容，详见 [NOTICE.md](NOTICE.md)。
