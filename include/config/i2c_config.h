@@ -17,7 +17,7 @@
 #define BR200K 200000
 #define BR400K 400000
 
-#define BR_I2C BR200K
+#define BR_I2C BR400K
 
 /* macros */
 

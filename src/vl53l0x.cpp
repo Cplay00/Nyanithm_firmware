@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Modified from pololu/vl53l0x-arduino
  * 
  * see license below
@@ -577,79 +577,35 @@ void VL53L0X::writeReg16Bit(uint8_t reg, uint16_t value) {
 
 // Write a 32-bit register
 void VL53L0X::writeReg32Bit(uint8_t reg, uint32_t value) {
-
-    int r0 = i2c_write(port, address, &reg, 1, false);
-    // bus->beginTransmission(address);
-    // bus->write(reg);
-
     uint8_t buf[] = { reg, (value >> 24), (value >> 16), (value >> 8), (value) };
-    int r1 = i2c_write(port, address, buf, 5, false);
-    // bus->write((uint8_t)(value >> 24));  // value highest byte
-    // bus->write((uint8_t)(value >> 16));
-    // bus->write((uint8_t)(value >> 8));
-    // bus->write((uint8_t)(value));  // value lowest byte
-    // last_status = bus->endTransmission();
-    // printf("wr32 %d %d\n", r0, r1);
+    i2c_write(port, address, buf, 5, false);
 }
 
 // Read an 8-bit register
 uint8_t VL53L0X::readReg(uint8_t reg) {
-
     uint8_t value;
-
-    // bus->beginTransmission(address);
-    int r0 = i2c_write(port, address, &reg, 1, false);
-    // bus->write(reg);
-    // last_status = bus->endTransmission();
-    sleep_us(50);
-    int r1 = i2c_read(port, address, &value, 1, false);
-    // bus->requestFrom(address, (uint8_t)1);
-    // value = bus->read();
-    // printf("rr8 %02x %02x\n", reg, value);
-
+    if (i2c_write_read(port, address, &reg, 1, &value, 1) < 0) {
+        return 0;  // I2C error: return 0 (filtered by range validation in updateAir)
+    }
     return value;
 }
 
 // Read a 16-bit register
 uint16_t VL53L0X::readReg16Bit(uint8_t reg) {
-
-    uint16_t value;
     uint8_t values[2];
-
-    // bus->beginTransmission(address);
-    i2c_write(port, address, &reg, 1, false);
-    // bus->write(reg);
-    // last_status = bus->endTransmission();
-    i2c_read(port, address, values, 2, false);
-    // bus->requestFrom(address, (uint8_t)2);
-    // value = (uint16_t)bus->read() << 8;  // value high byte
-    // value |= bus->read();                // value low byte
-    value = (values[0] << 8) | values[1];
-
-    return value;
+    if (i2c_write_read(port, address, &reg, 1, values, 2) < 0) {
+        return 8190;  // I2C error sentinel (filtered by range validation in updateAir)
+    }
+    return (values[0] << 8) | values[1];
 }
 
 // Read a 32-bit register
 uint32_t VL53L0X::readReg32Bit(uint8_t reg) {
-
-    uint32_t value;
-
     uint8_t values[4];
-
-    i2c_write(port, address, &reg, 1, false);
-    // bus->beginTransmission(address);
-    // bus->write(reg);
-    // last_status = bus->endTransmission();
-
-    i2c_read(port, address, values, 4, false);
-    // bus->requestFrom(address, (uint8_t)4);
-    // value = (uint32_t)bus->read() << 24;  // value highest byte
-    // value |= (uint32_t)bus->read() << 16;
-    // value |= (uint16_t)bus->read() << 8;
-    // value |= bus->read();  // value lowest byte
-    value = (values[0] << 24) | (values[1] << 16) | (values[2] << 8) | values[3];
-
-    return value;
+    if (i2c_write_read(port, address, &reg, 1, values, 4) < 0) {
+        return 0;  // I2C error
+    }
+    return (values[0] << 24) | (values[1] << 16) | (values[2] << 8) | values[3];
 }
 
 void VL53L0X::writeMulti(uint8_t reg, uint8_t* src, uint8_t count) {
@@ -657,8 +613,7 @@ void VL53L0X::writeMulti(uint8_t reg, uint8_t* src, uint8_t count) {
     i2c_write(port, address, src, count, false);
 }
 void VL53L0X::readMulti(uint8_t reg, uint8_t* dst, uint8_t count) {
-    i2c_write(port, address, &reg, 1, false);
-    i2c_read(port, address, dst, count, false);
+    i2c_write_read(port, address, &reg, 1, dst, count);
 }
 
 // Set the return signal rate limit check value in units of MCPS (mega counts
@@ -1015,7 +970,8 @@ void VL53L0X::startContinuous(uint32_t period_ms) {
         writeReg(SYSRANGE_START, 0x04);  // VL53L0X_REG_SYSRANGE_MODE_TIMED
     } else {
         // continuous back-to-back mode
-        writeReg(SYSRANGE_START, 0x02);  // VL53L0X_REG_SYSRANGE_MODE_BACKTOBACK
+        writeReg(SYSRANGE_START, 0x02);
+    startTimeout();  // round49: init timeout window to prevent spurious first-timeout  // VL53L0X_REG_SYSRANGE_MODE_BACKTOBACK
     }
 }
 
@@ -1058,20 +1014,14 @@ uint16_t VL53L0X::readRangeContinuousMillimeters() {
 /**
  */
 bool VL53L0X::readRangeContinuousMillimetersAsync(uint16_t* range) {
-    if (!asyncOperating) {
-        startTimeout();
-        startMeasureTime = get_absolute_time();
-        asyncOperating = true;
-        return false;
-    }
     if ((readReg(RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
+        if (checkTimeoutExpired()) {
+            did_timeout = true;
+            *range = 8190;  // error sentinel, filtered by updateAir range validation
+            startTimeout();  // restart timeout window for next attempt
+            return true;
+        }
         return false;
-    }
-    if (checkTimeoutExpired()) {
-        did_timeout = true;
-        asyncOperating = false;
-        *range = 4093;
-        return true;
     }
 
     // assumptions: Linearity Corrective Gain is 1000 (default);
@@ -1080,8 +1030,7 @@ bool VL53L0X::readRangeContinuousMillimetersAsync(uint16_t* range) {
 
     writeReg(SYSTEM_INTERRUPT_CLEAR, 0x01);
 
-    asyncOperating = false;
-    measureTime = get_absolute_time() - startMeasureTime;
+    startTimeout();  // reset timeout window for next measurement cycle
     return true;
 }
 

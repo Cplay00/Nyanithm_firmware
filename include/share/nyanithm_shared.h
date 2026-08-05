@@ -1,4 +1,4 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+﻿/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  file, You can obtain one at https://mozilla.org/MPL/2.0/.
  *
@@ -17,7 +17,7 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.4.0"
+#define NYANITHM_FW_VERSION "1.5.0"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -41,7 +41,8 @@ struct controller_config {
     uint16_t airMin;          // air判定下限
     int16_t heightOffset[5];  // 高度偏移值
     uint8_t lightLimit;
-    uint8_t reserved[102];  //
+    uint8_t heightRangeCfg;   // Air key segment overlap (mm), 0=default 10
+    uint8_t reserved[101];  //
     uint8_t xorSum;         // 前127字节异或和, 用于校验
 };
 

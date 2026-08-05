@@ -12,37 +12,35 @@
 #include <i2c_port.h>
 #include <pca954x.h>
 
+extern bool useMuxScan;  // from hw_devices.cpp
+
 void checkToF() {
     if (!findI2CDevice(1, 0x70)) {
         error(true);
     }
     PCA954X mux(1, 0x70, GPIO_PCA9545_RESET);
 
-    mux.setChannel(0);
-    if (!findI2CDevice(1, 0x29)) {
-        warn(true);
+    int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
+    if (!useMuxScan) {
+        // Independent address mode: sensors at 0x30+, all mux channels enabled
+        for (int i = 0; i < sensorCount; i++) {
+            if (!findI2CDevice(1, 0x30 + i)) {
+                warn(true);
+            }
+        }
+        // Restore mux state: all channels enabled (initToF sets this)
+        uint8_t muxMask = (sensorCount == 5) ? 0x1F : 0x0F;
+        mux.setReg(muxMask);
+    } else {
+        // Mux scan fallback: check each channel at default 0x29
+        for (int i = 0; i < sensorCount; i++) {
+            mux.setChannel(i);
+            if (!findI2CDevice(1, 0x29)) {
+                warn(true);
+            }
+        }
+        // Leave mux in last channel state; updateAir switches per cycle
     }
-    mux.setChannel(1);
-    if (!findI2CDevice(1, 0x29)) {
-        warn(true);
-    }
-    mux.setChannel(2);
-    if (!findI2CDevice(1, 0x29)) {
-        warn(true);
-    }
-    mux.setChannel(3);
-    if (!findI2CDevice(1, 0x29)) {
-        warn(true);
-    }
-
-    // if (ControllerConfig.hwVer == 2) {
-    //     mux.setChannel(4);
-    //     if (!findI2CDevice(1, 0x29)) {
-    //         warn(true);
-    //     }
-    // }
-
-    mux.setReg(0x00);
 }
 
 void check3116() {
@@ -69,12 +67,11 @@ void checkMPR121() {
     }
 }
 
-void chekcHardwareState() {
-
-    // if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
-    //     check3116();
-    // } else {
-    //     checkMPR121();
-    // }
-    // checkToF();
+void checkHardwareState() {
+    if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
+        check3116();
+    } else {
+        checkMPR121();
+    }
+    checkToF();
 }

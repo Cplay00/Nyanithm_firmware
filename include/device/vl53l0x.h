@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (c) 2017-2022 Pololu Corporation.  For more information, see
 
 https://www.pololu.com/
@@ -188,6 +188,9 @@ public:
     inline uint8_t getAddress() {
         return address;
     }
+    // Reset C++ address member only (no I2C write). Used after hardware reset
+    // to restore default 0x29 when independent-address assignment failed.
+    inline void setI2CAddressOnly(uint8_t addr) { address = addr; }
 
     bool init(bool io_2v8 = true);
     bool forceInit(bool io_2v8 = true);

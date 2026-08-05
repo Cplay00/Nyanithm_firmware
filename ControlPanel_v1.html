@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
@@ -258,7 +258,7 @@
         <div class="d-flex justify-content-between align-items-end mb-3">
             <div>
                 <h1>Nyanithm v1 专用测试面板</h1>
-                <div class="subtitle">API_LEVEL 0x10 / cfgVer 0x02 / 4×ToF / MPR121 或 CY8CMBR3116</div>
+                <div class="subtitle" id="subtitle">API_LEVEL 0x10 / cfgVer 0x02 / 4×ToF / MPR121 或 CY8CMBR3116</div>
             </div>
             <div class="text-end">
                 <span id="connBadge" class="badge bg-secondary">未连接</span>
@@ -398,7 +398,10 @@
                             <div class="col-6">
                                 <label class="form-label">硬件版本 hwVer</label>
                                 <select id="cfgHwVer" class="form-select" disabled>
-                                    <option value="1" selected>1 (v1 硬件)</option>
+                                    <option value="1" selected>1 (27寸 MPR121)</option>
+                                    <option value="2">2 (32寸 MPR121)</option>
+                                    <option value="3">3 (27寸 MBR3116)</option>
+                                    <option value="4">4 (32寸 MBR3116)</option>
                                 </select>
                             </div>
                             <div class="col-6">
@@ -444,13 +447,18 @@
                             <div class="col-3"><label class="form-label">ToF1 偏移</label><input type="number" id="cfgOff1" class="form-control" disabled></div>
                             <div class="col-3"><label class="form-label">ToF2 偏移</label><input type="number" id="cfgOff2" class="form-control" disabled></div>
                             <div class="col-3"><label class="form-label">ToF3 偏移</label><input type="number" id="cfgOff3" class="form-control" disabled></div>
+                            <div class="col-3" id="cfgOff4Wrapper" style="display:none;"><label class="form-label">ToF4 偏移</label><input type="number" id="cfgOff4" class="form-control" disabled></div>
                         </div>
                         <div class="row g-2 mt-2">
-                            <div class="col-6">
+                            <div class="col-4">
                                 <label class="form-label">灯光上限 lightLimit</label>
                                 <input type="number" id="cfgLightLimit" class="form-control" min="0" max="255" value="255" disabled>
                             </div>
-                            <div class="col-6">
+                            <div class="col-4">
+                                <label class="form-label">Air重叠 heightRange</label>
+                                <input type="number" id="cfgHeightRange" class="form-control" min="0" max="50" value="10" disabled>
+                            </div>
+                            <div class="col-4">
                                 <label class="form-label">校验 xorSum</label>
                                 <input type="text" id="cfgXorSum" class="form-control" value="-" disabled>
                             </div>
@@ -473,6 +481,7 @@
                             <div class="tof-bar"><span class="small" style="width:45px">ToF1</span><div class="tof-bar-fill"><div id="tof1bar" class="tof-bar-inner" style="width:0%"></div></div><span id="tof1val" class="small" style="width:55px;text-align:right">-</span></div>
                             <div class="tof-bar"><span class="small" style="width:45px">ToF2</span><div class="tof-bar-fill"><div id="tof2bar" class="tof-bar-inner" style="width:0%"></div></div><span id="tof2val" class="small" style="width:55px;text-align:right">-</span></div>
                             <div class="tof-bar"><span class="small" style="width:45px">ToF3</span><div class="tof-bar-fill"><div id="tof3bar" class="tof-bar-inner" style="width:0%"></div></div><span id="tof3val" class="small" style="width:55px;text-align:right">-</span></div>
+                            <div class="tof-bar" id="tof4Wrapper" style="display:none;"><span class="small" style="width:45px">ToF4</span><div class="tof-bar-fill"><div id="tof4bar" class="tof-bar-inner" style="width:0%"></div></div><span id="tof4val" class="small" style="width:55px;text-align:right">-</span></div>
                         </div>
                         <div class="row g-2 mt-2">
                             <div class="col-6"><button id="btnGetStatus" class="btn btn-primary w-100" disabled>读取状态 (0xB8)</button></div>
@@ -748,7 +757,7 @@
             const cfgIds = ["btnReadCfg", "btnSaveCfg", "btnSaveAndReboot", "btnGetStatus", "btnPollTof"];
             cfgIds.forEach(id => document.getElementById(id).disabled = !connected || !inCfg);
 
-            const inputs = ["cfgHwVer", "cfgForce16", "cfgMbr3116", "cfgDarkerGap", "cfgKbSlider", "cfgKbAir", "cfgThTouch", "cfgThRelease", "cfgDebounce", "cfgAirMax", "cfgAirMin", "cfgOff0", "cfgOff1", "cfgOff2", "cfgOff3", "cfgLightLimit"];
+            const inputs = ["cfgHwVer", "cfgForce16", "cfgMbr3116", "cfgDarkerGap", "cfgKbSlider", "cfgKbAir", "cfgThTouch", "cfgThRelease", "cfgDebounce", "cfgAirMax", "cfgAirMin", "cfgOff0", "cfgOff1", "cfgOff2", "cfgOff3", "cfgOff4", "cfgLightLimit", "cfgHeightRange"];
             inputs.forEach(id => document.getElementById(id).disabled = !inCfg);
         }
 
@@ -950,14 +959,15 @@
             buf[12] = airMin & 0xFF;
             buf[13] = (airMin >> 8) & 0xFF;
 
-            for (let i = 0; i < 4; i++) {
-                const v = parseInt(document.getElementById("cfgOff" + i).value) || 0;
+            for (let i = 0; i < 5; i++) {
+                const el = document.getElementById("cfgOff" + i);
+                const v = el ? parseInt(el.value) || 0 : 0;
                 const u16 = v < 0 ? v + 65536 : v;
                 buf[14 + i * 2] = u16 & 0xFF;
                 buf[15 + i * 2] = (u16 >> 8) & 0xFF;
             }
-            // heightOffset[4] reserved
             buf[24] = parseInt(document.getElementById("cfgLightLimit").value) || 0;
+            buf[25] = parseInt(document.getElementById("cfgHeightRange").value) || 0;
 
             // reserved 25..126 already zero
             buf[127] = calcXorSum(buf);
@@ -971,6 +981,7 @@
 
             lastReadConfig = buf.slice();
             document.getElementById("cfgHwVer").value = buf[2];
+            updateTofVisibility();
             document.getElementById("cfgVer").value = "0x" + buf[1].toString(16).padStart(2, "0");
             document.getElementById("cfgForce16").checked = !!(buf[3] & BIT_FORCE16);
             document.getElementById("cfgMbr3116").checked = !!(buf[3] & BIT_MBR3116);
@@ -982,13 +993,15 @@
             document.getElementById("cfgDebounce").value = buf[9];
             document.getElementById("cfgAirMax").value = buf[10] | (buf[11] << 8);
             document.getElementById("cfgAirMin").value = buf[12] | (buf[13] << 8);
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < 5; i++) {
                 const lo = buf[14 + i * 2], hi = buf[15 + i * 2];
                 let v = lo | (hi << 8);
                 if (v >= 32768) v -= 65536;
-                document.getElementById("cfgOff" + i).value = v;
+                const el = document.getElementById("cfgOff" + i);
+                if (el) el.value = v;
             }
             document.getElementById("cfgLightLimit").value = buf[24];
+            document.getElementById("cfgHeightRange").value = buf[25] || 10;
             document.getElementById("cfgXorSum").value = "0x" + buf[127].toString(16).padStart(2, "0");
         }
 
@@ -1079,18 +1092,36 @@
             } catch (e) { log("读取状态失败: " + e.message, "error"); }
         });
 
+        function updateTofVisibility() {
+            const hwVer = parseInt(document.getElementById("cfgHwVer").value) || 1;
+            const is32 = (hwVer === 2 || hwVer === 4);
+            const tof4Wrapper = document.getElementById("tof4Wrapper");
+            const cfgOff4Wrapper = document.getElementById("cfgOff4Wrapper");
+            if (tof4Wrapper) tof4Wrapper.style.display = is32 ? "" : "none";
+            if (cfgOff4Wrapper) cfgOff4Wrapper.style.display = is32 ? "" : "none";
+            const subtitle = document.getElementById("subtitle");
+            if (subtitle) subtitle.textContent = "API_LEVEL 0x10 / cfgVer 0x02 / " + (is32 ? "5" : "4") + "\u00d7ToF / " + (hwVer >= 3 ? "CY8CMBR3116" : "MPR121 或 CY8CMBR3116");
+        }
+
         function parseTofFromStatus(text) {
-            const m = text.match(/tof0\s*=\s*(-?\d+)\s+tof1\s*=\s*(-?\d+)\s+tof2\s*=\s*(-?\d+)\s+tof3\s*=\s*(-?\d+)/);
+            const m = text.match(/tof0\s*=\s*(-?\d+)\s+tof1\s*=\s*(-?\d+)\s+tof2\s*=\s*(-?\d+)\s+tof3\s*=\s*(-?\d+)(?:\s+tof4\s*=\s*(-?\d+))?/);
             if (!m) return;
             const vals = [parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), parseInt(m[4])];
+            if (m[5] !== undefined) vals.push(parseInt(m[5]));
             const max = 2000;
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < vals.length; i++) {
                 const v = vals[i];
-                document.getElementById("tof" + i + "val").textContent = v;
-                const pct = Math.max(0, Math.min(100, v / max * 100));
-                document.getElementById("tof" + i + "bar").style.width = pct + "%";
+                const valEl = document.getElementById("tof" + i + "val");
+                const barEl = document.getElementById("tof" + i + "bar");
+                if (valEl) valEl.textContent = v;
+                if (barEl) {
+                    const pct = Math.max(0, Math.min(100, v / max * 100));
+                    barEl.style.width = pct + "%";
+                }
             }
         }
+
+        document.getElementById("cfgHwVer").addEventListener("change", updateTofVisibility);
 
         document.getElementById("btnPollTof").addEventListener("click", () => {
             if (tofPollId) { stopTofPoll(); return; }

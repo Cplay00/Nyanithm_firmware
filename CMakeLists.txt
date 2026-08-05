@@ -1,4 +1,4 @@
-# Generated Cmake Pico project file
+﻿# Generated Cmake Pico project file
 
 cmake_minimum_required(VERSION 3.13)
 
@@ -65,7 +65,7 @@ pico_generate_pio_header(Nyanithm ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 pico_set_program_name(Nyanithm "Nyanithm")
 
-pico_set_program_version(Nyanithm "1.0.1")
+pico_set_program_version(Nyanithm "1.5.0")
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(Nyanithm 0)

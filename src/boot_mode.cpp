@@ -83,7 +83,7 @@ void boot_normalMode() {
     initHwDevices();
 
     sleep_ms(10);
-    chekcHardwareState();
+    checkHardwareState();
 
     sleep_ms(10);
     while (true) {
@@ -120,7 +120,7 @@ void boot_otherModes() {
     initHwDevices();
 
     sleep_ms(10);
-    chekcHardwareState();
+    checkHardwareState();
 
     sleep_ms(10);
     hid_working = false;

@@ -1,4 +1,4 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+﻿/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  file, You can obtain one at https://mozilla.org/MPL/2.0/.
  *
@@ -37,6 +37,62 @@ uint8_t g_lampCount = 31;
 TCA9539 iox0(1, 0x74);
 
 bool usingIR = false;
+bool useMuxScan = false;
+uint8_t heightRange = 10;  // Air key segment overlap (mm), updated from config in initHwDevices
+
+// ===== round49: Kalman 1D filter for ToF sensor smoothing =====
+struct Kalman1D {
+    float x;  // position estimate (mm, ToF distance)
+    float v;  // velocity (mm/cycle, negative = hand rising)
+    float p;  // estimation uncertainty
+    float lastMeas;  // last raw measurement (for differential velocity)
+};
+static Kalman1D kalman[5] = {
+    {0, 0, 200.0f, -1.0f}, {0, 0, 200.0f, -1.0f}, {0, 0, 200.0f, -1.0f}, {0, 0, 200.0f, -1.0f}, {0, 0, 200.0f, -1.0f}
+};
+static const float KALMAN_Q = 25.0f;
+static const float KALMAN_R = 100.0f;
+static const float KALMAN_KV = 0.3f;
+static const float LOOKAHEAD_K = 0.5f;
+static const float MAX_LOOKAHEAD = 2.0f;
+static const float CONF_THRESHOLD = 80.0f;
+static const float V_MIN = 1.0f;
+static const int16_t EXIT_HYSTERESIS = 5;
+
+static inline float clampf(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+static inline void kalmanUpdate(Kalman1D& k, float meas) {
+    float x_pred = k.x + k.v;
+    float p_pred = k.p + KALMAN_Q;
+    float K = p_pred / (p_pred + KALMAN_R);
+    float innov = meas - x_pred;
+    k.x = x_pred + K * innov;
+    // Differential velocity: immune to predict-step position drift
+    if (k.lastMeas > 0.0f) {
+        float dv = meas - k.lastMeas;
+        if (dv > 50.0f) dv = 50.0f;       // clamp outliers
+        if (dv < -50.0f) dv = -50.0f;
+        k.v = k.v * (1.0f - KALMAN_KV) + KALMAN_KV * dv;
+    }
+    k.p = (1.0f - K) * p_pred;
+    k.lastMeas = meas;
+}
+static inline void kalmanPredict(Kalman1D& k) {
+    k.v *= 0.85f;  // velocity decay: uncertainty grows without measurement
+    k.x += k.v;
+    k.p += KALMAN_Q;
+}
+
+// ===== round49: Air key lock state machine =====
+enum AirKeyState : uint8_t { AKS_IDLE, AKS_ACTIVE, AKS_COOLDOWN };
+struct AirKeyTracker {
+    AirKeyState state;
+    uint32_t lastActiveMs;
+    uint8_t cooldown;
+};
+static AirKeyTracker airKeyTracker[6] = {};
+
 
 void initToFReset() {
     gpio_init(GPIO_TOF_RESET);
@@ -52,57 +108,47 @@ void resetToF() {
 }
 
 void initToF() {
-
     initToFReset();
     resetToF();
-
     sleep_ms(2);
-    // printf("tof0\n");
-    mux0.setChannel(0);
-    tof0.setTimeout(0);
-    // tof0.setAddress(0x50);
-    tof0.forceInit();
-    tof0.setMeasurementTimingBudget(20000);
-   tof0.startContinuous(0);
-    sleep_ms(5);  // round45q: stagger ToF starts - new data every 5ms instead of every 20ms
-    // printf("tof1\n");
-
-    mux0.setChannel(1);
-    tof1.setTimeout(0);
-    // tof1.setAddress(0x51);
-    tof1.forceInit();
-    tof1.setMeasurementTimingBudget(20000);
-    tof1.startContinuous(0);
-    sleep_ms(5);  // round45q: stagger
-    // printf("tof2\n");
-
-    mux0.setChannel(2);
-    tof2.setTimeout(0);
-    // tof2.setAddress(0x52);
-    tof2.forceInit();
-    tof2.setMeasurementTimingBudget(20000);
-    tof2.startContinuous(0);
-    sleep_ms(5);  // round45q: stagger
-    // printf("tof3\n");
-
-    mux0.setChannel(3);
-    tof3.setTimeout(0);
-    // tof3.setAddress(0x53);
-    tof3.forceInit();
-    tof3.setMeasurementTimingBudget(20000);
-    tof3.startContinuous(0);
-    // tof3 is last (hw v1) - no stagger delay needed
-
-    if (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) {
-        mux0.setChannel(4);
-        tof4.setTimeout(0);
-        // tof4.setAddress(0x54);
-        tof4.forceInit();
-        tof4.setMeasurementTimingBudget(30000);
-        tof4.startContinuous(0);
+    VL53L0X* tofs[5] = { &tof0, &tof1, &tof2, &tof3, &tof4 };
+    int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
+    // Phase 1: init each sensor through mux, assign unique I2C address
+    for (int i = 0; i < sensorCount; i++) {
+        mux0.setChannel(i);
+        tofs[i]->setTimeout(200);
+        tofs[i]->forceInit();
+        tofs[i]->setMeasurementTimingBudget(12000);
+        tofs[i]->setAddress(0x30 + i);
+        tofs[i]->startContinuous(0);
+        sleep_ms(5);  // stagger: distribute measurement completion phases
     }
-
-    // mux0.setReg(0x0f);
+    // Phase 2: enable all mux channels simultaneously (all sensors on bus)
+    uint8_t muxMask = (sensorCount == 5) ? 0x1F : 0x0F;
+    mux0.setReg(muxMask);
+    sleep_ms(2);
+    // Phase 3: verify all sensors respond at their new addresses
+    useMuxScan = false;
+    for (int i = 0; i < sensorCount; i++) {
+        if (!findI2CDevice(1, 0x30 + i, 10)) {
+            useMuxScan = true;
+            break;
+        }
+    }
+    if (useMuxScan) {
+        // Fallback: reset all sensors, re-init with mux-per-channel scanning
+        resetToF();
+        sleep_ms(2);
+        for (int i = 0; i < sensorCount; i++) {
+            mux0.setChannel(i);
+            tofs[i]->setI2CAddressOnly(0x29);
+            tofs[i]->setTimeout(200);
+            tofs[i]->forceInit();
+            tofs[i]->setMeasurementTimingBudget(12000);
+            tofs[i]->startContinuous(0);
+            sleep_ms(5);
+        }
+    }
 }
 
 static uint8_t electrodeBaseTouchTh(uint8_t m, uint8_t e) {
@@ -262,6 +308,9 @@ void initHwDevices() {
     // updateInputState() calls watchdog_update() every cycle.
     watchdog_enable(2000, true);
     g_lampCount = (ControllerConfig.cfg0 & CFG0_BIT_FORCE16LEDS) ? 16 : 31;
+    heightRange = (ControllerConfig.heightRangeCfg == 0) ? 10 : ControllerConfig.heightRangeCfg;
+    for (int i = 0; i < 5; i++) { kalman[i].x = 0; kalman[i].v = 0; kalman[i].p = 200.0f; kalman[i].lastMeas = -1.0f; }
+    for (int j = 0; j < 6; j++) { airKeyTracker[j].state = AKS_IDLE; airKeyTracker[j].cooldown = 0; }
     RGB_LED.fill(0, 0, 0);
     initI2C();
     detectIR();
@@ -673,138 +722,134 @@ uint16_t heightDataOriginal[5] = { 4095, 4095, 4095, 4095, 4095 };
 int16_t heightData[5] = { 4094, 4094, 4094, 4094, 4094 };
 bool airKeys[6];
 
-uint8_t heightRange = 10;
 
 void updateAir() {
-    bool updated = false;
-    mux0.setChannel(0);
-    if (tof0.readRangeContinuousMillimetersAsync(heightDataOriginal + 0)) {
-        heightData[0] = heightDataOriginal[0];
-        heightData[0] += ControllerConfig.heightOffset[0];
-        updated = true;
-    }
-    mux0.setChannel(1);
-    if (tof1.readRangeContinuousMillimetersAsync(heightDataOriginal + 1)) {
-        heightData[1] = heightDataOriginal[1];
-        heightData[1] += ControllerConfig.heightOffset[1];
-        updated = true;
-    }
-    mux0.setChannel(2);
-    if (tof2.readRangeContinuousMillimetersAsync(heightDataOriginal + 2)) {
-        heightData[2] = heightDataOriginal[2];
-        heightData[2] += ControllerConfig.heightOffset[2];
-        updated = true;
-    }
-    mux0.setChannel(3);
-    if (tof3.readRangeContinuousMillimetersAsync(heightDataOriginal + 3)) {
-        heightData[3] = heightDataOriginal[3];
-        heightData[3] += ControllerConfig.heightOffset[3];
-        updated = true;
-    }
-    if (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) {
-        mux0.setChannel(4);
-        if (tof4.readRangeContinuousMillimetersAsync(heightDataOriginal + 4)) {
-            heightData[4] = heightDataOriginal[4];
-            heightData[4] += ControllerConfig.heightOffset[4];
-            updated = true;
+    VL53L0X* tofs[5] = { &tof0, &tof1, &tof2, &tof3, &tof4 };
+    int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
+
+    // Phase 1: Read ToF + Kalman update
+    bool anyUpdated = false;
+    bool gotNewData[5] = {};
+    for (int i = 0; i < sensorCount; i++) {
+        if (useMuxScan) mux0.setChannel(i);
+        if (tofs[i]->readRangeContinuousMillimetersAsync(heightDataOriginal + i)) {
+            if (heightDataOriginal[i] >= 8190) {
+                heightData[i] = 4095;  // I2C error sentinel
+            } else {
+                float meas = (float)((int16_t)heightDataOriginal[i] + ControllerConfig.heightOffset[i]);
+                if (kalman[i].p >= 199.0f) {
+                    // First valid measurement: hard-set position, zero velocity
+                    kalman[i].x = meas;
+                    kalman[i].v = 0;
+                    kalman[i].p = KALMAN_R;
+                    kalman[i].lastMeas = meas;
+                } else {
+                    kalmanUpdate(kalman[i], meas);
+                }
+                gotNewData[i] = true;
+            }
+            anyUpdated = true;
         }
     }
-    if (!updated) {
-        return;
+    // Phase 2: Kalman predict (sensors without new data only) + update heightData for debug
+    for (int i = 0; i < sensorCount; i++) {
+        if (!gotNewData[i] && heightDataOriginal[i] < 8190) { kalman[i].x += kalman[i].v; kalman[i].v *= 0.85f; }
+        heightData[i] = (int16_t)kalman[i].x;
     }
-    // 统计有效高度, 此处应为 dH = (..) / 6, 优化为dH = (..) * 21 / 128
-    int16_t dH = ((ControllerConfig.airMax - ControllerConfig.airMin) * 21) >> 7;
-    // round45s: Air detection with confirmation + slider gating + sticky maintain.
-    // Filters low swipes (hand crossing ToF beam horizontally) by requiring:
-    // 1. N consecutive in-range detections (2 normal, 3 when hand on slider)
-    // 2. Once confirmed, maintained until hand leaves + stretch (like touch sticky)
-    // 3. Prediction only triggers when hand rising (approach>0), not descending
-    // Prediction compensates for confirmation delay. Stretch smooths release.
-    static int16_t prevHeightData[5] = {4095, 4095, 4095, 4095, 4095};
-    static uint32_t airKeyLastActiveMs[6] = {0};
-    static uint8_t airConfirmCount[6] = {0};
-    static bool airKeyConfirmed[6] = {false};
-    const int16_t AIR_PREDICT_MM = 10;
-    const uint16_t AIR_STRETCH_MS = 15;
-    const uint8_t AIR_CONFIRM_NORMAL = 2;    // cycles to confirm new air (filters brief swipe)
-    const uint8_t AIR_CONFIRM_ON_SLIDER = 3;  // stricter when hand on slider (low swipe likely)
-    uint32_t nowMs = to_ms_since_boot(get_absolute_time());
-    // Check if hand is on slider -> require more confirmation cycles
+    if (!anyUpdated) return;
+
+    // Phase 3: Slider gating (from previous cycle's touchData)
     bool handOnSlider = false;
     for (int i = 0; i < 32; i++) {
         if (touchData32[i]) { handOnSlider = true; break; }
     }
-    uint8_t reqConfirm = handOnSlider ? AIR_CONFIRM_ON_SLIDER : AIR_CONFIRM_NORMAL;
+
+    // Phase 4: Air key detection with Kalman + lookahead + lock
+    int16_t dH = ((ControllerConfig.airMax - ControllerConfig.airMin) * 21) >> 7;
+    uint32_t nowMs = to_ms_since_boot(get_absolute_time());
+
     for (int j = 0; j < 6; j++) {
-        bool detected = false;
-        int16_t rangeLow = ControllerConfig.airMin + (int16_t)dH * j - heightRange;
-        int16_t rangeHigh = ControllerConfig.airMin + (int16_t)dH * (j + 1) + heightRange;
-        for (int i = 0; i < 5; i++) {
-            if (heightData[i] <= 0 || heightData[i] >= 4000) continue;
-            // Normal detection: hand in range
-            if (rangeLow <= heightData[i] && rangeHigh >= heightData[i]) {
-                detected = true;
-                break;
+        int16_t rangeLow = ControllerConfig.airMin + (int16_t)dH * j - (int16_t)heightRange;
+        int16_t rangeHigh = ControllerConfig.airMin + (int16_t)dH * (j + 1) + (int16_t)heightRange;
+        AirKeyTracker& tk = airKeyTracker[j];
+
+        // Check detection: any sensor in range (with lookahead for rising hand)
+        bool inRange = false;
+        bool risingConfident = false;
+        for (int i = 0; i < sensorCount; i++) {
+            if (kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
+            float v = kalman[i].v;
+            // Actual position in range (maintains ACTIVE, also triggers)
+            if (kalman[i].x >= rangeLow && kalman[i].x <= rangeHigh) {
+                inRange = true;
+                if (v < -V_MIN) risingConfident = true;
             }
-            // Prediction: hand below range but rising toward it (approach>0 gates horizontal swipe)
-            if (prevHeightData[i] < 4000) {
-                int16_t approach = prevHeightData[i] - heightData[i];
-                int16_t gap = heightData[i] - rangeHigh;
-                if (approach > 0 && gap > 0 && gap <= AIR_PREDICT_MM && approach >= gap) {
-                    detected = true;
-                    break;
+            // Lookahead position (early trigger when approaching from below)
+            if (!handOnSlider && v < -V_MIN) {
+                float la = clampf(-v * LOOKAHEAD_K, 0.0f, MAX_LOOKAHEAD);
+                float xAhead = kalman[i].x + v * la;
+                if (xAhead >= rangeLow && xAhead <= rangeHigh) {
+                    inRange = true;
+                    risingConfident = true;
                 }
             }
         }
-        if (airKeyConfirmed[j]) {
-            // Already confirmed - maintain while in range or within stretch window
-            if (detected) {
-                airKeyLastActiveMs[j] = nowMs;
-                airKeys[j] = true;
-            } else if (nowMs - airKeyLastActiveMs[j] < AIR_STRETCH_MS) {
-                airKeys[j] = true;  // stretch
-            } else {
-                airKeyConfirmed[j] = false;
-                airConfirmCount[j] = 0;
-                airKeys[j] = false;
+
+        switch (tk.state) {
+        case AKS_IDLE:
+            if (inRange) {
+                tk.state = AKS_ACTIVE;
+                tk.lastActiveMs = nowMs;
             }
-        } else {
-            // Not confirmed - require N consecutive in-range detections
-            if (detected) {
-                if (airConfirmCount[j] < 255) airConfirmCount[j]++;
+            break;
+        case AKS_ACTIVE:
+            if (inRange) {
+                tk.lastActiveMs = nowMs;
             } else {
-                airConfirmCount[j] = 0;
+                // Hysteresis: check wider range with actual position
+                bool inHyst = false;
+                for (int i = 0; i < sensorCount; i++) {
+                    if (kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
+                    if (kalman[i].x >= rangeLow - EXIT_HYSTERESIS &&
+                        kalman[i].x <= rangeHigh + EXIT_HYSTERESIS) {
+                        inHyst = true; break;
+                    }
+                }
+                if (!inHyst) {
+                    tk.state = AKS_COOLDOWN;
+                    tk.cooldown = 1;
+                    tk.lastActiveMs = nowMs;
+                }
             }
-            if (airConfirmCount[j] >= reqConfirm) {
-                airKeyConfirmed[j] = true;
-                airKeyLastActiveMs[j] = nowMs;
-                airKeys[j] = true;
-            } else {
-                airKeys[j] = false;
-            }
+            break;
+        case AKS_COOLDOWN:
+            if (tk.cooldown > 0) tk.cooldown--;
+            else tk.state = AKS_IDLE;
+            break;
         }
-    }
-    for (int i = 0; i < 5; i++) {
-        prevHeightData[i] = heightData[i];
+
+        airKeys[j] = (tk.state == AKS_ACTIVE) ||
+                     ((int32_t)(nowMs - tk.lastActiveMs) < 10);
     }
 }
 
 void updateInputState() {
-    watchdog_update();  // round46b: feed WDT (2s budget, loop runs at ~300Hz)
+    watchdog_update();
     uint32_t loopStartUs = time_us_32();
-    touchStateGen++;  // round46: odd = writer active (touch + air shared state)
+    touchStateGen++;
+    // Air update first: lower latency for judgment-critical path
+    if (usingIR) {
+        updateIR();
+    } else {
+        updateAir();
+    }
     if (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2) {
         updateTouch_v1();
     }
     if (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4) {
         updateTouch_v2();
     }
-    if (usingIR) {
-        updateIR();
-    } else {
-        updateAir();
-    }
-    touchStateGen++;  // round46: even = snapshot stable
+    touchStateGen++;
 
     // Software baseline auto-correction: gradually adjust baseline to match
     // idle filtered data. Fixes baseline stuck too high (e.g., M2E0 baseline=212
