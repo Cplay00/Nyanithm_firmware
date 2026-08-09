@@ -350,14 +350,138 @@ bool touchData4k[4];
 bool touchData6k[6];
 
 void updateTouch_v2() {
-    uint16_t t0, t1;
-    MBR3116D.get_BUTTON_STAT((uint8_t*)&t0);
-    MBR3116E.get_BUTTON_STAT((uint8_t*)&t1);
+    // round50: full optimization pipeline migrated from updateTouch_v1/MPR121
+    uint16_t t0 = 0, t1 = 0;
+    if (MBR3116D.get_BUTTON_STAT((uint8_t*)&t0) != 0) t0 = 0;  // round50: I2C error -> no touch
+    if (MBR3116E.get_BUTTON_STAT((uint8_t*)&t1) != 0) t1 = 0;
 
-    touchData[0] = *(0 + (uint8_t*)(&t0));
-    touchData[1] = *(1 + (uint8_t*)(&t0));
-    touchData[2] = *(0 + (uint8_t*)(&t1));
-    touchData[3] = *(1 + (uint8_t*)(&t1));
+    hwTouch[0] = t0; hwTouch[1] = t1; hwTouch[2] = 0;  // round50: pre-verification snapshot
+
+    static uint16_t prevStretched[2] = {0, 0};  // round50: slide-aware spatial filtering
+    static const uint8_t CONFIRM_CYCLES_V2 = 2;
+    static uint8_t confirmReq[2][16] = {0};
+    static uint8_t verifiedCount[2][16] = {0};
+    static uint32_t lastTouchedMsV2[2][16] = {0};
+    uint32_t nowVer = to_ms_since_boot(get_absolute_time());
+    static const uint16_t MBR3116_VERIFY_TH = 80;
+    static const uint16_t MBR3116_STRONG_SKIP_TH = 300;
+    static const uint16_t MBR3116_STRONG_TH = 200;
+    static const uint16_t MBR3116_MEDIUM_TH = 120;
+    {   // round50: software verification
+        uint16_t raw[2] = {t0, t1};
+        CY8CMBR3116* chips[2] = {&MBR3116D, &MBR3116E};
+        uint16_t diffCounts[2][16];
+        bool diffRead[2] = {false, false};
+        bool diffOk[2] = {false, false};
+        bool diffRetried[2] = {false, false};
+        for (uint8_t m = 0; m < 2; m++) {
+            for (uint8_t e = 0; e < 16; e++) {
+                if (raw[m] & (1 << e)) {
+                    if (verifiedCount[m][e] < 2) {
+                        if (!diffRead[m]) {
+                            diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                            if (!diffOk[m]) {
+                                diffRetried[m] = true;
+                                diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                            }
+                            diffRead[m] = true;
+                        }
+                        if (!diffOk[m]) {
+                            confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                        } else {
+                            uint16_t diff = diffCounts[m][e];
+                            bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
+                                                     (e < 15 && (prevStretched[m] & (1 << (e + 1))));
+                            if (diff < MBR3116_VERIFY_TH) {
+                                raw[m] &= ~(1 << e);
+                                verifiedCount[m][e] = 0;
+                                confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                                if (g_verifyFail[m * 16 + e] < 255) g_verifyFail[m * 16 + e]++;
+                            } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
+                                       (diff >= MBR3116_STRONG_SKIP_TH || neighborWasActive)) {
+                                verifiedCount[m][e] = 2;
+                                confirmReq[m][e] = 1;
+                            } else {
+                                verifiedCount[m][e]++;
+                                if (diff >= MBR3116_STRONG_TH)      confirmReq[m][e] = 1;
+                                else if (diff >= MBR3116_MEDIUM_TH) confirmReq[m][e] = 2;
+                                else                                 confirmReq[m][e] = 3;
+                            }
+                        }
+                    }
+                } else {
+                    if (verifiedCount[m][e] != 0) {
+                        if (lastTouchedMsV2[m][e] == 0 || (nowVer - lastTouchedMsV2[m][e]) > 50) {
+                            verifiedCount[m][e] = 0;
+                            confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                        }
+                    }
+                }
+            }
+        }
+        t0 = raw[0]; t1 = raw[1];
+    }
+    rawTouch[0] = t0; rawTouch[1] = t1; rawTouch[2] = 0;
+    {   // round50: pulse stretching + sticky touch + dip tolerance + spatial filtering
+        static const uint32_t STRETCH_MS_V2 = 5;
+        static const uint8_t DIP_TOLERANCE_CYCLES_V2 = 3;
+        static const uint8_t STICKY_THRESHOLD_V2 = 15;
+        static const uint8_t STICKY_GRACE_MAX_V2 = 15;
+        static const uint8_t STICKY_GRACE_SHORT_V2 = 12;
+        static uint8_t touchCount[2][16] = {0};
+        static uint32_t lastConfirmed[2][16] = {0};
+        static uint8_t dipGrace[2][16] = {0};
+        static uint8_t stickyGrace[2][16] = {0};
+        uint16_t raw[2] = {t0, t1};
+        uint16_t stretched[2] = {0, 0};
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        for (uint8_t m = 0; m < 2; m++) {
+            for (uint8_t e = 0; e < 16; e++) {
+                bool isTouched = (raw[m] >> e) & 1;
+                if (isTouched) {
+                    lastTouchedMsV2[m][e] = now;
+                    dipGrace[m][e] = DIP_TOLERANCE_CYCLES_V2;
+                    if (touchCount[m][e] < 255) touchCount[m][e]++;
+                    // round50fix: match v1 stickyGrace logic (duration-based, no decrement during touch)
+                    if (touchCount[m][e] >= STICKY_THRESHOLD_V2) {
+                        stickyGrace[m][e] = (touchCount[m][e] >= 50) ? STICKY_GRACE_MAX_V2
+                                                                      : STICKY_GRACE_SHORT_V2;
+                    }
+                    uint8_t reqCycles = confirmReq[m][e] ? confirmReq[m][e] : CONFIRM_CYCLES_V2;
+                    // round50fix: spatial penalty - isolated electrode needs +1 confirm cycle
+                    bool hasNeighbor = ((e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
+                                        (e < 15 && (prevStretched[m] & (1 << (e + 1)))));
+                    if (!hasNeighbor) reqCycles += 1;
+                    if (touchCount[m][e] >= reqCycles) {
+                        lastConfirmed[m][e] = now;
+                        stretched[m] |= (1 << e);
+                    } else if (touchCount[m][e] >= STICKY_THRESHOLD_V2 && stickyGrace[m][e] > 0) {
+                        stickyGrace[m][e]--;
+                        stretched[m] |= (1 << e);
+                    } else if (lastConfirmed[m][e] != 0 && touchCount[m][e] >= 3 && dipGrace[m][e] > 0) {
+                        dipGrace[m][e]--;
+                        stretched[m] |= (1 << e);
+                    }
+                } else {
+                    if (touchCount[m][e] >= STICKY_THRESHOLD_V2 && stickyGrace[m][e] > 0) {
+                        stickyGrace[m][e]--;
+                        stretched[m] |= (1 << e);
+                    } else if (lastConfirmed[m][e] != 0 && touchCount[m][e] >= 3 && dipGrace[m][e] > 0) {
+                        dipGrace[m][e]--;
+                        stretched[m] |= (1 << e);
+                    } else {
+                        touchCount[m][e] = 0;
+                        stickyGrace[m][e] = 0;
+                        if (lastConfirmed[m][e] != 0 && (now - lastConfirmed[m][e]) < STRETCH_MS_V2) {
+                            stretched[m] |= (1 << e);
+                        }
+                    }
+                }
+            }
+        }
+        t0 = stretched[0]; t1 = stretched[1];
+    }
+    prevStretched[0] = t0; prevStretched[1] = t1;
 
     touchData32[0] = GET_BIT(t1, 4) ? 128 : 0;
     touchData32[1] = GET_BIT(t1, 0) ? 128 : 0;
@@ -412,15 +536,21 @@ void updateTouch_v2() {
 
     touchData32[30] = GET_BIT(t0, 0) ? 128 : 0;
     touchData32[31] = GET_BIT(t0, 4) ? 128 : 0;
+
+    // round50: set touchData[0..3] AFTER touchData32[] (same fix as round45t in v1)
+    touchData[0] = *(0 + (uint8_t*)(&t0));
+    touchData[1] = *(1 + (uint8_t*)(&t0));
+    touchData[2] = *(0 + (uint8_t*)(&t1));
+    touchData[3] = *(1 + (uint8_t*)(&t1));
 }
 
 void updateTouch_v1() {
 
-    uint16_t t0, t1, t2;
+    uint16_t t0 = 0, t1 = 0, t2 = 0;  // round50: init to 0 for I2C error safety
     if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
-        MBR3116A.get_BUTTON_STAT((uint8_t*)&t0);
-        MBR3116B.get_BUTTON_STAT((uint8_t*)&t1);
-        MBR3116C.get_BUTTON_STAT((uint8_t*)&t2);
+        if (MBR3116A.get_BUTTON_STAT((uint8_t*)&t0) != 0) t0 = 0;  // round50: I2C error -> no touch
+        if (MBR3116B.get_BUTTON_STAT((uint8_t*)&t1) != 0) t1 = 0;
+        if (MBR3116C.get_BUTTON_STAT((uint8_t*)&t2) != 0) t2 = 0;
     } else {
         t0 = mpr0.touched();
         t1 = mpr1.touched();
@@ -441,6 +571,8 @@ void updateTouch_v1() {
    // Filters false touches from MPR121 timing mismatch, baseline drift, noise.
    static const uint8_t  CONFIRM_CYCLES = 2;  // round36: 3->2, software verification handles noise filtering
     static uint8_t confirmReq[3][12] = {0};     // round45: amplitude-tier confirmation cycles (1=fast, 2=normal, 3=strict)
+   static uint8_t verifiedCount[3][12] = {0};     // round50: shared MPR121/MBR3116 verification
+   uint32_t nowVer = to_ms_since_boot(get_absolute_time());  // round45r: sticky dip verification preservation
    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
         uint16_t raw[3] = {t0, t1, t2};
         MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
@@ -448,10 +580,8 @@ void updateTouch_v1() {
         // Verification threshold is sw_th - 2 to tolerate 2 LSB timing mismatch
         // between touched() read and filteredData/baselineData read.
         // Without this margin, light touches (diff=4-5) are falsely rejected
-        // because filtered data fluctuates ?2-3 LSB between I2C reads.
+        // because filtered data fluctuates +/-2-3 LSB between I2C reads.
         uint8_t verify_th = (sw_th > 1) ? (sw_th - 1) : 1;  // round41: -2->-1 LSB tolerance
-      static uint8_t verifiedCount[3][12] = {0};
-       uint32_t nowVer = to_ms_since_boot(get_absolute_time());  // round45r: for sticky dip verification preservation
       for (uint8_t m = 0; m < 3; m++) {
             for (uint8_t e = 0; e < 12; e++) {
                 if (raw[m] & (1 << e)) {
@@ -528,6 +658,79 @@ void updateTouch_v1() {
                    }
                    // else: keep verifiedCount, instant re-trigger when touch returns
                }
+            }
+        }
+        t0 = raw[0]; t1 = raw[1]; t2 = raw[2];
+    } else {
+        // round50: MBR3116 software verification (migrated from MPR121 optimization).
+        // Uses get_DIFFERENCE_COUNT_SENSOR() to verify chip's touch decision against
+        // actual signal strength. Catches I2C errors, false positives from timing
+        // mismatch between BUTTON_STAT and DIFFERENCE_COUNT reads.
+        // MBR3116 hardware threshold is 128 (config); verify threshold 80 gives
+        // ~37% margin for I2C read timing skew (equivalent to MPR121's sw_th-1).
+        uint16_t raw[3] = {t0, t1, t2};
+        CY8CMBR3116* chips[3] = {&MBR3116A, &MBR3116B, &MBR3116C};
+        uint8_t maxElec[3] = {12, 12, 8};  // electrodes used per chip in v1 layout
+        static const uint16_t MBR3116_VERIFY_TH = 80;
+        static const uint16_t MBR3116_STRONG_SKIP_TH = 300;  // skip 2nd verification
+        static const uint16_t MBR3116_STRONG_TH = 200;       // confirmReq = 1 (fast)
+        static const uint16_t MBR3116_MEDIUM_TH = 120;       // confirmReq = 2 (normal)
+        // else: confirmReq = 3 (weak/edge, strict)
+        uint16_t diffCounts[3][16];
+        bool diffRead[3] = {false, false, false};
+        bool diffOk[3] = {false, false, false};
+        bool diffRetried[3] = {false, false, false};
+        for (uint8_t m = 0; m < 3; m++) {
+            for (uint8_t e = 0; e < maxElec[m]; e++) {
+                if (raw[m] & (1 << e)) {
+                    if (verifiedCount[m][e] < 2) {
+                        // New touch - verify with sensor difference count
+                        if (!diffRead[m]) {
+                            diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                            if (!diffOk[m]) {
+                                // round47b-patch: I2C error - re-read once before trusting
+                                diffRetried[m] = true;
+                                diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                            }
+                            diffRead[m] = true;
+                        }
+                        if (!diffOk[m]) {
+                            // I2C failure - don't trust, don't reject, skip this cycle
+                            confirmReq[m][e] = CONFIRM_CYCLES;
+                        } else {
+                            uint16_t diff = diffCounts[m][e];
+                            // round45u: slide transition acceleration
+                            bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
+                                                     (e + 1 < maxElec[m] && (prevStretched[m] & (1 << (e + 1))));
+                            if (diff < MBR3116_VERIFY_TH) {
+                                // False touch - signal insufficient
+                                raw[m] &= ~(1 << e);
+                                verifiedCount[m][e] = 0;
+                                confirmReq[m][e] = CONFIRM_CYCLES;
+                                if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;
+                            } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
+                                       (diff >= MBR3116_STRONG_SKIP_TH || neighborWasActive)) {
+                                // Very strong signal or slide - skip 2nd verification
+                                verifiedCount[m][e] = 2;
+                                confirmReq[m][e] = 1;
+                            } else {
+                                verifiedCount[m][e]++;
+                                if (diff >= MBR3116_STRONG_TH)      confirmReq[m][e] = 1;
+                                else if (diff >= MBR3116_MEDIUM_TH) confirmReq[m][e] = 2;
+                                else                                 confirmReq[m][e] = 3;
+                            }
+                        }
+                    }
+                    // else: sustained touch, skip I2C reads to minimize latency
+                } else {
+                    // round45r: preserve verification if recently touched (sticky dip recovery)
+                    if (verifiedCount[m][e] != 0) {
+                        if (lastTouchedMs[m][e] == 0 || (nowVer - lastTouchedMs[m][e]) > 50) {
+                            verifiedCount[m][e] = 0;
+                            confirmReq[m][e] = CONFIRM_CYCLES;
+                        }
+                    }
+                }
             }
         }
         t0 = raw[0]; t1 = raw[1]; t2 = raw[2];
@@ -854,6 +1057,10 @@ void updateInputState() {
     // Software baseline auto-correction: gradually adjust baseline to match
     // idle filtered data. Fixes baseline stuck too high (e.g., M2E0 baseline=212
     // vs idle filt=207, diff=5 causes false touches). Runs every 2s when idle.
+    // round50: MBR3116 does NOT need this - the chip manages its own baseline
+    // internally (configurable baseline tracking rate via BUTTON_LBR/NNT/NT
+    // registers). The software verification layer (round50) compensates for any
+    // residual baseline drift by rejecting touches with insufficient diff count.
     if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116) &&
         (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2)) {
         // round47: idle baseline auto-correction (single software baseline writer).

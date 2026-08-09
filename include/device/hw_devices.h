@@ -48,6 +48,7 @@ extern bool airKeys[6];
 extern uint8_t touchData[4];
 extern bool touchData4k[4];
 extern bool touchData6k[6];
+extern uint8_t touchData32[32];
 
 // round46: cross-core seqlock generation. Core0 bumps this BEFORE and AFTER
 // updating the shared touch state; Core1 readers copy shared bytes only when

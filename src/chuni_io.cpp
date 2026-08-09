@@ -105,8 +105,6 @@ void hid_task_chuni_input() {
 
 #define CLAMP(val, lo, hi) (val < lo ? lo : (val > hi ? hi : val))
 
-extern uint8_t touchData32[32];
-
 bool game_connected;
 uint32_t connected_time;
 

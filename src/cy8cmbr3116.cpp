@@ -592,84 +592,26 @@ uint8_t CY8CMBR3116::get_DEBUG_AVG_RAW_COUNT0(uint16_t* resultBuffer) {
 
 // METHODS FOR WRITING/READING AND SETTING POINTER ON IC
 uint8_t CY8CMBR3116::setPointer(int registerAddress) {
-    // uint8_t error = 5;
-    // uint8_t timeoutCounter = 0;
-
-    // while (error != 0 && timeoutCounter < TIMEOUTCOUNTER) {
-    // Begin transmission to the device
-    // Wire.beginTransmission(DEVICE_I2C_ADDRESS);
-    // Set the register pointer
-    // Wire.write(registerAddress);
-    // End transmission
-    // error = Wire.endTransmission();
     uint8_t buf = registerAddress;
-    i2c_write(i2c_port, DEVICE_I2C_ADDRESS, &buf, 1, false);
-
-    // timeoutCounter++;
-    // }
-
-    // return error;
-    return 0;
+    int ret = i2c_write(i2c_port, DEVICE_I2C_ADDRESS, &buf, 1, false);
+    return (ret < 0) ? 1 : 0;  // 0 = success, non-zero = I2C error
 }
 
 // Method to retriev count of bytes from last pointer Postition to resultBuffer
 uint8_t CY8CMBR3116::requestData(uint8_t count, uint8_t* resultBuffer) {
-
-    // uint8_t timeoutCounter = 0;
-    // return request from the IC
-    // while (Wire.available() == 0 && timeoutCounter < TIMEOUTCOUNTER) {
-    // while (timeoutCounter < TIMEOUTCOUNTER) {
-    // Wire.requestFrom(DEVICE_I2C_ADDRESS, count);
-    i2c_read(i2c_port, DEVICE_I2C_ADDRESS, resultBuffer, count, false);
-    // timeoutCounter++;
-    // }
-
-    // check if timeout occured
-    // if (timeoutCounter >= TIMEOUTCOUNTER) {
-    // return 5;
-    // }
-
-    // Read the return requested Data
-    // uint8_t counter = 0;
-    // while (Wire.available()) {
-    //     resultBuffer[counter] = Wire.read();
-    //     counter++;
-    // }
-
-    return 0;
+    int ret = i2c_read(i2c_port, DEVICE_I2C_ADDRESS, resultBuffer, count, false);
+    return (ret < 0) ? 1 : 0;  // 0 = success, non-zero = I2C error
 }
 
 // Method to write uint8_tCount of uint8_ts to a registerAddress from the data buffer
 uint8_t CY8CMBR3116::writeData(uint8_t registerAddress, uint8_t count, uint8_t* data) {
-    // uint8_t error = 5;
-    // uint8_t timeoutCounter = 0;
-
-    // while (error != 0 && timeoutCounter < TIMEOUTCOUNTER) {
-    // Begin transmission to the device
-    // Wire.beginTransmission(DEVICE_I2C_ADDRESS);
-
-    uint8_t* buf = new uint8_t[count + 1];
+    uint8_t buf[18];  // max count=16 (THRESHOLD), +1 for register address
     buf[0] = registerAddress;
-    for (int i = 0; i < count; i++) {
+    for (uint8_t i = 0; i < count; i++) {
         buf[i + 1] = data[i];
     }
-
-    i2c_write(i2c_port, DEVICE_I2C_ADDRESS, buf, count + 1, false);
-
-    // Set the register pointer
-    // Wire.write(registerAddress);
-
-    // write the uint8_ts
-    // for (uint8_t i = 0; i < count; i++) {
-    // Wire.write(data[i]);
-    // }
-    // End transmission
-    // error = Wire.endTransmission();
-
-    // timeoutCounter++;
-    // }
-    // return error;
-    return 0;
+    int ret = i2c_write(i2c_port, DEVICE_I2C_ADDRESS, buf, count + 1, false);
+    return (ret < 0) ? 1 : 0;  // 0 = success, non-zero = I2C error
 }
 
 // Method to retriev uint8_tCount of uint8_ts from an registerAddress to the resultBuffer
