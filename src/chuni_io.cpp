@@ -15,6 +15,7 @@
 #include <hw_devices.h>
 #include <nyanithm_shared.h>
 #include <tusb.h>
+#include <usb_device.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -94,7 +95,7 @@ void hid_task_chuni_input() {
         if (getButtonState(BUTTON_UP)) {
             report_buf[6] |= 0b00010000;  // ENTER
         } else if (getButtonState(BUTTON_DOWN)) {
-            report_buf[8] |= 0b10000000;  // F2
+            report_buf[8] |= 0b10000000;  // F1 (bit71 -> usage 0x3B; bitmap starts at report bit 16)
         } else if (getButtonState(BUTTON_PUSH)) {
             report_buf[6] |= 0b00100000;  // ESCAPE
         }
@@ -456,6 +457,10 @@ void cdc_respond() {
         uint32_t got = 0;
         // 96 bytes may arrive in multiple USB packets; loop until complete,
         // pumping tud_task() so the USB stack keeps receiving.
+        // round51: bounded wait (500ms). A partial transfer (host close / unplug)
+        // used to wedge Core1 here forever while Core0 kept feeding the watchdog,
+        // freezing HID input until power cycle.
+        uint32_t ledDeadline = to_ms_since_boot(get_absolute_time()) + 500;
         while (got < 96) {
             uint32_t r = tud_cdc_read(leds + got, 96 - got);
             got += r;
@@ -463,6 +468,9 @@ void cdc_respond() {
                 tud_task();
                 if (!tud_cdc_available()) {
                     sleep_us(50);
+                }
+                if (to_ms_since_boot(get_absolute_time()) >= ledDeadline) {
+                    return;  // stale payload bytes are dropped as unknown commands
                 }
             }
         }
@@ -498,6 +506,10 @@ void cdc_respond() {
         RGB_LED.flush();
         hid_working = false;
         in_config_mode = true;  // Core1 stops reading CDC; Core0 handleCommand takes over
+        // round51: Core0 becomes the sole tud_task() driver in config mode
+        // (handleCommand's idle loop pumps it). Prevents the cross-core
+        // tud_task() race with Core1's loop via the stdio_cdc printf/getchar path.
+        core0_owns_usb = true;
         // Delegate to Core0: handleCommand() needs flash_safe_execute context
         // (Core0 is the core that can safely stall Core1 for flash write/erase).
         pending_config_mode = true;

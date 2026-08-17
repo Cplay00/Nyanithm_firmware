@@ -537,9 +537,15 @@ bool VL53L0X::forceInit(bool io_2v8) {
 bool VL53L0X::selfCheck() {
     startContinuous(0);
     uint16_t result;
+    // round51: bounded wait (was unbounded -- a dead sensor reboot-looped via WDT)
+    uint32_t deadline = to_ms_since_boot(get_absolute_time()) + 500;
     while (true) {
         if (readRangeContinuousMillimetersAsync(&result)) {
             break;
+        }
+        if (to_ms_since_boot(get_absolute_time()) >= deadline) {
+            stopContinuous();
+            return false;
         }
         sleep_ms(1);
     }
@@ -567,7 +573,7 @@ void VL53L0X::writeReg16Bit(uint8_t reg, uint16_t value) {
     // int r0 = i2c_write(port, address, &reg, 1, false);
     // bus->beginTransmission(address);
     // bus->write(reg);
-    uint8_t buf[] = { reg, (value >> 8), (value) };
+    uint8_t buf[] = { reg, (uint8_t)(value >> 8), (uint8_t)(value) };
     int r1 = i2c_write(port, address, buf, 3, false);
     // bus->write((uint8_t)(value >> 8));  // value high byte
     // bus->write((uint8_t)(value));       // value low byte
@@ -577,7 +583,8 @@ void VL53L0X::writeReg16Bit(uint8_t reg, uint16_t value) {
 
 // Write a 32-bit register
 void VL53L0X::writeReg32Bit(uint8_t reg, uint32_t value) {
-    uint8_t buf[] = { reg, (value >> 24), (value >> 16), (value >> 8), (value) };
+    uint8_t buf[] = { reg, (uint8_t)(value >> 24), (uint8_t)(value >> 16),
+                      (uint8_t)(value >> 8), (uint8_t)(value) };
     i2c_write(port, address, buf, 5, false);
 }
 

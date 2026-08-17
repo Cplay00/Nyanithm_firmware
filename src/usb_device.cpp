@@ -42,16 +42,28 @@
 #include <lamp_array.h>
 #include <usb_device.h>
 
+// round51: USB stack single-driver ownership flag. TinyUSB (osal_none build)
+// must never execute tud_task() on two cores concurrently: Core0's stdio_cdc
+// path calls tud_task() inside printf/getchar, which raced Core1's loop in
+// config / production / other-modes. Set by Core0 (boot_otherModes,
+// boot_productionMode) or by Core1 (CMD_CONFIG_MODE) before the handover.
+volatile bool core0_owns_usb = false;
+
 void multicore_entry() {
     // multicore_lockout_victim_init();  // 初始化当前内核（内核1），使其可以被内核0中断
     flash_safe_execute_core_init();  // 初始化当前内核（内核1），使其可以被内核0中断
 
     while (true) {
-        // round46d: Core1 ALWAYS drives the USB stack (tud_task) - including
-        // config mode. Core0's config-mode I/O (config_cdc module) never calls
-        // tud_task() and only uses tud_cdc_read/write/flush, so tinyusb is
-        // driven by exactly one core. (round46c made Core1 idle in config mode
-        // which starved USB RX: handleCommand's wait loop never saw commands.)
+        // round51: single-driver USB ownership. When Core0 owns the stack
+        // (config mode / 4k/6k / production), Core1 steps aside completely --
+        // Core0 pumps tud_task() itself (handleCommand idle loop, other-modes
+        // loops, program3116 loop; the stdio_cdc path also self-pumps). This
+        // both eliminates the cross-core tud_task() race and fixes the round46c
+        // RX starvation by pumping inside handleCommand's wait loop.
+        if (core0_owns_usb) {
+            sleep_us(200);
+            continue;
+        }
         tud_task();
         cdc_respond();
         hid_task_chuni_input();

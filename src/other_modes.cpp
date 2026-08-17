@@ -17,6 +17,7 @@ void start_4kMode() {
 
     while (true) {
 
+        tud_task();  // round51: Core0 owns the USB stack in other-modes
         updateInputState();
         updateTouchData4k();
         if (g_lampCount == 16) {
@@ -107,7 +108,7 @@ void start_4kMode() {
             if (getButtonState(BUTTON_UP)) {
                 report_buf[6] |= 0b00010000;  // ENTER
             } else if (getButtonState(BUTTON_DOWN)) {
-                report_buf[8] |= 0b10000000;  // F2
+                report_buf[8] |= 0b10000000;  // F1 (bit71 -> usage 0x3B)
             } else if (getButtonState(BUTTON_PUSH)) {
                 report_buf[6] |= 0b00100000;  // ESCAPE
             }
@@ -118,6 +119,7 @@ void start_4kMode() {
 
 void start_6kMode() {
     while (true) {
+        tud_task();  // round51: Core0 owns the USB stack in other-modes
         updateInputState();
         updateTouchData6k();
         RGB_LED.fill(0, 0, 0);
@@ -275,7 +277,7 @@ void start_6kMode() {
             if (getButtonState(BUTTON_UP)) {
                 report_buf[6] |= 0b00010000;  // ENTER
             } else if (getButtonState(BUTTON_DOWN)) {
-                report_buf[8] |= 0b10000000;  // F2
+                report_buf[8] |= 0b10000000;  // F1 (bit71 -> usage 0x3B)
             } else if (getButtonState(BUTTON_PUSH)) {
                 report_buf[6] |= 0b00100000;  // ESCAPE
             }

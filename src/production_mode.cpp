@@ -11,6 +11,7 @@
 
 #include <production_mode.h>
 #include <stdio.h>
+#include <tusb.h>
 
 bool detect3116(uint8_t addr) {
     // 尝试读取地址寄存器值
@@ -43,6 +44,7 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
 
 void program3116() {
     while (1) {
+        tud_task();  // round51: Core0 owns the USB stack in production mode
         printf("\n");
         if (detect3116(0x43) && detect3116(0x44)) {
             printf("+-----------------------------+\n");

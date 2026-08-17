@@ -27,8 +27,9 @@ controller_config defaultConfig{
     .debounce = 0b00010001,               // dt=1/dr=1, 1ms debounce at ESI=1ms (adjustable via ConfigApp)
     .airMax = 500,                        //
     .airMin = 200,                        //
-    .heightOffset = { 0, 0, 0, 0 },       //
+    .heightOffset = { 0, 0, 0, 0, 0 },   //
     .lightLimit = 255,                    //
+    .heightRangeCfg = 0,                  // 0 = runtime default (10mm)
     .xorSum = 0,                          // 前127字节异或和
 };
 
@@ -38,15 +39,58 @@ uint8_t config_buf[sizeof(controller_config)];
 
 uint8_t currentPage = 0;
 
-void saveConfigSafe(void* param) {
-    if (currentPage == 15) {
-        flash_range_erase(FLASH_STORAGE_START, FLASH_SECTOR_SIZE);
-        currentPage = 0;
-        flash_range_program(FLASH_STORAGE_START + (currentPage * FLASH_PAGE_SIZE), (const uint8_t*)&ControllerConfig, sizeof(controller_config));
-    } else {
-        currentPage++;
-        flash_range_program(FLASH_STORAGE_START + (currentPage * FLASH_PAGE_SIZE), (const uint8_t*)&ControllerConfig, sizeof(controller_config));
+// round51: silent integrity check for the flash read path. Must not printf:
+// readConfig can run on Core0 while Core1 owns the USB stack (boot time).
+static bool validateConfigQuiet(controller_config* config) {
+    if (config->magic != CONTROLLER_CONFIG_MAGIC) return false;
+    if (config->cfgVer != CONTROLLER_CONFIG_VERSION) return false;
+    uint8_t* ptr = (uint8_t*)config;
+    uint8_t sum = 0;
+    for (int i = 0; i < (int)sizeof(controller_config) - 1; i++) {
+        sum ^= *ptr++;
     }
+    return sum == config->xorSum;
+}
+
+// round51: clamp loaded / host-supplied configs into safe ranges instead of
+// accepting arbitrary values (the old hwVer gate was commented out entirely,
+// so a corrupted hwVer/air range silently took effect).
+static void sanitizeConfig(controller_config* config) {
+    if (config->hwVer < 1 || config->hwVer > 4) config->hwVer = defaultConfig.hwVer;
+    if (config->th_touch < 1) config->th_touch = 1;
+    if (config->th_touch > 63) config->th_touch = 63;
+    if (config->th_release < 1) config->th_release = 1;
+    if (config->th_release > 63) config->th_release = 63;
+    if (config->airMin >= config->airMax) {
+        config->airMin = defaultConfig.airMin;
+        config->airMax = defaultConfig.airMax;
+    }
+}
+
+static void recomputeXorSum(controller_config* config) {
+    uint8_t* ptr = (uint8_t*)config;
+    uint8_t sum = 0;
+    for (int i = 0; i < (int)sizeof(controller_config) - 1; i++) {
+        sum ^= *ptr++;
+    }
+    config->xorSum = sum;
+}
+
+void saveConfigSafe(void* param) {
+    // round51: currentPage = last written page (0..15) or 0xFF (no valid
+    // history). 0xFF and 15 both erase the sector first -- the old code wrote
+    // page 1 after an erase (page 0 stayed erased, the sequential boot scan
+    // stopped at page 0, and the just-saved config was lost on reboot).
+    uint8_t next;
+    if (currentPage == 0xff || currentPage >= 15) {
+        flash_range_erase(FLASH_STORAGE_START, FLASH_SECTOR_SIZE);
+        next = 0;
+    } else {
+        next = currentPage + 1;
+    }
+    flash_range_program(FLASH_STORAGE_START + (next * FLASH_PAGE_SIZE),
+                        (const uint8_t*)&ControllerConfig, sizeof(controller_config));
+    currentPage = next;
 }
 
 void saveConfig() {
@@ -56,7 +100,7 @@ void saveConfig() {
 
 void eraseConfigSectorSafe(void* param) {
     flash_range_erase(FLASH_STORAGE_START, FLASH_SECTOR_SIZE);
-    currentPage = 0;
+    currentPage = 0xff;  // round51: next save starts at page 0 (was page 1)
 }
 
 void eraseConfigSector() {
@@ -65,26 +109,33 @@ void eraseConfigSector() {
 }
 
 void readConfigSafe(void* param) {
-    void* addr = (void*)(XIP_BASE + FLASH_STORAGE_START);
+    uint8_t* addr = (uint8_t*)(XIP_BASE + FLASH_STORAGE_START);
     bool found = false;
-    void* target = nullptr;
+    controller_config* target = nullptr;
     for (int page = 0; page < 16; page++) {
         controller_config* config = (controller_config*)addr;
         // printf("magic = %d\n", config->magic);
         // 检查是否为存储的配置
-        if (config->magic == CONTROLLER_CONFIG_MAGIC) {
-            // if (checkConfigBuf(config)) {
+        if (config->magic != CONTROLLER_CONFIG_MAGIC) {
+            break;  // erased/unwritten page: sequential-write scheme ends here
+        }
+        // round51: full integrity check (magic + cfgVer + xorSum) before
+        // accepting a page; a torn write (power loss mid-program) falls back
+        // to the previous valid page instead of loading bit-rotten values.
+        if (validateConfigQuiet(config)) {
             found = true;
-            target = addr;
+            target = config;
             currentPage = page;
-        } else {
-            break;
         }
         addr += FLASH_PAGE_SIZE;
     }
     if (found) {
         // printf("found config in page %d\n", currentPage);
         memcpy(&ControllerConfig, target, sizeof(controller_config));
+        // round51: clamp fields to safe ranges and refresh the checksum so
+        // the next save persists a fully valid image.
+        sanitizeConfig(&ControllerConfig);
+        recomputeXorSum(&ControllerConfig);
     } else {
         // printf("config not found\n");
         currentPage = 0xff;
@@ -118,6 +169,10 @@ void setConfig() {
     if (checkConfigBuf((controller_config*)config_buf)) {
         printf("read %d byte. check ok. config changed.\n", count);
         memcpy(&ControllerConfig, config_buf, sizeof(controller_config));
+        // round51: sanitize host-supplied config too (clamped values are
+        // saved with a refreshed xorSum on the next CFG_SAVE).
+        sanitizeConfig(&ControllerConfig);
+        recomputeXorSum(&ControllerConfig);
     } else {
         printf("read %d byte. illegal config.\nconfig will not be changed\n", count);
     }

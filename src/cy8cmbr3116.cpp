@@ -605,6 +605,7 @@ uint8_t CY8CMBR3116::requestData(uint8_t count, uint8_t* resultBuffer) {
 
 // Method to write uint8_tCount of uint8_ts to a registerAddress from the data buffer
 uint8_t CY8CMBR3116::writeData(uint8_t registerAddress, uint8_t count, uint8_t* data) {
+    if (count > 16) return 1;  // round51 defensive: buf[18] holds addr + 16 bytes max
     uint8_t buf[18];  // max count=16 (THRESHOLD), +1 for register address
     buf[0] = registerAddress;
     for (uint8_t i = 0; i < count; i++) {

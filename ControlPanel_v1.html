@@ -513,8 +513,12 @@
             CONFIG_MODE: 0xB3,
             CFG_READ: 0xB4,
             CFG_SAVE: 0xB5,
-            CFG_SET: 0xB6,
-            CFG_ERASE: 0xB7,
+            // round51: 与固件 NyanithmCmd 枚举对齐 (CMD_CFG_ERASE=0xB6, CMD_CFG_SET=0xB7)。
+            // 此前 SET/ERASE 互换: "保存配置"实际执行擦除, 且后续128字节配置
+            // 被固件当作命令流解析 (值0xB9=重启 / 0xBB=变砖), 为面板全部
+            // 配置功能失效的根因。
+            CFG_SET: 0xB7,
+            CFG_ERASE: 0xB6,
             GET_STATUS: 0xB8,
             EXIT: 0xB9,
             LOAD3116CONFIG: 0xBA,
@@ -1276,7 +1280,6 @@
             return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
         }
 
-        window.addEventListener("beforeunload", () => { if (connected) closePort(); });
         window.addEventListener("beforeunload", () => { if (connected) closePort(); });
     </script>
 </body>

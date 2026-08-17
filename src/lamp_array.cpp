@@ -37,6 +37,7 @@ static bool s_dirty = false;
 static uint8_t s_rgb[kMaxLampCount][3];
 
 static uint16_t clamp_lamp_id(uint16_t lamp_id) {
+    if (g_lampCount == 0) return 0;  // round51 defensive: never index into s_rgb
     return lamp_id < g_lampCount ? lamp_id : (g_lampCount - 1);
 }
 
@@ -136,7 +137,7 @@ static uint16_t build_lamp_attributes_response(uint8_t* buffer, uint16_t reqlen)
     write_le16(report + 0, lamp_id);
 
     // Position: distribute lamps linearly along X axis.
-    uint32_t x = (lamp_id * kBoundingBoxWidthUm) / (g_lampCount - 1);
+    uint32_t x = (g_lampCount > 1) ? (lamp_id * kBoundingBoxWidthUm) / (g_lampCount - 1) : 0;
     write_le32(report + 2, x);
     write_le32(report + 6, 0);
     write_le32(report + 10, 0);

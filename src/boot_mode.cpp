@@ -19,6 +19,7 @@
 #include <i2c_port.h>
 #include <pico/flash.h>
 #include <production_mode.h>
+#include <usb_device.h>
 #include <rainbow.h>
 
 void reboot() {
@@ -49,6 +50,9 @@ void boot_switch() {
 void boot_productionMode() {
     hid_working = false;
     game_connected = true;
+    // round51: production console prints from Core0 (stdio_cdc self-pumps
+    // tud_task); Core1 must not race it.
+    core0_owns_usb = true;
     initI2CBus(0, GPIO_I2C_0_SDA, GPIO_I2C_0_SCL, BR200K);
     RGB_LED.fill(0xff, 0xff, 0xff);
     RGB_LED.flush();
@@ -62,6 +66,10 @@ void boot_appLinkMode() {
     RGB_LED.flush();
 
     hid_working = false;
+    // round51: button-boot config path must take USB ownership too --
+    // handleCommand() pumps tud_task() on Core0; Core1 must step aside.
+    game_connected = true;  // suppress LampArray while config LED is shown
+    core0_owns_usb = true;
 
     sleep_ms(10);
     readConfig();
@@ -124,6 +132,11 @@ void boot_otherModes() {
 
     sleep_ms(10);
     hid_working = false;
+    // round51: other-modes send HID reports and drive RGB from Core0; take
+    // sole USB ownership and suppress LampArray so Core1 cannot race the
+    // WS2812 PIO state machine or HID endpoints.
+    game_connected = true;
+    core0_owns_usb = true;
     RGB_LED.fill(0, 0, 0);
     if (g_lampCount == 16) {
         for (int j = 0; j < 4; j++)
@@ -145,6 +158,7 @@ void boot_otherModes() {
 
     RGB_LED.flush();
     while (true) {
+        tud_task();  // round51: Core0 owns the USB stack in other-modes
         updateInputState();
         updateTouchData4k();
         if (touchData4k[0]) {

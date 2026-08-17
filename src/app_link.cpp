@@ -63,6 +63,10 @@ void handleCommand() {
     static uint16_t cfgCmdLogTotal = 0;
     while (true) {
         while (tud_cdc_available() == 0) {
+            // round51: Core0 owns tud_task() in config mode -- pump the USB
+            // stack while waiting so CDC RX is serviced (fixes round46c-style
+            // starvation without re-introducing the cross-core tud_task race).
+            tud_task();
             sleep_ms(1);
             updateInputState();
             if (to_ms_since_boot(get_absolute_time()) - lastCmdMs > 60000) {
@@ -109,7 +113,16 @@ void handleCommand() {
             printf("done\n");
 
         } else if (cmd == CMD_FLASHING) {
-            boot_flashing();
+            // round51: irreversible flash erase now requires an explicit
+            // confirmation byte (0xA5) right after the command. A stray 0xBB
+            // inside a misaligned command stream must not brick the board
+            // (BOOTSEL rescue is the only recovery).
+            uint8_t flashingConfirm = getchar();
+            if (flashingConfirm == 0xA5) {
+                boot_flashing();
+            } else {
+                printf("flashing denied\n");
+            }
         } else if (cmd == 0xCE) {
             // round46g: dump config-mode command log: [1B len][len bytes oldest->newest]
             uint16_t n = (cfgCmdLogTotal < 256) ? cfgCmdLogTotal : 256;

@@ -13,6 +13,10 @@
 
 void initUSBDevice();
 
+// round51: true while Core0 is the sole tud_task() driver (config mode,
+// 4k/6k other-modes, production mode). Core1's loop steps aside when set.
+extern volatile bool core0_owns_usb;
+
 
 
 
