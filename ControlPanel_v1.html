@@ -4013,7 +4013,9 @@ function validateUf2ForDevice(p, devInfo) {
         constructor() {
             this.cfg = buildMockConfig();
             this.configMode = false;
+            this.cfgSetPending = null;  // round63f: CFG_SET 载入流跨 write 累积
             this.tofCount = MOCK_GEN2 ? 3 : 4;  // gen2:ToF 数异常,应被门禁拦截
+            this.cmdLog = [];  // round63h: 与真实固件 0xCE 命令日志同构(仅顶层命令字节)
             // 无定时器收发:后台标签页的 setTimeout 节流会把 Mock 卡死,
             // 因此数据入队即唤醒等待的 reader,不依赖轮询。
             this.dev = { rx: [], closed: false, waiters: [] };
@@ -4057,14 +4059,40 @@ function validateUf2ForDevice(p, devInfo) {
 
         onHostWrite(bytes) {
             let i = 0;
+            // round63f: 若正处于 CFG_SET 载入流中, 本次 write 的全部字节都是
+            // 配置负载续段(面板分块发送), 不可能是新的命令字节, 直接累积。
+            if (this.cfgSetPending !== null) {
+                while (i < bytes.length && this.cfgSetPending.length < 128) {
+                    this.cfgSetPending.push(bytes[i++]);
+                }
+                if (this.cfgSetPending.length === 128) {
+                    const cfg = new Uint8Array(this.cfgSetPending);
+                    this.cfgSetPending = null;
+                    if (cfg[0] === CFG_MAGIC && calcXorSum(cfg) === cfg[127]) {
+                        this.cfg = cfg;
+                        this.sendText("read 128 byte. check ok. config changed.", 15);
+                    } else {
+                        this.sendText("illegal config", 15);
+                    }
+                }
+                return;  // 载入流未凑满 128 也直接返回, 剩余字节留到下一次 write
+            }
             while (i < bytes.length) {
                 const cmd = bytes[i++];
+                if (this.cmdLog.length > 255) this.cmdLog.shift();
+                this.cmdLog.push(cmd);
                 if (cmd === CMD.DEV_DETECT) { this.send([CMD.DEV_DETECT]); }
                 else if (cmd === CMD.GET_API_LEVEL) { this.send([API_LEVEL]); }
                 else if (cmd === CMD.GET_INPUT) { this.send(this.inputFrame()); }
                 else if (cmd === CMD.SET_LED) { i += 96; /* 无应答 */ }
                 else if (cmd === CMD.CONFIG_MODE) { this.configMode = true; }
                 else if (cmd === CMD.CFG_KEEPALIVE) { /* round57: 心跳,静默无响应 */ }
+                else if (cmd === 0xCE) {
+                    // round63h: 命令日志转储, 与真机 handleCommand 0xCE 同构
+                    const n = Math.min(this.cmdLog.length, 255);
+                    this.send([n]);
+                    this.send(Array.from(this.cmdLog.slice(-n)));
+                }
                 else if (cmd === CMD.DETECT) {
                     this.send([CMD.DETECT, 0b111, 0b000, this.tofCount, 0b00000001, this.cfg[2]]);
                 }
@@ -4074,16 +4102,26 @@ function validateUf2ForDevice(p, devInfo) {
                     this.sendText("using config in page 3", 35);
                 }
                 else if (cmd === CMD.CFG_SAVE) { this.sendText("saveConfig result: 0, currentPage = 3", 15); }
-                else if (cmd === CMD.CFG_ERASE) { this.sendText("erase ok", 15); }
-                else if (cmd === CMD.CFG_SET) {
-                    const cfg = bytes.slice(i, i + 128); i += 128;
-                    if (cfg.length === 128 && cfg[0] === CFG_MAGIC && calcXorSum(cfg) === cfg[127]) {
-                        this.cfg = new Uint8Array(cfg);
-                        this.sendText("read 128 byte. check ok. config changed.", 15);
-                    } else {
-                        this.sendText("illegal config", 15);
-                    }
+        else if (cmd === CMD.CFG_ERASE) { this.sendText("erase ok", 15); }
+        else if (cmd === CMD.CFG_SET) {
+            // round63f: 真实固件 setConfig() 一次性读 128 字节, 面板可能分块发送。
+            // Mock 必须跨 write 累积载入流(此前按单次 write 解析, 分块会被拆坏)。
+            if (this.cfgSetPending === null) this.cfgSetPending = [];
+            while (i < bytes.length && this.cfgSetPending.length < 128) {
+                this.cfgSetPending.push(bytes[i++]);
+            }
+            if (this.cfgSetPending.length === 128) {
+                const cfg = new Uint8Array(this.cfgSetPending);
+                this.cfgSetPending = null;
+                if (cfg[0] === CFG_MAGIC && calcXorSum(cfg) === cfg[127]) {
+                    this.cfg = cfg;
+                    this.sendText("read 128 byte. check ok. config changed.", 15);
+                } else {
+                    this.sendText("illegal config", 15);
                 }
+            }
+            // 未凑满 128 字节则等待下一次 write(与真机 setConfig 行为一致)
+        }
                 else if (cmd === CMD.GET_STATUS) {
                     this.sendText("get status...", 8);
                     this.sendText("Nyanithm build MOCK-1.5.3", 16);
@@ -4188,9 +4226,18 @@ function validateUf2ForDevice(p, devInfo) {
         stopCfgKeepalive();
         cfgKeepaliveTimer = setInterval(async () => {
             if (!connected || !configMode) { stopCfgKeepalive(); return; }
-            try {
-                await writeBytes(new Uint8Array([CMD.CFG_KEEPALIVE]));
-            } catch (e) { /* 串口异常由 readLoop/断开清理兜底 */ }
+            // round63: 心跳必须和命令事务串行。此前直接 writeBytes(0xC3) 不认
+            // serialBusy,若在 doSaveConfig 发送 CFG_SET 的 128 字节载入流的窗口内
+            // 命中,0xC3 会在 UART 层被固件 setConfig() 读进配置块,使整块错位,
+            // 最终一个配置字节残留在缓冲并可能被解码成 0xB9/0xBB,触发设备重启
+            // (表现为"等待行响应超时" + "device has been lost")。走 withSerialLock
+            // 让心跳排在当前事务之后,绝不穿插进载入流。
+            await withSerialLock(async () => {
+                if (!connected || !configMode) return;
+                try {
+                    await writeBytes(new Uint8Array([CMD.CFG_KEEPALIVE]));
+                } catch (e) { /* 串口异常由 readLoop/断开清理兜底 */ }
+            });
         }, 30000);
     }
     function stopCfgKeepalive() {
@@ -4218,6 +4265,7 @@ function validateUf2ForDevice(p, devInfo) {
     // 意外断开(拔线 / 设备重启进 BOOTSEL / 刷写后重枚举)的幂等清理
     function handleUnexpectedDisconnect(reason) {
         if (!connected && !port && !reader) return;
+        stopSaveRebootReconnect();  // round63j: 意外断开时停止保存后自动重连计时器
         stopCfgKeepalive();
         stopLedAnim();
         stopTofPoll();
@@ -4806,9 +4854,65 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }
 
+    // round63b: 保存前确认设备仍在配置模式。配置模式有 60s 空闲自动退出(固件保底),
+    // 面板若在设备已退出/重启后仍发送 CFG_SET 载入流,128 字节会撞进普通模式命令流,
+    // 超时后还可能被解码成 0xB9/0xBB 触发重置。判别命令改用 GET_STATUS(0xB8):
+    // 配置模式返回换行结尾的 "get status...\n"(与面板状态查询同一机制,真机已验证),
+    // 普通模式 cdc_respond 无 0xB8 分支(静默丢弃)。不用 0xBC: 它的 6 字节二进制
+    // 帧无换行,真机上单独发送时不可靠(仅当其后的 printf 文本带出时才有效)。
+    async function probeConfigAlive() {
+        flushReadBuffer();
+        await writeBytes(new Uint8Array([CMD.GET_STATUS]));
+        try {
+            const line = await waitForLine(700);
+            if (!line.includes("get status")) return false;
+            // 状态转储(ToF 数值等)是多余文本,必须按时间窗排空,否则会污染随后
+            // CFG_SET 的响应行读取(真机/模拟器异步分批送达,缓冲区会在排空中
+            // 再次收到后续行)。固定等待 ~250ms 让 getStatus() 输出全部落盘再清空。
+            const t0 = performance.now();
+            while (performance.now() - t0 < 250) {
+                while (readBuffer.indexOf(10) >= 0) readBuffer = readBuffer.slice(readBuffer.indexOf(10) + 1);
+                await nextTick();
+            }
+            flushReadBuffer();
+            return true;
+        } catch (e) {
+            // 无响应/超时 = 设备已离开配置模式(60s 空闲自动退出或已重启)。
+            // 真·连接丢失将由 readLoop 的 handleUnexpectedDisconnect 单独上报。
+            return false;
+        }
+    }
+
+    // round63h: 命令日志转储(0xCE 诊断)。固件 handleCommand 会把配置模式下
+    // 收到的每个命令字节记入环形日志(最近 255 个),回读可判定设备实际收到
+    // 多少字节——用于排查 CFG_SET 载入流是否被截断(byte 65 断流等)。
+    // 真机: [0xCE] -> [len][len 个字节];mock: 同构。
+    // 通过控制台调用: 连接后进入配置模式, 执行 dumpCfgCmdLog()。
+    async function dumpCfgCmdLog() {
+        if (!connected) { log("未连接", "warn"); return; }
+        try {
+            flushReadBuffer();
+            await writeBytes(new Uint8Array([0xCE]));
+            const n = (await waitForBytes(1, 1000))[0];
+            log("设备命令日志(" + n + " 字节, 最旧→最新):");
+            if (n > 0) {
+                const buf = await waitForBytes(n, 1000);
+                const hex = Array.from(buf).map(b => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+                log(hex);
+            }
+        } catch (e) { log("命令日志读取失败: " + e.message, "error"); }
+    }
+    window.dumpCfgCmdLog = dumpCfgCmdLog;
+
     async function doSaveConfig() {
         if (cfgVerMismatch) {
             log("设备 cfgVer 不匹配,禁止写入(固件 checkConfigBuf 也会拒绝)", "error");
+            return false;
+        }
+        // 保存前先确认设备仍在配置模式,避免把 128 字节写到已退出的设备。
+        const alive = await probeConfigAlive();
+        if (!alive) {
+            log("设备已离开配置模式(可能超过 60s 自动退出或已重启)。未写入配置,请重新进入配置模式后再保存。", "error");
             return false;
         }
         finishSliderAnims();  // 收敛在途滑条动画,防止打包中间值
@@ -4819,11 +4923,21 @@ function validateUf2ForDevice(p, devInfo) {
             return false;
         }
         flushReadBuffer();
-        const pkt = new Uint8Array(1 + CFG_SIZE);
-        pkt[0] = CMD.CFG_SET;
-        pkt.set(cfg, 1);
-        await writeBytes(pkt);
-        const line = await waitForLineNudged(1000);
+        // round63i: 真机 A/B 实测(2026-08-24, cplay 固件 Built Aug 24 20:49:44)确认:
+        //   A) writeBytes(0xB7+128 共 129B 单次 write) -> read timeout at byte 65 (失败)
+        //   B) writeBytes([0xB7]) 再 writeBytes(cfg)(两次独立 write, 与 ConfigApp
+        //      serialib::writeChar(0xB7)+writeBytes(cfg,0x80) 逐字节一致) -> check ok (成功)
+        // 单次 129B write 在 Web Serial/USB 驱动层被打成 [64][64][1] 三个包, 第二个包
+        // (byte 65 起)撞上设备端单缓冲 OUT 端点未及时重武装而 NAK;两次 write 让固件
+        // handleCommand 先吃掉 0xB7(单独 1B 包), 随后 setConfig() 从干净状态读 128B
+        // 载入流, 逐包重武装, 稳定成功(真机连测 3 次全过)。必须拆成两次 write。
+        // 注意: 此处绝不能用 waitForLineNudged——设备此刻仍在 setConfig() 载入流
+        // 读取中, 0xBC"轻推"会被当成第 65 个配置字节注入并错位整个配置。
+        // CFG_SET 响应只能等固件读完 128 字节后由 handleCommand 打出, 用纯
+        // waitForLine(总宽限 3s)。
+        await writeBytes(new Uint8Array([CMD.CFG_SET]));
+        await writeBytes(cfg);
+        const line = await waitForLine(3000);
         log("CFG_SET 响应: " + line);
         if (!line.includes("check ok")) {
             await sleep(20);
@@ -4832,6 +4946,7 @@ function validateUf2ForDevice(p, devInfo) {
         }
         await sleep(50);
         await writeBytes(new Uint8Array([CMD.CFG_SAVE]));
+        // CFG_SAVE 阶段设备已回到 handleCommand 命令循环, 轻推安全(不注入载入流)。
         const saveLine = await waitForLineNudged(2000);
         log("配置已保存: " + saveLine);
         return true;
@@ -4848,7 +4963,50 @@ function validateUf2ForDevice(p, devInfo) {
             configMode = false;
             await sleep(200);
             await closePort();
+            startSaveRebootReconnect();
         } catch (e) { log("保存并重启失败: " + e.message, "error"); }
+    }
+
+    // round63j: 保存并重启后自动重连。设备 reboot 后以同一 VID/PID 重新枚举,
+    // 与刷写流程的 startReconnectWatch 不同: 那是 flash UI 专用(setFlashPhase/
+    // verifyFlashResult), 这里走普通连接路径(openPort + autoHandshake + 输入轮询),
+    // 用独立定时器避免与 flash 的 reconnectWatch/热插拔监听互相干扰。
+    let saveRebootWatch = null;
+    let saveRebootDeadline = 0;
+    function stopSaveRebootReconnect() {
+        if (saveRebootWatch) { clearInterval(saveRebootWatch); saveRebootWatch = null; }
+    }
+    async function saveRebootReconnectOnce() {
+        if (connected) { stopSaveRebootReconnect(); return true; }
+        try {
+            const ports = await navigator.serial.getPorts();
+            const ny = ports.find(p => {
+                const i = p.getInfo();
+                return i.usbVendorId === 0xCAFE && i.usbProductId === 0x4009;
+            });
+            if (!ny) return false;
+            const ok = await openPort(ny, true);
+            if (!ok) return false;
+            log("保存并重启完成,已自动重连");
+            await autoHandshake();
+            inputPolling = true;
+            setBtnState($("toggleInputBtn"), stopIcon, ' 停止测试', 'btn-warning');
+            inputLoop();
+            stopSaveRebootReconnect();
+            return true;
+        } catch (e) { return false; }
+    }
+    function startSaveRebootReconnect() {
+        stopSaveRebootReconnect();
+        saveRebootDeadline = Date.now() + 15000;
+        saveRebootWatch = setInterval(async () => {
+            if (Date.now() > saveRebootDeadline) {
+                stopSaveRebootReconnect();
+                log("保存并重启后 15 秒内未自动重连,请点击「连接串口」手动连接", "warn");
+                return;
+            }
+            await saveRebootReconnectOnce();
+        }, 1000);
     }
 
     async function doEraseConfig() {
@@ -5278,7 +5436,13 @@ function validateUf2ForDevice(p, devInfo) {
     async function sendLedColors(colors) {
         if (!connected || configMode) return;
         try {
-            await writeBytes(buildLedPacket(colors));
+            // round63: 灯光写同样串行化。0xB2 虽为单向写入(无应答),但若与输入轮询
+            // 的 GET_INPUT 请求在导线层交错,会把面板的字节读取器弄乱(33 字节边界
+            // 无法辨识)。走 withSerialLock 让灯光写排到当前事务之后,避免与读交换序。
+            await withSerialLock(async () => {
+                if (!connected || configMode) return;
+                await writeBytes(buildLedPacket(colors));
+            });
             setLedPreview(colors);
         } catch (e) { log("发送灯光失败: " + e.message, "error"); }
     }
@@ -5799,12 +5963,12 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     // round57: 保存设置按钮已从工具栏移除;保存并入"保存并重启"(二级确认)
-    setupConfirmAction($("btnSaveAndReboot"), "确认保存并重启?", () => withSerialLock(async () => {
+    setupConfirmAction($("btnSaveAndReboot"), "继续？", () => withSerialLock(async () => {
         if (!configMode) { log("请先进入配置模式", "warn"); return; }
         await doSaveAndReboot();
     }));
 
-    setupConfirmAction($("eraseConfigBtn"), "确认恢复?", () => withSerialLock(doEraseConfig));
+    setupConfirmAction($("eraseConfigBtn"), "继续？", () => withSerialLock(doEraseConfig));
     $("btnDevInfo").addEventListener("click", () => withSerialLock(async () => {
         if (!connected) { log("请先连接设备", "warn"); return; }
         try { await queryDevInfo(); } catch (e) { log("读取设备信息失败: " + e.message, "error"); }

@@ -7,6 +7,7 @@
 
 #include <controller_config.h>
 #include <hardware/flash.h>
+#include <hardware/watchdog.h>
 #include <pico/flash.h>
 #include <pico/multicore.h>
 #include <pico/stdio.h>
@@ -166,9 +167,27 @@ uint8_t getConfigPage() {
 
 void setConfig() {
     int count = 0;
-    // round46e: stdio getchar restored (round45- era config-mode mechanism)
-    for (; count < sizeof(controller_config); count++) {
-        config_buf[count] = getchar();
+    // round63e: 直接用 tud_cdc_read() 读载入流, 放弃 stdio getchar 路径。
+    // 前面两版(round63c/d)用 getchar_timeout_us() 都不可靠: stdio 的
+    // in_chars 共用 stdio_usb_mutex(与输出竞争), 且 busy-wait 内部不泵
+    // tud_task()。CFG_TUD_CDC_RX_BUFSIZE=64, 129 字节载入流(0xB7+128)
+    // 跨越两个 USB 包: 读空 64B FIFO 后, 第 65 字节起必须靠 tud_task()
+    // 拉取第二个包才能续流——stdio 路径在这里卡死(真机表现为
+    // "read timeout at byte 65")。本版与 normal-mode cdc_respond 同机制:
+    // tud_cdc_available()/tud_cdc_read() + 每次循环显式 tud_task() 泵 USB +
+    // watchdog_update() 喂狗, 直到读完 128 字节。
+    uint32_t totalStart = to_ms_since_boot(get_absolute_time());
+    while (count < (int)sizeof(controller_config)) {
+        tud_task();
+        watchdog_update();
+        if (tud_cdc_available()) {
+            int n = tud_cdc_read(&config_buf[count], (uint32_t)(sizeof(controller_config) - count));
+            if (n > 0) count += n;
+        } else if (to_ms_since_boot(get_absolute_time()) - totalStart > 1000) {
+            // 1s 总宽限: 面板在同一事务里已把 129 字节发出, 正常续流远快于此。
+            printf("read timeout at byte %d of %d. config read aborted.\n", count, (int)sizeof(controller_config));
+            return;
+        }
     }
     if (checkConfigBuf((controller_config*)config_buf)) {
         printf("read %d byte. check ok. config changed.\n", count);

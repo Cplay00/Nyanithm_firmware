@@ -15,6 +15,7 @@
 #include <i2c_port.h>
 #include <nyanithm_shared.h>
 #include <pca954x.h>
+#include <pico/stdio.h>
 #include <pico/stdlib.h>
 #include <stdio.h>
 #include <tusb.h>
@@ -178,6 +179,10 @@ void handleCommand() {
             putchar(tofCount);
             putchar(flags);
             putchar(ControllerConfig.hwVer);
+            // round63: 探测帧是纯二进制、无换行结尾。stdio_cdc 按驱动逐次
+            // flush,但为稳妥,显式刷出,确保单发 0xBC(面板保存前存活性探测用
+            // 0xB8 不依赖此,但任何独立发送 0xBC 的宿主都能立即收到完整帧)。
+            stdio_flush();
         } else if (cmd == CMD_CFG_KEEPALIVE) {
             // round57: 配置模式心跳。面板每 30s 发送一次,仅重置 60s 自动退出
             // 计时器(lastCmdMs 已在 getchar() 后更新),不回显任何字节,避免

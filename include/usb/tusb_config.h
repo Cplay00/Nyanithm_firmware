@@ -103,7 +103,11 @@
 #define CFG_TUD_CDC_NOTIFY        1 // Enable use of notification endpoint
 
 // CDC FIFO size of TX and RX
-#define CFG_TUD_CDC_RX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
+// round63e: RX 从 64 提到 256。CFG_SET 载入流 = 0xB7 + 128 = 129 字节, 64B
+// ring 只能装一个 USB 包, 第二个包被 NAK 直到应用排空并重挂 OUT(脆弱的
+// 时序竞态, 真机表现为 read timeout at byte 65)。256B 让整段载入流连续入
+// ring, TinyUSB 在每包后自动重挂 OUT, 无需应用与主机 NAK 重试赛跑。
+#define CFG_TUD_CDC_RX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 256)
 #define CFG_TUD_CDC_TX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 256)
 
 // CDC Endpoint transfer buffer size, more is faster
