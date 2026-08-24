@@ -19,6 +19,12 @@
 #include <stdio.h>
 #include <string.h>
 
+// round53: build variant, injected via CMake (hw_v1 / cplay). Used by the
+// control panel to match firmware files against the connected device.
+#ifndef NYANITHM_VARIANT
+#define NYANITHM_VARIANT "unknown"
+#endif
+
 // called by usb_device.cpp to run in core #1, while main codes run in core #0
 void hid_task_chuni_input() {
     if (!hid_working) {
@@ -137,6 +143,7 @@ struct NyanithmTelemetry {
 
 static NyanithmInput prevInputState;
 static uint8_t prevAirState = 0;
+static uint32_t latencyFrameMs = 0;  // round55: arrival timestamp of the frame currently held back (cfg3 latency)
 
 // round47b-patch: maindev_loop() removed (dead code, replaced by cdc_respond on Core1).
 // It read touchData32 without seqlock and was never called after the round46
@@ -190,13 +197,19 @@ void cdc_respond() {
         // Length-prefixed ASCII info string so the host can display firmware
         // version, API level, hardware version, compile date/time and Pico SDK
         // version in one shot. Format: [1B len][len ASCII bytes].
-        char info[96];
+        // round53: appended VAR + NYANFW1 signature. The signature is resolved
+        // at compile time (string-literal concatenation), so the exact bytes
+        // "NYANFW1;<version>;<variant>" are baked into the UF2 image inside
+        // this format string AND returned live -- the control panel scans UF2
+        // files for it to validate firmware version/variant before flashing.
+        char info[160];
         int n = snprintf(info, sizeof(info),
-            "FW:%s API:0x%02X HW:v%d Built:%s %s SDK:%d.%d.%d",
+            "FW:%s API:0x%02X HW:v%d Built:%s %s SDK:%d.%d.%d VAR:%s NYANFW1;" NYANITHM_FW_VERSION ";" NYANITHM_VARIANT,
             NYANITHM_FW_VERSION, NYANITHM_API_LEVEL,
             (int)ControllerConfig.hwVer,
             __DATE__, __TIME__,
-            PICO_SDK_VERSION_MAJOR, PICO_SDK_VERSION_MINOR, PICO_SDK_VERSION_REVISION);
+            PICO_SDK_VERSION_MAJOR, PICO_SDK_VERSION_MINOR, PICO_SDK_VERSION_REVISION,
+            NYANITHM_VARIANT);
         if (n < 0) n = 0;
         if (n > 255) n = 255;
         uint8_t len = (uint8_t)n;
@@ -223,6 +236,19 @@ void cdc_respond() {
                 if (airKeys[i]) air |= 1 << i;
             }
             if (g == touchStateGen) {
+                // round55: additive input latency (cfg3, 0-15ms). Hold each new
+                // frame until nowMs >= frameFirstSeenMs + latencyMs, so state
+                // younger than the configured delay is never served. Poll rate
+                // is unaffected (busy callers spin at their own cadence).
+                uint32_t nowMs = to_ms_since_boot(get_absolute_time());
+                uint32_t latencyMs = ControllerConfig.cfg3 > INPUT_LATENCY_MAX_MS
+                                         ? INPUT_LATENCY_MAX_MS
+                                         : ControllerConfig.cfg3;
+                bool changed = memcmp(inputState.slider, tmpSlider, 32) != 0 || inputState.air != air;
+                if (changed) {
+                    if (nowMs - latencyFrameMs < latencyMs) break;  // too fresh - keep serving previous frame
+                    latencyFrameMs = nowMs;
+                }
                 memcpy(inputState.slider, tmpSlider, 32);
                 inputState.air = air;
                 break;

@@ -10,13 +10,18 @@
 #include <production_mode.h>
 #include <boot_mode.h>
 #include <controller_config.h>
+#include <gpio_def.h>
 #include <hw_devices.h>
+#include <i2c_port.h>
 #include <nyanithm_shared.h>
+#include <pca954x.h>
 #include <pico/stdlib.h>
 #include <stdio.h>
 #include <tusb.h>
 
 bool hid_working = true;
+
+extern bool useMuxScan;  // from hw_devices.cpp
 
 void getStatus() {
     // round46e: config-mode I/O restored to stdio (round45- era mechanism).
@@ -123,6 +128,61 @@ void handleCommand() {
             } else {
                 printf("flashing denied\n");
             }
+        } else if (cmd == CMD_DETECT) {
+            // round52: read-only hardware identity probe so the host control
+            // panel can gate on real hardware instead of config-file values
+            // (hwVer / CFG0_BIT_MBR3116 can be written wrongly; this cannot).
+            // 6-byte binary response:
+            //   [0]=0xBC sync  [1]=mprMask  [2]=mbrMask  [3]=tofCount  [4]=flags  [5]=config hwVer
+            // mprMask: bit0..2 = MPR121 present at 0x5A..0x5C (i2c0)
+            // mbrMask: bit0=0x37, bit1..3=0x40..0x42, bit4/5=0x43/0x44 (i2c0)
+            // flags:   bit0 = PCA9545 mux present (i2c1 0x70), bit1 = useMuxScan
+            // Absent addresses cost one 10ms findI2CDevice timeout each, so the
+            // full probe may take ~150ms on sparsely populated hardware.
+            uint8_t mprMask = 0;
+            for (int i = 0; i < 3; i++) {
+                if (findI2CDevice(0, 0x5A + i)) mprMask |= (1 << i);
+            }
+            static const uint8_t mbrAddrs[6] = { 0x37, 0x40, 0x41, 0x42, 0x43, 0x44 };
+            uint8_t mbrMask = 0;
+            for (int i = 0; i < 6; i++) {
+                if (findI2CDevice(0, mbrAddrs[i])) mbrMask |= (1 << i);
+            }
+            bool muxPresent = findI2CDevice(1, 0x70);
+            uint8_t flags = (muxPresent ? 0b00000001 : 0) | (useMuxScan ? 0b00000010 : 0);
+            uint8_t tofCount = 0;
+            if (muxPresent) {
+                PCA954X mux(1, 0x70, GPIO_PCA9545_RESET);
+                if (!useMuxScan) {
+                    // Independent-address mode: enable all 5 mux channels so a
+                    // 5th ToF is reachable even when the config says 27", then
+                    // restore the mask initToF established (see checkToF).
+                    mux.setReg(0x1F);
+                    for (int i = 0; i < 5; i++) {
+                        if (findI2CDevice(1, 0x30 + i)) tofCount++;
+                    }
+                    mux.setReg((ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 0x1F : 0x0F);
+                } else {
+                    // Mux-scan fallback: every sensor keeps 0x29 behind its own
+                    // channel. updateAir switches channels per cycle, so leaving
+                    // the mux on the last probed channel is fine (see checkToF).
+                    for (int ch = 0; ch < 5; ch++) {
+                        mux.setChannel(ch);
+                        if (findI2CDevice(1, 0x29)) tofCount++;
+                    }
+                }
+            }
+            putchar(CMD_DETECT);
+            putchar(mprMask);
+            putchar(mbrMask);
+            putchar(tofCount);
+            putchar(flags);
+            putchar(ControllerConfig.hwVer);
+        } else if (cmd == CMD_CFG_KEEPALIVE) {
+            // round57: 配置模式心跳。面板每 30s 发送一次,仅重置 60s 自动退出
+            // 计时器(lastCmdMs 已在 getchar() 后更新),不回显任何字节,避免
+            // 污染面板的文本/字节响应流。旧固件收到 0xC3 会回 "unknown
+            // command",面板侧需容忍(见面板心跳注释)。
         } else if (cmd == 0xCE) {
             // round46g: dump config-mode command log: [1B len][len bytes oldest->newest]
             uint16_t n = (cfgCmdLogTotal < 256) ? cfgCmdLogTotal : 256;

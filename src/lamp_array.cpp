@@ -77,9 +77,24 @@ void lamp_array_init(void) {
 }
 
 void lamp_array_apply(void) {
+    static bool clearedOnDisable = false;  // round55: one-shot clear latch
     if (game_connected) {
         return;
     }
+    // round55: Windows Dynamic Lighting can be switched off from the control
+    // panel (cfg2 bit0, DISABLE semantics). Bit CLEAR = enabled, so legacy
+    // configs (cfg2==0) and the factory default keep the pre-round55 behavior
+    // (LampArray active). Clear the strip once on disable so the last Windows
+    // frame does not stay lit forever.
+    if (ControllerConfig.cfg2 & CFG2_BIT_DISABLE_LAMP_ARRAY) {
+        if (!clearedOnDisable) {
+            RGB_LED.fill(0, 0, 0);
+            RGB_LED.flush();
+            clearedOnDisable = true;
+        }
+        return;
+    }
+    clearedOnDisable = false;  // re-enabled (or never disabled)
     if (!s_dirty) {
         return;
     }

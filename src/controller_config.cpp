@@ -65,6 +65,10 @@ static void sanitizeConfig(controller_config* config) {
         config->airMin = defaultConfig.airMin;
         config->airMax = defaultConfig.airMax;
     }
+    // round55: new cfg2/cfg3 fields. cfg2: only bit0 defined, mask the rest.
+    // cfg3: clamp latency to INPUT_LATENCY_MAX_MS (15ms).
+    config->cfg2 &= CFG2_BIT_DISABLE_LAMP_ARRAY;
+    if (config->cfg3 > INPUT_LATENCY_MAX_MS) config->cfg3 = INPUT_LATENCY_MAX_MS;
 }
 
 static void recomputeXorSum(controller_config* config) {

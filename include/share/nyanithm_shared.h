@@ -17,7 +17,7 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.5.1"
+#define NYANITHM_FW_VERSION "1.5.3"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -25,6 +25,10 @@ const uint8_t CFG0_BIT_MBR3116 = 0b00000010;
 const uint8_t CFG0_BIT_DARKER_GAP = 0b00000100;
 const uint8_t CFG1_BIT_ENABLE_SLIDER_INPUT_AS_KEYBOARD = 0b00000001;
 const uint8_t CFG1_BIT_ENABLE_AIR_INPUT_AS_KEYBOARD = 0b00000010;
+// round55: cfg2/cfg3 previously reserved (always 0).
+const uint8_t CFG2_BIT_DISABLE_LAMP_ARRAY = 0b00000001;  // set = OFF. Clear = Windows Dynamic Lighting (LampArray USB HID) enabled - legacy configs (cfg2==0) keep it on.
+// cfg3: additive input latency, 0-15 ms (MBR3116-style tuning knob, 0 = off).
+const uint8_t INPUT_LATENCY_MAX_MS = 15;
 
 struct controller_config {
     uint8_t magic;            // 此值必须为 CONTROLLER_CONFIG_MAGIC
@@ -32,8 +36,8 @@ struct controller_config {
     uint8_t hwVer;            // 硬件版本
     uint8_t cfg0;             // b0: 强制使用16灯模式; b1: 使用cy8cmbr3116; b2: 降低非判定区域灯光亮度
     uint8_t cfg1;             // b0: 启用触摸板键盘输入; b1: 启用Air键盘输入
-    uint8_t cfg2;             //
-    uint8_t cfg3;             //
+    uint8_t cfg2;             // b0: 关闭 LampArray / Windows 动态照明 (round55, 置1=禁用)
+    uint8_t cfg3;             // 附加输入延迟 ms, 0-15, 0=关闭 (round55)
     uint8_t th_touch;         //
     uint8_t th_release;       //
     uint8_t debounce;         // 低4位dt, 高4位dr, 有效值3位
@@ -71,7 +75,8 @@ typedef enum {
     CMD_DEBUG_ALL = 0xBF,
     CMD_DEBUG_CHAIN = 0xC0,
     CMD_DEBUG_TELEMETRY = 0xC1,
-    CMD_DEBUG_DIFF = 0xC2
+    CMD_DEBUG_DIFF = 0xC2,
+    CMD_CFG_KEEPALIVE = 0xC3,  // round57: 配置模式心跳,静默重置 60s 自动退出计时器
 } NyanithmCmd;
 
 #endif
