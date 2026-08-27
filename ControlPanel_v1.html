@@ -3461,6 +3461,9 @@ input[type="range"]:disabled {
                                 <div class="slider-track">
                                     <input type="range" id="rgThTouch" min="1" max="63" step="1" value="6" disabled>
                                 </div>
+                                <!-- round72d: 警告 span 原挂在 config-section 尾部,视觉上落在"附加延迟"行下方,
+                                     现移入各自 slider-row,提示紧贴对应滑条 -->
+                                <span class="field-hint" id="thTouchWarn" style="display:none"></span>
                             </div>
                             <div class="slider-row">
                                 <div class="slider-top">
@@ -3473,6 +3476,7 @@ input[type="range"]:disabled {
                                 <div class="slider-track">
                                     <input type="range" id="rgThRelease" min="1" max="63" step="1" value="4" disabled>
                                 </div>
+                                <span class="field-hint" id="thReleaseWarn" style="display:none"></span>
                             </div>
                             <div class="slider-row">
                                 <div class="slider-top">
@@ -3500,8 +3504,6 @@ input[type="range"]:disabled {
                                 <span class="field-hint">输入报告附加延迟（cfg3，MBR3116 式调校）;0 = 关闭。需固件 round55+，旧固件忽略该字段。</span>
                             </div>
                         </div>
-                        <span class="field-hint" id="thTouchWarn" style="display:none"></span>
-                        <span class="field-hint" id="thReleaseWarn" style="display:none"></span>
                     </div>
 
                     <div class="config-section collapsible collapsed">
@@ -3520,6 +3522,7 @@ input[type="range"]:disabled {
                                         <div class="slider-track">
                                             <input type="range" id="rgDt" min="0" max="7" step="1" value="1" disabled>
                                         </div>
+                                        <span class="field-hint" id="dtWarn" style="display:none"></span>
                                     </div>
                                     <div class="slider-row">
                                         <div class="slider-top">
@@ -3532,6 +3535,7 @@ input[type="range"]:disabled {
                                         <div class="slider-track">
                                             <input type="range" id="rgDr" min="0" max="7" step="1" value="1" disabled>
                                         </div>
+                                        <span class="field-hint" id="drWarn" style="display:none"></span>
                                     </div>
                                     <div class="slider-row">
                                         <div class="slider-top">
@@ -3546,8 +3550,6 @@ input[type="range"]:disabled {
                                         </div>
                                     </div>
                                 </div>
-                                <span class="field-hint" id="dtWarn" style="display:none"></span>
-                                <span class="field-hint" id="drWarn" style="display:none"></span>
                                 <div class="field-grid cols-5">
                                     <div class="field-item"><label class="field-label">ToF0 偏移</label><input type="number" class="num-input" id="off0" disabled></div>
                                     <div class="field-item"><label class="field-label">ToF1 偏移</label><input type="number" class="num-input" id="off1" disabled></div>
@@ -4371,8 +4373,12 @@ function validateUf2ForDevice(p, devInfo) {
         for (let i = 0; i < numDigits; i++) {
             const digit = parseInt(str[i], 10);
             const d = digits[i];
-            // 上一笔进位若仍挂在瞬态副本位:先无跳变收尾,再从静止位判断方向
-            if (d.snapTimer || d.onEnd) odoFinalize(d);
+            // 上一笔进位若仍挂在瞬态副本位:先无跳变收尾,再从静止位判断方向。
+            // round72c: 落点与进行中进位相同(d.cur===digit)时不得收尾——逐键气泡
+            // 滑条同时挂通用 input 监听与气泡自身 oninput,一次拖动连写两笔同值,
+            // 第二笔若立即 finalize 会把刚发起的 wrap 当帧无过渡归位(9↔0 滚动
+            // 消失的根因);同值续写让动画自然走完,onEnd/兜底负责归位。
+            if ((d.snapTimer || d.onEnd) && d.cur !== digit) odoFinalize(d);
             odoMove(d, digit);
             // 前导零(非末位且未遇到非零数字)做浅色处理
             if (!foundNonZero && digit === 0 && i < numDigits - 1) digits[i].el.classList.add('leading-zero');
@@ -4455,8 +4461,27 @@ function validateUf2ForDevice(p, devInfo) {
                 if (activeSliderAnims.get(slider.id) === anim) activeSliderAnims.delete(slider.id);
                 setSlider(slider, targetValue);
                 requestAnimationFrame(() => { track.style.transition = ''; });
+                // round72d: 程序化动画不触发 input 事件,unpack 后挂在动画尾部的
+                // 格子阈值展示/警告/变色只会读到动画起点的旧值,且动画结束后再无
+                // 刷新时机(实机首次进配置 6/4 vs 13/12 的根因)。落地时按滑条
+                // 身份广播一次,与用户拖动的 input 监听器同源。
+                notifySliderSettled(slider.id);
             }
         })(performance.now());
+    }
+
+    // round72d: 滑条程序化落地后的联动刷新。阈值类滑条落到设备值后,INPUT TEST
+    // 格子的生效阈值、警告文案与滑条/数显变色都以 slider.value 为数据源,必须
+    // 在此显式触发(用户拖动路径由 initSliderAnimations 的 input 监听器覆盖)。
+    function notifySliderSettled(sliderId) {
+        if (sliderId === 'rgThTouch' || sliderId === 'rgThRelease') {
+            checkThresholdHints();
+            updateTcThresholdDisplay();
+        } else if (sliderId === 'rgDt' || sliderId === 'rgDr') {
+            checkThresholdHints();
+        } else if (sliderId === 'rgBright') {
+            updateLightLimitHint();
+        }
     }
 
     const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, pkThTouch: 2, pkThRelease: 2 };
@@ -4710,9 +4735,11 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     let mockPort = null;
+    // round72d: 桥接实例到 window 供控制台调试/自动化注入设备侧配置
+    // (与 window.dumpCfgCmdLog 同惯例;仅 MOCK 分支存在)。
     const mockSerial = {
-        getPorts: async () => { mockPort = new MockPort(); return [mockPort]; },
-        requestPort: async () => { mockPort = new MockPort(); return mockPort; },
+        getPorts: async () => { mockPort = new MockPort(); window.__mockPort = mockPort; return [mockPort]; },
+        requestPort: async () => { mockPort = new MockPort(); window.__mockPort = mockPort; return mockPort; },
         addEventListener: () => {},
         removeEventListener: () => {},
     };
