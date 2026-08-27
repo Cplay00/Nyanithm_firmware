@@ -151,35 +151,65 @@ void initToF() {
     }
 }
 
+// ===== round64: lane (game view, 0-31) <-> electrode (chip index m, bit e) =====
+// Forward layout tables mirror the touchData32[] assignment in updateTouch_v1
+// (v1 layout: chips A/B/C for MBR3116 or mpr0/1/2, lanes 0-7 -> chip1, 8-15 ->
+// chip0/chip1 interleaved, 16-23 -> chip0/chip2, 24-31 -> chip0/chip2) and
+// updateTouch_v2 (v2 layout: chips D/E, lanes 0-15 -> chip1, 16-31 -> chip0).
+// laneTable[m][e] holds the lane for each physical electrode in the active
+// layout, -1 when the electrode is not part of the 32-lane slider (e.g. v2
+// electrodes with no lane), so threshold lookups are O(1) in the hot loop.
+static const uint8_t V1_LANE_M[32] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1,
+    0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2
+};
+static const uint8_t V1_LANE_E[32] = {
+    11, 0, 10, 1, 9, 2, 8, 3, 11, 4, 10, 5, 9, 6, 8, 7,
+    7, 0, 6, 1, 5, 2, 4, 3, 3, 4, 2, 5, 1, 6, 0, 7
+};
+static const uint8_t V2_LANE_M[32] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+static const uint8_t V2_LANE_E[32] = {
+    4, 0, 5, 1, 6, 2, 7, 3, 8, 15, 9, 14, 10, 13, 11, 12,
+    12, 11, 13, 10, 14, 9, 15, 8, 3, 7, 2, 6, 1, 5, 0, 4
+};
+static int16_t laneTable[3][16];  // -1 = electrode not mapped to a lane
+
+static void buildLaneTable() {
+    for (int m = 0; m < 3; m++)
+        for (int e = 0; e < 16; e++) laneTable[m][e] = -1;
+    bool v2 = (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4);
+    const uint8_t* lm = v2 ? V2_LANE_M : V1_LANE_M;
+    const uint8_t* le = v2 ? V2_LANE_E : V1_LANE_E;
+    for (uint8_t lane = 0; lane < 32; lane++) {
+        uint8_t m = lm[lane], e = le[lane];
+        if (m < 3 && e < 16) laneTable[m][e] = lane;
+    }
+}
+
 static uint8_t electrodeBaseTouchTh(uint8_t m, uint8_t e) {
-    // round46: unified-threshold build variant.
-    //   1 = every electrode uses the SAME global th_touch/th_release
-    //       (majority-of-keys calibration; values set via ConfigApp after
-    //       running calibrate_thresholds.ps1). High-idle-noise electrodes
-    //       are handled by the software verification chain instead of
-    //       per-electrode hardware thresholds.
-    //   0 = restore the round45b per-electrode override table below.
-#define UNIFIED_THRESHOLD_V1 1
-#if UNIFIED_THRESHOLD_V1
-    (void)m;
-    (void)e;
-    return 0;  // unified: fall back to global ControllerConfig.th_touch
-#else
-    // round45b: per-electrode elevated touch threshold for high-idle-noise electrodes.
-    // Idle diff analysis (detail_log, 423 idle samples) showed these electrodes spike
-    // above global th_touch=6 (M2E0 max=13). Elevate base threshold above observed idle
-    // max to suppress false touches. Real touches (diff 20-50) unaffected. Returns 0
-    // to mean "use global th_touch".
-    if (m == 2 && e == 0) return 15;  // M2E0 cell17 idle max=13, +2 margin (round45g: was 16, lowered to reduce miss)
-    if (m == 2 && e == 3) return 10;  // M2E3 cell23 idle max=8, +2 (was 12)
-    if (m == 2 && e == 1) return 9;   // M2E1 cell19 idle max=7, +2 (was 11)
-    if (m == 0 && e == 5) return 9;   // M0E5 cell20 idle max=7, +2 (was 11)
-    if (m == 0 && e == 6) return 9;   // M0E6 cell18 idle max=7, +2 (was 11)
-    if (m == 1 && e == 7) return 8;   // M1E7 cell15 idle max=6, +2 (was 10)
-    if (m == 2 && e == 2) return 9;   // M2E2 cell21 idle max=6, +3 (round45h: was 8, raised to curb idle trigger)
-    if (m == 2 && e == 4) return 10;  // round45r: M2E4 cell25, was 7 but still 2x/10min idle trigger, raise to 10
-    return 0;
-#endif
+    // round64: config-driven per-lane touch threshold. laneTable maps the
+    // physical electrode back to its slider lane (game view); 0 = inherit the
+    // global th_touch. This replaces the round46 unified-threshold skeleton:
+    // the old per-electrode override table (round45b) is superseded by the
+    // v1.6 per-key config fields.
+    int16_t lane = laneTable[m][e];
+    if (lane >= 0 && ControllerConfig.thTouchKey[lane] != 0) {
+        return ControllerConfig.thTouchKey[lane];
+    }
+    return 0;  // inherit global ControllerConfig.th_touch
+}
+
+static uint8_t electrodeBaseReleaseTh(uint8_t m, uint8_t e) {
+    // round64: release twin of electrodeBaseTouchTh. MPR121 only (MBR has no
+    // per-sensor release register). 0 = inherit global th_release.
+    int16_t lane = laneTable[m][e];
+    if (lane >= 0 && ControllerConfig.thReleaseKey[lane] != 0) {
+        return ControllerConfig.thReleaseKey[lane];
+    }
+    return 0;  // inherit global ControllerConfig.th_release
 }
 
 void initMPR121() {
@@ -203,14 +233,17 @@ void initMPR121() {
     // th_touch/th_release that ConfigApp applied.
     uint8_t th_t = ControllerConfig.th_touch;
     uint8_t th_r = ControllerConfig.th_release;
-    // round45b: per-electrode elevated thresholds for high-idle-noise electrodes
+    // round64: per-electrode thresholds driven by config (lane table lookup,
+    // 0 = inherit global). Touch + release both written per electrode.
     for (uint8_t m = 0; m < 3; m++) {
         for (uint8_t e = 0; e < 12; e++) {
             uint8_t base = electrodeBaseTouchTh(m, e);
+            uint8_t baseR = electrodeBaseReleaseTh(m, e);
             uint8_t eth = (base > th_t) ? base : th_t;
-            if (m == 0) mpr0.setThresholdsForElectrode(e, eth, th_r);
-            else if (m == 1) mpr1.setThresholdsForElectrode(e, eth, th_r);
-            else mpr2.setThresholdsForElectrode(e, eth, th_r);
+            uint8_t erh = (baseR > th_r) ? baseR : th_r;
+            if (m == 0) mpr0.setThresholdsForElectrode(e, eth, erh);
+            else if (m == 1) mpr1.setThresholdsForElectrode(e, eth, erh);
+            else mpr2.setThresholdsForElectrode(e, eth, erh);
         }
     }
 
@@ -307,6 +340,9 @@ void initHwDevices() {
     // the chip auto-resets after 2s instead of freezing the game input forever.
     // updateInputState() calls watchdog_update() every cycle.
     watchdog_enable(2000, true);
+    // round64: build the lane<->electrode inverse table BEFORE any threshold
+    // consumer runs (initMPR121 / software verify layers).
+    buildLaneTable();
     g_lampCount = (ControllerConfig.cfg0 & CFG0_BIT_FORCE16LEDS) ? 16 : 31;
     heightRange = (ControllerConfig.heightRangeCfg == 0) ? 10 : ControllerConfig.heightRangeCfg;
     for (int i = 0; i < 5; i++) { kalman[i].x = 0; kalman[i].v = 0; kalman[i].p = 200.0f; kalman[i].lastMeas = -1.0f; }
@@ -344,6 +380,83 @@ volatile uint32_t touchStateGen = 0;
 uint8_t  g_verifyFail[36] = {0};          // per-electrode I2C verification rejections
 uint32_t g_loopMinUs = 0xFFFFFFFF, g_loopMaxUs = 0, g_loopSumUs = 0, g_loopCount = 0;
 
+// round66: real-time pressure snapshot (0-255 clamped diff per slider lane).
+// Core0 fills this every 5ms while rawReportMode is on; Core1 substitutes it
+// into the GET_INPUT 33B frame. Written inside the touchStateGen seqlock
+// section so Core1 gets one coherent state. Zero I2C cost while off.
+uint8_t pressureSnap[32] = {0};
+volatile bool rawReportMode = false;  // set by Core1 (0xC5), auto-cleared on CDC disconnect
+volatile bool gameRawEnabled = false;  // round68: cfg2 bit1 baseline (experimental)
+static uint32_t pressureSnapLastMs = 0;
+static const uint32_t PRESSURE_SNAP_INTERVAL_MS = 5;
+
+// round66: MPR121 bulk diff read (mirrors CMD_DEBUG_DIFF's 0xC2 path: 3 chips,
+// filtered+baseline in 6 bulk transactions ~1ms). Writes pressureSnap clamped
+// 0-255. Returns false on I2C error (snapshot kept stale).
+static bool mprReadPressureSnap() {
+    MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
+    bool allOk = true;
+    for (uint8_t m = 0; m < 3; m++) {
+        uint8_t filt[24];
+        uint8_t base[12];
+        bool ok_filt = mprs[m]->readRegisters(MPR121_FILTDATA_0L, filt, 24);
+        bool ok_base = mprs[m]->readRegisters(MPR121_BASELINE_0, base, 12);
+        if (!ok_filt || !ok_base) {
+            allOk = false;
+            continue;
+        }
+        for (uint8_t e = 0; e < 12; e++) {
+            uint16_t f = filt[e * 2] | ((uint16_t)filt[e * 2 + 1] << 8);
+            uint16_t b = (uint16_t)base[e] << 2;
+            int16_t diff = (int16_t)b - (int16_t)f;
+            uint8_t v = (diff < 0) ? 0 : ((diff > 255) ? 255 : (uint8_t)diff);
+            int16_t lane = laneTable[m][e];
+            if (lane >= 0) pressureSnap[lane] = v;
+        }
+    }
+    return allOk;
+}
+
+// round66: MBR3116 bulk diff read (one 32B transaction per chip, 16x16-bit
+// diff). v1 layout 3 chips / v2 layout 2 chips.
+static bool mbrReadPressureSnap() {
+    bool allOk = true;
+    uint8_t numChips = (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4) ? 2 : 3;
+    for (uint8_t m = 0; m < numChips; m++) {
+        uint16_t diffs[16];
+        CY8CMBR3116* chip = (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4)
+                                ? (m == 0 ? &MBR3116D : &MBR3116E)
+                                : (m == 0 ? &MBR3116A : (m == 1 ? &MBR3116B : &MBR3116C));
+        if (chip->get_DIFFERENCE_COUNT_SENSOR(diffs) != 0) {
+            allOk = false;
+            continue;
+        }
+        for (uint8_t e = 0; e < 16; e++) {
+            int16_t lane = laneTable[m][e];
+            if (lane >= 0) {
+                uint16_t d = diffs[e];
+                pressureSnap[lane] = (d > 255) ? 255 : (uint8_t)d;
+            }
+        }
+    }
+    return allOk;
+}
+
+// round66: called from updateInputState() inside the seqlock writer section.
+// Throttled to every PRESSURE_SNAP_INTERVAL_MS; no-op while rawReportMode off.
+// round68: also on while cfg2 bit1 game-raw baseline is set.
+static void updatePressureSnap() {
+    if (!rawReportMode && !gameRawEnabled) return;
+    uint32_t nowMs = to_ms_since_boot(get_absolute_time());
+    if (nowMs - pressureSnapLastMs < PRESSURE_SNAP_INTERVAL_MS) return;
+    pressureSnapLastMs = nowMs;
+    if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
+        mbrReadPressureSnap();
+    } else {
+        mprReadPressureSnap();
+    }
+}
+
 #define GET_BIT(UNUM, BIT) (UNUM & (1 << BIT))
 
 bool touchData4k[4];
@@ -363,10 +476,27 @@ void updateTouch_v2() {
     static uint8_t verifiedCount[2][16] = {0};
     static uint32_t lastTouchedMsV2[2][16] = {0};
     uint32_t nowVer = to_ms_since_boot(get_absolute_time());
-    static const uint16_t MBR3116_VERIFY_TH = 80;
-    static const uint16_t MBR3116_STRONG_SKIP_TH = 300;
-    static const uint16_t MBR3116_STRONG_TH = 200;
-    static const uint16_t MBR3116_MEDIUM_TH = 120;
+    // round64: per-lane MBR thresholds. base_k defaults to 80 (=round50
+    // MBR3116_VERIFY_TH); amplitude tiers are relative offsets off it, so
+    // per-key values only tighten (hardware gate stays at 128).
+        static const uint16_t MBR_VERIFY_BASE = 80;
+        static const uint16_t MBR_TIER_OFFSET_MEDIUM = 40;
+        static const uint16_t MBR_TIER_OFFSET_STRONG = 120;
+        static const uint16_t MBR_TIER_OFFSET_SKIP = 220;
+        uint16_t verifyBaseK[2][16];
+        for (uint8_t m = 0; m < 2; m++) {
+            for (uint8_t e = 0; e < 16; e++) {
+                int16_t lane = laneTable[m][e];
+                uint16_t base = (lane >= 0 && ControllerConfig.thTouchKey[lane] != 0)
+                                    ? ControllerConfig.thTouchKey[lane]
+                                    : MBR_VERIFY_BASE;
+                // round64: MBR can only tighten. The chip's hardware gate is
+                // 128; a config value <=128 can never be stricter than that, so
+                // keep the round50 verify baseline (80) for those to avoid
+                // silently relaxing the software gate.
+                verifyBaseK[m][e] = (base > MBR_VERIFY_BASE) ? base : MBR_VERIFY_BASE;
+            }
+        }
     {   // round50: software verification
         uint16_t raw[2] = {t0, t1};
         CY8CMBR3116* chips[2] = {&MBR3116D, &MBR3116E};
@@ -390,22 +520,23 @@ void updateTouch_v2() {
                             confirmReq[m][e] = CONFIRM_CYCLES_V2;
                         } else {
                             uint16_t diff = diffCounts[m][e];
+                            uint16_t baseK = verifyBaseK[m][e];
                             bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                                      (e < 15 && (prevStretched[m] & (1 << (e + 1))));
-                            if (diff < MBR3116_VERIFY_TH) {
+                            if (diff < baseK) {
                                 raw[m] &= ~(1 << e);
                                 verifiedCount[m][e] = 0;
                                 confirmReq[m][e] = CONFIRM_CYCLES_V2;
                                 if (g_verifyFail[m * 16 + e] < 255) g_verifyFail[m * 16 + e]++;
                             } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
-                                       (diff >= MBR3116_STRONG_SKIP_TH || neighborWasActive)) {
+                                       (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_SKIP) || neighborWasActive)) {
                                 verifiedCount[m][e] = 2;
                                 confirmReq[m][e] = 1;
                             } else {
                                 verifiedCount[m][e]++;
-                                if (diff >= MBR3116_STRONG_TH)      confirmReq[m][e] = 1;
-                                else if (diff >= MBR3116_MEDIUM_TH) confirmReq[m][e] = 2;
-                                else                                 confirmReq[m][e] = 3;
+                                if (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_STRONG))      confirmReq[m][e] = 1;
+                                else if (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_MEDIUM)) confirmReq[m][e] = 2;
+                                else                                                         confirmReq[m][e] = 3;
                             }
                         }
                     }
@@ -576,12 +707,20 @@ void updateTouch_v1() {
    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
         uint16_t raw[3] = {t0, t1, t2};
         MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
-        uint8_t sw_th = (ControllerConfig.th_touch < 4) ? 4 : ControllerConfig.th_touch;
-        // Verification threshold is sw_th - 2 to tolerate 2 LSB timing mismatch
-        // between touched() read and filteredData/baselineData read.
-        // Without this margin, light touches (diff=4-5) are falsely rejected
-        // because filtered data fluctuates +/-2-3 LSB between I2C reads.
-        uint8_t verify_th = (sw_th > 1) ? (sw_th - 1) : 1;  // round41: -2->-1 LSB tolerance
+        // round64: per-lane software thresholds. sw_th_k = per-key value if
+        // configured (non-zero), else the global th_touch; floor of 4 kept so
+        // verify thresholds never collapse to 0.
+        uint8_t sw_th_k[3][12];
+        uint8_t verify_th_k[3][12];
+        for (uint8_t m = 0; m < 3; m++) {
+            for (uint8_t e = 0; e < 12; e++) {
+                uint8_t base = electrodeBaseTouchTh(m, e);
+                uint8_t sw = (base != 0) ? base : ControllerConfig.th_touch;
+                if (sw < 4) sw = 4;
+                sw_th_k[m][e] = sw;
+                verify_th_k[m][e] = (sw > 1) ? (sw - 1) : 1;  // round41: -1 LSB tolerance
+            }
+        }
       for (uint8_t m = 0; m < 3; m++) {
             for (uint8_t e = 0; e < 12; e++) {
                 if (raw[m] & (1 << e)) {
@@ -603,7 +742,7 @@ void updateTouch_v1() {
                                 filt = filt2;
                                 uint16_t base = mprs[m]->baselineData(e);
                                 int16_t diff = (int16_t)base - (int16_t)filt;
-                                if (diff < verify_th) {
+                            if (diff < static_cast<int16_t>(verify_th_k[m][e])) {
                                     raw[m] &= ~(1 << e);
                                     verifiedCount[m][e] = 0;
                                     confirmReq[m][e] = CONFIRM_CYCLES;
@@ -613,15 +752,15 @@ void updateTouch_v1() {
                                     // (diff>=sw_th+6 skip). First read was 0 (I2C unstable),
                                     // so require full 2-cycle verification.
                                     verifiedCount[m][e]++;
-                                    if (diff >= (int16_t)(sw_th + 4))      confirmReq[m][e] = 1;
-                                    else if (diff >= (int16_t)(sw_th + 2)) confirmReq[m][e] = 2;
-                                    else                                   confirmReq[m][e] = 3;
+                                    if (diff >= (int16_t)(sw_th_k[m][e] + 4))      confirmReq[m][e] = 1;
+                                    else if (diff >= (int16_t)(sw_th_k[m][e] + 2)) confirmReq[m][e] = 2;
+                                    else                                        confirmReq[m][e] = 3;
                                 }
                             }
                        } else {
                             uint16_t base = mprs[m]->baselineData(e);
                             int16_t diff = (int16_t)base - (int16_t)filt;
-                               if (diff < verify_th) {
+                               if (diff < static_cast<int16_t>(verify_th_k[m][e])) {
                                raw[m] &= ~(1 << e);
                                verifiedCount[m][e] = 0;
                                confirmReq[m][e] = CONFIRM_CYCLES;
@@ -632,14 +771,14 @@ void updateTouch_v1() {
                                 // in previous cycle, skip 2nd verification (slide, not noise)
                                 bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e-1)))) ||
                                                           (e < 11 && (prevStretched[m] & (1 << (e+1))));
-                                 if (diff >= (int16_t)(sw_th + 6) || neighborWasActive) {
+                                 if (diff >= (int16_t)(sw_th_k[m][e] + 6) || neighborWasActive) {
                                     verifiedCount[m][e] = 2;  // skip second I2C verification cycle
                                     confirmReq[m][e] = 1;     // fastest confirmation
                                 } else {
                                     verifiedCount[m][e]++;
-                                    if (diff >= (int16_t)(sw_th + 4))      confirmReq[m][e] = 1;  // strong signal: fastest
-                                    else if (diff >= (int16_t)(sw_th + 2)) confirmReq[m][e] = 2;  // medium
-                                    else                                   confirmReq[m][e] = 3;  // weak/edge: strict, anti-false-touch
+                                    if (diff >= (int16_t)(sw_th_k[m][e] + 4))      confirmReq[m][e] = 1;  // strong signal: fastest
+                                    else if (diff >= (int16_t)(sw_th_k[m][e] + 2)) confirmReq[m][e] = 2;  // medium
+                                    else                                         confirmReq[m][e] = 3;  // weak/edge: strict, anti-false-touch
                                 }
                            }
                         }
@@ -671,11 +810,27 @@ void updateTouch_v1() {
         uint16_t raw[3] = {t0, t1, t2};
         CY8CMBR3116* chips[3] = {&MBR3116A, &MBR3116B, &MBR3116C};
         uint8_t maxElec[3] = {12, 12, 8};  // electrodes used per chip in v1 layout
-        static const uint16_t MBR3116_VERIFY_TH = 80;
-        static const uint16_t MBR3116_STRONG_SKIP_TH = 300;  // skip 2nd verification
-        static const uint16_t MBR3116_STRONG_TH = 200;       // confirmReq = 1 (fast)
-        static const uint16_t MBR3116_MEDIUM_TH = 120;       // confirmReq = 2 (normal)
-        // else: confirmReq = 3 (weak/edge, strict)
+        // round64: per-lane MBR thresholds. base_k defaults to 80 (=round50
+        // MBR3116_VERIFY_TH); amplitude tiers are relative offsets off it, so
+        // per-key values only tighten (hardware gate stays at 128).
+        static const uint16_t MBR_VERIFY_BASE = 80;
+        static const uint16_t MBR_TIER_OFFSET_MEDIUM = 40;
+        static const uint16_t MBR_TIER_OFFSET_STRONG = 120;
+        static const uint16_t MBR_TIER_OFFSET_SKIP = 220;
+        uint16_t verifyBaseK[3][16];
+        for (uint8_t m = 0; m < 3; m++) {
+            for (uint8_t e = 0; e < 16; e++) {
+                int16_t lane = laneTable[m][e];
+                uint16_t base = (lane >= 0 && ControllerConfig.thTouchKey[lane] != 0)
+                                    ? ControllerConfig.thTouchKey[lane]
+                                    : MBR_VERIFY_BASE;
+                // round64: MBR can only tighten. The chip's hardware gate is
+                // 128; a config value <=128 can never be stricter than that, so
+                // keep the round50 verify baseline (80) for those to avoid
+                // silently relaxing the software gate.
+                verifyBaseK[m][e] = (base > MBR_VERIFY_BASE) ? base : MBR_VERIFY_BASE;
+            }
+        }
         uint16_t diffCounts[3][16];
         bool diffRead[3] = {false, false, false};
         bool diffOk[3] = {false, false, false};
@@ -699,25 +854,26 @@ void updateTouch_v1() {
                             confirmReq[m][e] = CONFIRM_CYCLES;
                         } else {
                             uint16_t diff = diffCounts[m][e];
+                            uint16_t baseK = verifyBaseK[m][e];
                             // round45u: slide transition acceleration
                             bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                                      (e + 1 < maxElec[m] && (prevStretched[m] & (1 << (e + 1))));
-                            if (diff < MBR3116_VERIFY_TH) {
+                            if (diff < baseK) {
                                 // False touch - signal insufficient
                                 raw[m] &= ~(1 << e);
                                 verifiedCount[m][e] = 0;
                                 confirmReq[m][e] = CONFIRM_CYCLES;
                                 if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;
                             } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
-                                       (diff >= MBR3116_STRONG_SKIP_TH || neighborWasActive)) {
+                                       (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_SKIP) || neighborWasActive)) {
                                 // Very strong signal or slide - skip 2nd verification
                                 verifiedCount[m][e] = 2;
                                 confirmReq[m][e] = 1;
                             } else {
                                 verifiedCount[m][e]++;
-                                if (diff >= MBR3116_STRONG_TH)      confirmReq[m][e] = 1;
-                                else if (diff >= MBR3116_MEDIUM_TH) confirmReq[m][e] = 2;
-                                else                                 confirmReq[m][e] = 3;
+                                if (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_STRONG))      confirmReq[m][e] = 1;
+                                else if (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_MEDIUM)) confirmReq[m][e] = 2;
+                                else                                                         confirmReq[m][e] = 3;
                             }
                         }
                     }
@@ -1046,6 +1202,9 @@ void updateInputState() {
     } else {
         updateAir();
     }
+    // round66: pressure snapshot (5ms throttle) - inside the seqlock writer
+    // section so Core1's GET_INPUT snapshot gets one coherent state.
+    updatePressureSnap();
     if (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2) {
         updateTouch_v1();
     }

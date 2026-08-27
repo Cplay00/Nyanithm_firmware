@@ -131,4 +131,16 @@ if __name__ == '__main__':
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <input.elf> <output.uf2>")
         sys.exit(1)
-    elf2uf2(sys.argv[1], sys.argv[2])
+    # round73: 路径规范化与校验——resolve() 消除 '../' 歧义;输入必须是已存在的
+    # .elf 文件,输出必须是 .uf2 目标。不限制所在驱动器/目录: 构建脚本按设计会把
+    # UF2 写到仓库外(如 D:\Nyanithm_build\fw_v1\build\)。
+    from pathlib import Path
+    elf_in = Path(sys.argv[1]).resolve()
+    uf2_out = Path(sys.argv[2]).resolve()
+    if elf_in.suffix.lower() != '.elf' or not elf_in.is_file():
+        print(f"ERROR: input must be an existing .elf file: {elf_in}")
+        sys.exit(1)
+    if uf2_out.suffix.lower() != '.uf2':
+        print(f"ERROR: output must be a .uf2 path: {uf2_out}")
+        sys.exit(1)
+    elf2uf2(str(elf_in), str(uf2_out))

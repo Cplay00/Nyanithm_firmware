@@ -17,7 +17,7 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.5.3"
+#define NYANITHM_FW_VERSION "1.6.0"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -27,6 +27,13 @@ const uint8_t CFG1_BIT_ENABLE_SLIDER_INPUT_AS_KEYBOARD = 0b00000001;
 const uint8_t CFG1_BIT_ENABLE_AIR_INPUT_AS_KEYBOARD = 0b00000010;
 // round55: cfg2/cfg3 previously reserved (always 0).
 const uint8_t CFG2_BIT_DISABLE_LAMP_ARRAY = 0b00000001;  // set = OFF. Clear = Windows Dynamic Lighting (LampArray USB HID) enabled - legacy configs (cfg2==0) keep it on.
+// round68/69: 压力报送&压力映射 单开关(实验)。开启后 GET_INPUT 对游戏侧
+// (chuniio_nyanithm.dll)报线性归一化 0-255 映射值: 按下=映射压力(MPR ×4 clamp 255 /
+// MBR 原生 0-255), 释放=0; 面板会话(0xC5 0x01)不受影响, 仍报真实原始压力。
+// 默认 OFF (legacy configs keep binary 0/128)。Requires round66 pressure snapshot
+// pipeline. NOTE: API stays 0x10 for gen-1 hardware - 0xC4/0xC5 are additive
+// commands gated by firmware version on the host side, not by API level.
+const uint8_t CFG2_BIT_GAME_RAW_SLIDER = 0b00000010;
 // cfg3: additive input latency, 0-15 ms (MBR3116-style tuning knob, 0 = off).
 const uint8_t INPUT_LATENCY_MAX_MS = 15;
 
@@ -46,9 +53,25 @@ struct controller_config {
     int16_t heightOffset[5];  // 高度偏移值
     uint8_t lightLimit;
     uint8_t heightRangeCfg;   // Air key segment overlap (mm), 0=default 10
-    uint8_t reserved[101];  //
-    uint8_t xorSum;         // 前127字节异或和, 用于校验
+    // round64: v1.6 per-key thresholds, indexed by slider lane 0-31 (game view).
+    // 0 = inherit global th_touch/th_release. MPR121 range 1-63 (same scale as
+    // th_touch). MBR3116: values 1-255 stored; the software verify layer applies
+    // max(80, value), so the effective gate only tightens from the round50
+    // baseline (hardware gate stays 128) -- values <=128 never relax it.
+    // thReleaseKey only applies to MPR121 (MBR has no per-sensor release reg).
+    uint8_t thTouchKey[32];    //
+    uint8_t thReleaseKey[32];  //
+    uint8_t reserved[37];      //
+    uint8_t xorSum;            // 前127字节异或和, 用于校验
 };
+
+// round64: the config blob must stay 128 bytes (flash page layout + CFG_SET
+// protocol depend on it).
+#if defined(__cplusplus)
+static_assert(sizeof(struct controller_config) == 128, "controller_config must stay 128 bytes");
+#else
+_Static_assert(sizeof(struct controller_config) == 128, "controller_config must stay 128 bytes");
+#endif
 
 extern controller_config defaultConfig;
 
@@ -77,6 +100,8 @@ typedef enum {
     CMD_DEBUG_TELEMETRY = 0xC1,
     CMD_DEBUG_DIFF = 0xC2,
     CMD_CFG_KEEPALIVE = 0xC3,  // round57: 配置模式心跳,静默重置 60s 自动退出计时器
+    CMD_GET_RAW_STATUS = 0xC4,  // round66: 压力上报开关查询,回文本行 RAW=0|1\n
+    CMD_SET_RAW_REPORT = 0xC5,  // round66: 压力上报开关设置,跟 1B 0/1,回 RAW=0|1\n
 } NyanithmCmd;
 
 #endif

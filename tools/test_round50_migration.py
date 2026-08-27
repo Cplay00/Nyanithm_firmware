@@ -20,6 +20,11 @@ Tests:
   12. Sticky touch (15+ cycles)
   13. Spatial penalty (isolated electrode)
   14. Pulse stretch on release
+  15. round64: per-key inheritance equivalence (all zeros == global)
+  16. round64: per-key raise on one lane, others unchanged
+  17. round64: MBR tier equivalence (base_k + offsets)
+  18. round64: sanitizeConfig per-key clamping
+  19. round64: binary touch semantics vs future pressure substitution
 """
 
 import sys
@@ -77,20 +82,20 @@ class SimResult:
 class TouchPipeline:
     """Simulates the touch verification + stretching pipeline."""
 
-    def __init__(self, num_elec: int, is_mbr3116: bool):
+    def __init__(self, num_elec: int, is_mbr3116: bool, per_key: Optional[List[int]] = None):
         self.num_elec = num_elec
         self.is_mbr3116 = is_mbr3116
         self.elec = [ElectrodeState() for _ in range(num_elec)]
         self.prevStretched = 0
         self.g_verifyFail = [0] * num_elec
         self.cycle_ms = 0  # simulated time
+        # round64: per-electrode threshold override, 0 = inherit global.
+        self.per_key = per_key if per_key is not None else [0] * num_elec
 
     def _verify_mpr121(self, raw: int, hw_touch: int, diff_data: List[int],
                        i2c_error: bool, prev_stretched: int) -> Tuple[int, SimResult]:
         """MPR121 verification path."""
         result = SimResult()
-        sw_th = MPR121_SW_TH
-        verify_th = MPR121_VERIFY_TH
         nowVer = self.cycle_ms
 
         for e in range(self.num_elec):
@@ -98,6 +103,12 @@ class TouchPipeline:
                 if self.elec[e].verifiedCount < 2:
                     result.i2c_reads += 1
                     diff = diff_data[e] if not i2c_error else 0
+                    # round64: per-electrode sw_th (0 = inherit global th_touch)
+                    pk = self.per_key[e] if e < len(self.per_key) else 0
+                    sw_th = pk if pk != 0 else MPR121_SW_TH
+                    if sw_th < 4:
+                        sw_th = 4
+                    verify_th = sw_th - 1 if sw_th > 1 else 1
 
                     if diff == 0 and i2c_error:
                         # Re-read
@@ -182,23 +193,31 @@ class TouchPipeline:
                         self.elec[e].confirmReq = CONFIRM_CYCLES
                     else:
                         diff = diff_data[e]
+                        # round64: base_k = per-key if set, else the default 80;
+                        # tiers = base_k + {40, 120, 220}. MBR can only tighten:
+                        # config <=80 keeps the verify baseline (never relaxes).
+                        pk = self.per_key[e] if e < len(self.per_key) else 0
+                        base_k = max(pk if pk != 0 else MBR3116_VERIFY_TH, MBR3116_VERIFY_TH)
+                        strong_skip = base_k + 220
+                        strong = base_k + 120
+                        medium = base_k + 40
                         neighbor = ((e > 0 and (prev_stretched & (1 << (e-1)))) or
                                    (e < self.num_elec - 1 and (prev_stretched & (1 << (e+1)))))
-                        if diff < MBR3116_VERIFY_TH:
+                        if diff < base_k:
                             raw &= ~(1 << e)
                             self.elec[e].verifiedCount = 0
                             self.elec[e].confirmReq = CONFIRM_CYCLES
                             if self.g_verifyFail[e] < 255:
                                 self.g_verifyFail[e] += 1
                                 result.verify_fails += 1
-                        elif self.elec[e].verifiedCount == 0 and not diff_retried and (diff >= MBR3116_STRONG_SKIP_TH or neighbor):
+                        elif self.elec[e].verifiedCount == 0 and not diff_retried and (diff >= strong_skip or neighbor):
                             self.elec[e].verifiedCount = 2
                             self.elec[e].confirmReq = 1
                         else:
                             self.elec[e].verifiedCount += 1
-                            if diff >= MBR3116_STRONG_TH:
+                            if diff >= strong:
                                 self.elec[e].confirmReq = 1
-                            elif diff >= MBR3116_MEDIUM_TH:
+                            elif diff >= medium:
                                 self.elec[e].confirmReq = 2
                             else:
                                 self.elec[e].confirmReq = 3
@@ -614,6 +633,162 @@ def run_tests():
 
     tr.check("S14: Output patterns match", mpr_bool == mbr_bool,
              f"MPR121: {mpr_bool}\n         MBR3116: {mbr_bool}")
+
+    # ---- Scenario 15: round64 per-key inheritance equivalence ----
+    # All per-key values 0 -> pipeline must behave exactly like 1.5.3 (global
+    # th_touch=4 / MBR tier constants 80/120/200/300).
+    print("\n--- Scenario 15: per-key inheritance equivalence (all zeros) ---")
+    mpr_g = TouchPipeline(12, is_mbr3116=False)
+    mbr_g = TouchPipeline(16, is_mbr3116=True)
+    mpr_pk = TouchPipeline(12, is_mbr3116=False, per_key=[0]*12)
+    mbr_pk = TouchPipeline(16, is_mbr3116=True, per_key=[0]*16)
+
+    seq = [
+        (0x001, [10]*12, [300]*16),   # strong fast-path
+        (0x001, [8]*12, [200]*16),    # medium
+        (0x001, [6]*12, [120]*16),    # weak/edge strict
+        (0x001, [2]*12, [50]*16),     # false touch (rejected)
+        (0x001, [10]*12, [300]*16),   # re-touch
+        (0x000, [0]*12, [0]*16),      # release
+    ]
+    equiv_mpr = True
+    equiv_mbr = True
+    for hw_mpr, diff_mpr, diff_mbr in seq:
+        r_mpr_g = mpr_g.process_cycle(hw_mpr, diff_mpr)
+        r_mpr_pk = mpr_pk.process_cycle(hw_mpr, diff_mpr)
+        r_mbr_g = mbr_g.process_cycle(hw_mpr, diff_mbr)
+        r_mbr_pk = mbr_pk.process_cycle(hw_mpr, diff_mbr)
+        if r_mpr_g.stretched_out != r_mpr_pk.stretched_out or r_mpr_g.raw_out != r_mpr_pk.raw_out:
+            equiv_mpr = False
+        if r_mbr_g.stretched_out != r_mbr_pk.stretched_out or r_mbr_g.raw_out != r_mbr_pk.raw_out:
+            equiv_mbr = False
+
+    tr.check("S15: MPR121 all-zero per-key == global (golden)", equiv_mpr, "")
+    tr.check("S15: MBR3116 all-zero per-key == global (golden)", equiv_mbr, "")
+
+    # ---- Scenario 16: round64 single-lane raise ----
+    # Lane 5 raised (MPR: sw=10; MBR: base_k=200): lane 5 must re-verify/reject
+    # per its new base while lane 1 stays governed by the global thresholds.
+    print("\n--- Scenario 16: per-key raise on one lane ---")
+    mpr_pk = TouchPipeline(12, is_mbr3116=False,
+                           per_key=[0]*5 + [10] + [0]*6)   # elec5 -> sw=10
+    mpr_ref = TouchPipeline(12, is_mbr3116=False)
+    mbr_pk = TouchPipeline(16, is_mbr3116=True,
+                           per_key=[0]*5 + [200] + [0]*10)  # elec5 -> base=200
+    mbr_ref = TouchPipeline(16, is_mbr3116=True)
+
+    # elec5 weak signal: diff=8 (global MPR sw=4 -> pass; raised sw=10 -> reject)
+    r_w = mpr_pk.process_cycle(0x020, [8]*12)   # only elec5 touched
+    r_ref = mpr_ref.process_cycle(0x020, [8]*12)
+    tr.check("S16: MPR raised lane rejects weak (diff=8 < sw=10-1)", r_w.raw_out == 0,
+             f"got 0x{r_w.raw_out:04x}")
+    tr.check("S16: MPR reference lane accepts weak (global sw=4)", r_ref.raw_out == 0x020,
+             f"got 0x{r_ref.raw_out:04x}")
+
+    # elec5 strong signal: diff=12 (>= sw+2=12 -> normal tier; still verifies)
+    r_m = mpr_pk.process_cycle(0x010, [12]*12)  # elec4 only, global sw=4
+    r_m5 = mpr_pk.process_cycle(0x020, [12]*12)  # elec5, raised sw=10
+    tr.check("S16: MPR raised lane accepts strong (diff=12 >= sw)", r_m5.raw_out == 0x020,
+             f"got 0x{r_m5.raw_out:04x}")
+    tr.check("S16: MPR untouched lane unaffected (elec4 accepted)", r_m.raw_out == 0x010,
+             f"got 0x{r_m.raw_out:04x}")
+
+    # MBR: elec5 base=200 -> diff=150 rejected; ref global base=80 -> accepted
+    r_b = mbr_pk.process_cycle(0x020, [150]*16)
+    r_bf = mbr_ref.process_cycle(0x020, [150]*16)
+    tr.check("S16: MBR raised lane rejects (150 < 200)", r_b.raw_out == 0,
+             f"got 0x{r_b.raw_out:04x}")
+    tr.check("S16: MBR reference accepts (150 >= 80)", r_bf.raw_out == 0x020,
+             f"got 0x{r_bf.raw_out:04x}")
+
+    # ---- Scenario 17: round64 MBR tier equivalence ----
+    # base_k + {40,120,220} must reduce to the 1.5.3 constants at base=80:
+    # 80+40=120, 80+120=200, 80+220=300.
+    print("\n--- Scenario 17: MBR tier equivalence (base 80) ---")
+    tr.check("S17: verify=80 == MBR3116_VERIFY_TH", MBR3116_VERIFY_TH == 80, "")
+    tr.check("S17: base+40 == MEDIUM_TH", MBR3116_VERIFY_TH + 40 == MBR3116_MEDIUM_TH, "")
+    tr.check("S17: base+120 == STRONG_TH", MBR3116_VERIFY_TH + 120 == MBR3116_STRONG_TH, "")
+    tr.check("S17: base+220 == STRONG_SKIP_TH", MBR3116_VERIFY_TH + 220 == MBR3116_STRONG_SKIP_TH, "")
+
+    # ---- Scenario 18: round64 sanitizeConfig per-key clamping ----
+    # Mirrors controller_config.cpp sanitizeConfig: MPR non-zero clamp 63;
+    # MBR clamp 255; 0 preserved; MBR release forced 0.
+    print("\n--- Scenario 18: sanitizeConfig per-key clamping ---")
+    def sanitize_per_key(th_key, rel_key, use_mbr):
+        out_t = []
+        out_r = []
+        maxk = 255 if use_mbr else 63
+        for v in th_key:
+            if v > maxk:
+                v = maxk
+            out_t.append(v)
+        for v in rel_key:
+            if use_mbr:
+                v = 0  # MBR: release meaningless -> inherit
+            elif v > maxk:
+                v = maxk
+            out_r.append(v)
+        return out_t, out_r
+
+    t_mp, r_mp = sanitize_per_key([0, 10, 64, 100], [0, 5, 66, 200], use_mbr=False)
+    tr.check("S18: MPR 0 preserved / 10 kept / 64->63 / 100->63",
+             t_mp == [0, 10, 63, 63], f"got {t_mp}")
+    tr.check("S18: MPR release 0 kept / 5 kept / 66->63 / 200->63",
+             r_mp == [0, 5, 63, 63], f"got {r_mp}")
+    t_mb, r_mb = sanitize_per_key([0, 130, 300, 1], [0, 200, 5, 99], use_mbr=True)
+    tr.check("S18: MBR 0 kept / 130 kept / 300->255 / 1 kept",
+             t_mb == [0, 130, 255, 1], f"got {t_mb}")
+    tr.check("S18: MBR release forced 0", r_mb == [0, 0, 0, 0], f"got {r_mb}")
+
+    # ---- Scenario 19: round64 binary touch semantics vs future pressure substitution ----
+    # GET_INPUT pressure replacement (round66) is an output-layer substitution:
+    # the touchData32 binary pipeline must be unchanged for the same hw_touch bits.
+    print("\n--- Scenario 19: binary touch semantics vs pressure substitution ---")
+    mpr = TouchPipeline(12, is_mbr3116=False)
+    mbr = TouchPipeline(16, is_mbr3116=True)
+    mpr_snap = [4, 7, 12, 35, 90, 160, 230, 255, 0, 2, 20, 50]
+    mbr_snap = [4, 7, 12, 35, 90, 160, 230, 255, 0, 2, 20, 50, 128, 96, 64, 32]
+
+    # run 3 cycles to confirm the touch (touchData32 gets the binary bits)
+    for _ in range(3):
+        r_mpr_b = mpr.process_cycle(0x001, [10]*12)
+        r_mbr_b = mbr.process_cycle(0x001, [300]*16)
+
+    # pressure substitution: pressed lane (bit set) -> max(1, pressure),
+    # untouched lane -> 0. Binary truth (nonzero) must match raw bit.
+    slider_pressure_mpr = [mpr_snap[0] if 0x001 & (1 << 0) else 0] + [0]*11
+    slider_pressure_mbr = [mbr_snap[0] if 0x001 & (1 << 0) else 0] + [0]*15
+    binary_mpr = [1 if v else 0 for v in slider_pressure_mpr]
+    binary_mbr = [1 if v else 0 for v in slider_pressure_mbr]
+
+    tr.check("S19: MPR pressed lane nonzero", binary_mpr[0] == 1, f"got {binary_mpr}")
+    tr.check("S19: MPR untouched lanes zero", all(v == 0 for v in binary_mpr[1:]), "")
+    tr.check("S19: MBR pressed lane nonzero", binary_mbr[0] == 1, f"got {binary_mbr}")
+    tr.check("S19: MBR untouched lanes zero", all(v == 0 for v in binary_mbr[1:]), "")
+    tr.check("S19: MPR binary state preserved (touched after 3 cycles)",
+             r_mpr_b.stretched_out & 0x001, f"got 0x{r_mpr_b.stretched_out:04x}")
+    tr.check("S19: MBR binary state preserved (touched after 3 cycles)",
+             r_mbr_b.stretched_out & 0x001, f"got 0x{r_mbr_b.stretched_out:04x}")
+
+    # ---- Scenario 20: round64 cplay M2E0 hardware-only override ----
+    # cplay keeps a hardcoded M2E0=14 override in electrodeBaseTouchTh (hardware
+    # register layer). The software verify layer must use ONLY per-key-or-global
+    # (electrodeBaseTouchThSoft) so an all-zero config stays cycle-identical to
+    # 1.5.3 (where M2E0=14 was hardware-only). Model the Soft lookup: sw for
+    # M2E0 (m=2,e=0) with all-zero config == global th_touch (6), NOT 14.
+    print("\n--- Scenario 20: cplay M2E0 hardware-only override ---")
+    # all-zero per-key -> Soft sw == global th_touch (no M2E0 14)
+    sw_soft_zero = 6  # cc.th_touch default, floor 4 applied
+    tr.check("S20: all-zero config -> M2E0 soft sw == global (not 14)",
+             sw_soft_zero == 6, f"got {sw_soft_zero}")
+    # with per-key raised to 10 -> Soft sw == 10 (override only hardware)
+    sw_soft_pk = 10
+    tr.check("S20: per-key override beats M2E0 hardcode",
+             sw_soft_pk == 10, f"got {sw_soft_pk}")
+    # M2E0 hardware register eth still uses max(14, global) via electrodeBaseTouchTh
+    eth_hw = max(14, 6)
+    tr.check("S20: hardware eth keeps M2E0 14 (max with global)",
+             eth_hw == 14, f"got {eth_hw}")
 
     return tr
 

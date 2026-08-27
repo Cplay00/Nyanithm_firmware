@@ -61,4 +61,12 @@ extern uint16_t rawTouch[3];   // verified touch bits (after software verify)
 extern uint8_t  g_verifyFail[36];  // per-electrode I2C verification rejections (saturating)
 extern uint32_t g_loopMinUs, g_loopMaxUs, g_loopSumUs, g_loopCount;  // Core0 cycle timing
 
+// round66: real-time per-lane pressure snapshot (Core0 writer, Core1 reader).
+// rawReportMode is set by Core1 (0xC5) and auto-cleared on CDC disconnect;
+// gameRawEnabled is the round68 cfg2 bit1 baseline (experimental, persists).
+// Core0 fills pressureSnap while either is on.
+extern uint8_t pressureSnap[32];
+extern volatile bool rawReportMode;
+extern volatile bool gameRawEnabled;
+
 #endif

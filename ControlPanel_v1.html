@@ -2473,6 +2473,30 @@
     animation: fadeUp 0.25s var(--e-spring);
 }
 
+/* round69: 关闭过渡动画——先加 .closing, transitionend/animationend 后再 display:none */
+.flash-modal.closing {
+    animation: fadeOut 0.18s var(--e-out) forwards;
+}
+.flash-modal.closing .flash-modal-card {
+    animation: fadeUpOut 0.22s var(--e-spring) forwards;
+}
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+@keyframes fadeUpOut {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(16px) scale(0.97); }
+}
+
+/* round69: 逐键编辑气泡卡片——窄卡片适配 INPUT TEST 场景 */
+.pk-bubble-card {
+    width: min(420px, 92vw);
+}
+.pk-bubble-card .flash-modal-head .slider-label-en {
+    margin-left: auto;
+}
+
 .flash-modal-head {
     display: flex;
     align-items: center;
@@ -2554,10 +2578,18 @@
    INPUT TEST 提示为 10px (fs-xs)/opacity .5;这里把面板所有说明性小字提到
    12px (fs-sm) 并统一 opacity .4,覆盖 .field-hint / .slider-label-en /
    .section-subtitle / .config-warning-text / .panel-subtitle / .metric-cell-label
-   (透明度覆盖所有副标题与小字)。 */
+   (透明度覆盖所有副标题与小字)。
+   round71: 用户反馈低亮度文字在低对比环境下难以辨认,透明度统一回调
+   0.4 -> 0.55(≈+15% 有效亮度),并在补丁层覆写 --c-text-tertiary 提亮一档。 */
+:root {
+    --c-text-tertiary: #6f6f72;
+}
+[data-theme="light"] {
+    --c-text-tertiary: #999a9e;
+}
 .field-hint {
     font-size: var(--fs-sm) !important;
-    opacity: 0.4;
+    opacity: 0.55 !important;
     color: var(--c-text-secondary) !important;
 }
 .slider-label-en,
@@ -2565,8 +2597,10 @@
 .config-warning-text,
 .panel-subtitle,
 .metric-cell-label {
-    opacity: 0.4 !important;
+    opacity: 0.55 !important;
 }
+/* round71: BASE 的 INPUT TEST 行内提示 opacity .5 同步提亮 */
+.input-test-hint { opacity: 0.65 !important; }
 .section-subtitle { font-size: var(--fs-md) !important; }
 
 /* 警告提示(配置模式下的红字):保持可读,不受全局 40% 透明度压制 */
@@ -2585,8 +2619,9 @@
 /* --- 4.3 触摸/释放阈值、消抖滑条:数值 >= 警告线 25% 时,数显+滑条平滑转橙红 ---
    警告线:th_touch=4..20,th_release=3..8,dt/dr=1..3。25% 增幅从橙色开始渐变。
    通过 JS 在 <input> 上切换 .warn 类;这里定义颜色过渡(滑条轨道 ::before 填充
-   与滑块 ::after 都随 class 变色,transition 平滑)。 */
-.slider-row input[type="range"].warn + .slider-fill,
+   与滑块 ::after 都随 class 变色,transition 平滑)。
+   round72: 移除从未生效的死选择器 `.warn + .slider-fill`(面板中不存在
+   .slider-fill 元素,实际变色由 .slider-track:has(input.warn) 伪元素承担)。 */
 .slider-track:has(input.warn)::before,
 .slider-track:has(input.warn)::after {
     background: var(--c-accent-warm, #ff8a3d) !important;
@@ -2708,6 +2743,248 @@ input[type="range"]:disabled {
 .info-cell.clickable:hover {
     background: var(--c-surface-hover);
     transition: background 0.2s var(--e-out);
+}
+
+/* round70b: 一键校准报告 Toast */
+.cal-toast-wrap {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.cal-toast {
+    width: min(560px, 92vw);
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--c-surface, #14161c);
+    border: 1px solid var(--c-border, #2a2d37);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+.cal-toast-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--c-border, #2a2d37);
+}
+.cal-toast-x {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: var(--c-text-dim, #8a8f9c);
+    cursor: pointer;
+    line-height: 1;
+}
+.cal-toast-body {
+    padding: 14px 16px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.cal-toast-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--c-border, #2a2d37);
+}
+.cal-toast-foot .btn-primary {
+    background: var(--c-accent, #00d2ff);
+    color: #000;
+    font-weight: 600;
+}
+
+/* ================================================================
+   round71 补丁:按钮语义高亮 + 校准向导弹窗 + 配置模式格子阈值展示
+   ================================================================ */
+
+/* --- 5. 功能按钮语义高亮 ---
+   连接串口(未连接)=高亮黄描边+浅底,引导主入口;
+   断开连接(JS 切类)=红色实底白字,破坏性操作;
+   更新固件=暖橙警示(变砖风险);恢复默认=红描边;保存并重启=绿描边。 */
+.btn.btn-connect-acc {
+    border-color: var(--c-accent);
+    color: var(--c-accent);
+    background: var(--c-accent-dim, rgba(255, 214, 10, 0.08));
+}
+.btn.btn-connect-acc:hover:not(:disabled) {
+    background: var(--c-accent-dim, rgba(255, 214, 10, 0.08));
+    box-shadow: 0 0 12px var(--c-accent-glow, rgba(255, 214, 10, 0.25));
+    color: var(--c-accent-hover, #ffe040);
+    border-color: var(--c-accent-hover, #ffe040);
+}
+.btn.btn-disconnect-danger,
+.flash-modal-foot .btn.btn-disconnect-danger {
+    background: var(--c-danger, #e5484d);
+    border-color: var(--c-danger, #e5484d);
+    color: #fff;
+}
+.btn.btn-disconnect-danger svg { color: #fff; }
+.btn.btn-disconnect-danger:hover:not(:disabled) {
+    background: var(--c-danger, #e5484d);
+    opacity: 0.88;
+    box-shadow: 0 0 12px rgba(229, 72, 77, 0.35);
+    color: #fff;
+}
+.btn.btn-flash-warm {
+    border-color: var(--c-accent-warm, #ff8a3d);
+    color: var(--c-accent-warm, #ff8a3d);
+    background: rgba(255, 138, 61, 0.08);
+}
+.btn.btn-flash-warm:hover:not(:disabled) {
+    background: rgba(255, 138, 61, 0.08);
+    box-shadow: 0 0 12px rgba(255, 138, 61, 0.3);
+    color: #ffa05f;
+    border-color: #ffa05f;
+}
+#eraseConfigBtn {
+    border-color: var(--c-danger, #e5484d);
+    color: var(--c-danger, #e5484d);
+}
+#eraseConfigBtn:hover:not(:disabled) { box-shadow: 0 0 10px rgba(229, 72, 77, 0.3); }
+#btnSaveAndReboot {
+    border-color: var(--c-success, #46a758);
+    color: var(--c-success, #46a758);
+}
+#btnSaveAndReboot:hover:not(:disabled) { box-shadow: 0 0 10px rgba(70, 167, 88, 0.3); }
+/* 二级确认脉冲色跟随自身描边语义 */
+#btnSaveAndReboot.btn-confirming { animation: confirmPulse 1.2s var(--e-out) infinite; }
+
+/* --- 2. 逐键阈值编辑提示行(config-warning 变体,进配置模式才显示) --- */
+.perkey-hint-warning .config-warning-text strong { color: var(--c-accent); }
+.perkey-hint-warning svg { color: var(--c-accent); }
+
+/* --- 1. 校准向导弹窗(flash-modal 卡片三屏) --- */
+.cal-wizard-card { width: min(520px, 92vw); }
+.cal-wizard-screen { display: flex; flex-direction: column; min-height: 0; }
+.cal-intro-body { font-size: var(--fs-sm); line-height: 1.7; }
+.cal-intro-p { margin: 0 0 10px; color: var(--c-text-secondary); }
+.cal-intro-note {
+    margin: 12px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--c-line);
+    color: var(--c-text-tertiary);
+    font-size: var(--fs-xs);
+}
+.cal-phase-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: var(--c-surface-2, #191c23);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-base, 8px);
+}
+.cal-phase-num {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--c-accent);
+    color: #000;
+    font-weight: 700;
+    font-size: var(--fs-sm);
+}
+.cal-phase-text { color: var(--c-text-secondary); }
+.cal-phase-text strong { color: var(--c-text-primary, #f0f0f0); }
+/* running 屏: conic-gradient 环形进度由 JS 写 background */
+.cal-running-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding-top: var(--sp-5);
+    padding-bottom: var(--sp-5);
+}
+.cal-ring-wrap {
+    position: relative;
+    width: 148px;
+    height: 148px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.cal-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(var(--c-accent) 0deg, var(--c-surface-3, #262a33) 0deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+    transition: background 0.35s linear;
+}
+.cal-ring-num {
+    position: relative;
+    z-index: 1;
+    font-family: var(--font-display, monospace);
+    font-size: 44px;
+    font-weight: var(--fw-semibold, 600);
+    color: var(--c-accent);
+    font-variant-numeric: tabular-nums;
+}
+.cal-ring-unit {
+    /* round72: 显式水平居中加固,不再依赖 abspos 静态位置这一较脆的规范行为 */
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 14px;
+    text-align: center;
+    color: var(--c-text-tertiary);
+    font-size: var(--fs-xs);
+}
+.cal-run-hint {
+    text-align: center;
+    color: var(--c-text-secondary);
+    font-size: var(--fs-sm);
+    max-width: 34ch;
+}
+.cal-report-body { font-size: 13px; line-height: 1.6; word-break: break-all; }
+.cal-report-body b { color: var(--c-accent); font-size: var(--fs-lg); }
+.cal-report-note { color: var(--c-text-tertiary); font-size: var(--fs-xs); }
+
+/* --- 3. 配置模式 INPUT TEST 格子阈值展示 ---
+   两值上下分布 / 单值居中,统一高亮主题色(暗黄/亮蓝随主题)。
+   round72: 阈值态给格子加 .th-mode(JS 挂),隐藏 BASE 的通道数字伪元素
+   (:not(:empty)::before top:8px 会与顶部触摸阈值挤靠);三个数显统一水平居中,
+   单值补 left/right 锚定,不再依赖 abspos 静态位置。 */
+.div_touch_channel { position: relative; cursor: pointer; }
+.div_touch_channel.th-mode::before { display: none !important; }
+.tc-th-touch, .tc-th-release, .tc-th-single {
+    display: block;
+    width: 100%;
+    text-align: center;
+    color: var(--c-accent) !important;
+    font-weight: var(--fw-semibold, 600);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    pointer-events: none;
+}
+.tc-th-touch, .tc-th-release {
+    position: absolute;
+    left: 0;
+    right: 0;
+}
+.tc-th-touch { top: 14%; }
+.tc-th-release { bottom: 14%; }
+.tc-th-single {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
 }
 
     </style>
@@ -2931,7 +3208,7 @@ input[type="range"]:disabled {
                         <button id="ledStop" class="btn btn-danger" disabled>停止动画</button>
                     </div>
                     <div class="led-controls">
-                        <input type="color" id="ledColor" class="led-color-input" value="#00d2ff" disabled>
+                        <input type="color" id="ledColor" class="led-color-input" value="#ffd60a" disabled>
                         <button id="ledCustom" class="btn" disabled>发送当前颜色</button>
                         <div class="mini-slider-group">
                             <div class="mini-slider">
@@ -2982,7 +3259,9 @@ input[type="range"]:disabled {
                         <button id="btnGetStatus" class="btn" disabled>读取状态 (0xB8)</button>
                         <button id="btnPollTof" class="btn" disabled>连续 ToF</button>
                         <button id="btnDevInfo" class="btn" disabled>读取设备信息</button>
+                        <button id="btnCalibrate" class="btn" disabled>一键校准阈值</button>
                     </div>
+                    <div class="field-hint" style="margin-top:4px;">一键校准: 点击后按向导提示先静置 20s 再划键 15s(需固件 1.6.0+ 压力上报);建议值回填逐键阈值,进配置模式确认后保存</div>
                     <pre class="log-box" id="statusLog">未读取状态</pre>
                 </div>
             </section>
@@ -3022,13 +3301,16 @@ input[type="range"]:disabled {
                     <div class="toolbar-grid">
                         <button id="connectBtn" class="btn btn-dark">
                             <svg viewBox="0 0 16 16" fill="none">
-                                <path d="M6 2H10V6H14V10H10V14H6V10H2V6H6V2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                                <path d="M9.5 1.5L14.5 6.5L11 10H6V5L9.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                                <path d="M6 7.5L2.5 11C1.8 11.7 1.8 12.8 2.5 13.5C3.2 14.2 4.3 14.2 5 13.5L8.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                             连接串口
                         </button>
                         <button id="flashBtn" class="btn btn-dark">
                             <svg viewBox="0 0 16 16" fill="none">
-                                <path d="M8 1L2 9H7L6 15L14 7H9L10 1H8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                                <rect x="4" y="4" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                                <path d="M6 4V1.5M10 4V1.5M6 14.5V12M10 14.5V12M4 6H1.5M4 10H1.5M14.5 6H12M14.5 10H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                <path d="M8 6V9M8 9L6.6 7.8M8 9L9.4 7.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                             更新固件
                         </button>
@@ -3040,6 +3322,15 @@ input[type="range"]:disabled {
                             <path d="M8 6V9M8 11V11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                         </svg>
                         <span class="config-warning-text">配置读写需先<strong>进入配置模式</strong>，保存后<strong>重启</strong>生效</span>
+                    </div>
+
+                    <!-- round71: 逐键阈值编辑提示升级为叹号行(更醒目),显隐仍由 updatePerKeyUi 控制 -->
+                    <div class="config-warning perkey-hint-warning" id="perKeyHint" style="display:none;">
+                        <svg viewBox="0 0 16 16" fill="none">
+                            <path d="M8 1L15 14H1L8 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                            <path d="M8 6V9M8 11V11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <span class="config-warning-text"><strong>提示：</strong>配置模式下，点击 INPUT TEST 的<strong>按键格子</strong>可编辑该键的触摸/释放阈值</span>
                     </div>
 
                     <div class="info-grid">
@@ -3113,6 +3404,10 @@ input[type="range"]:disabled {
                             <label class="checkbox-item">
                                 <input type="checkbox" id="ckLampArray" class="form-check-input" disabled>
                                 <span class="form-check-label">Windows 动态照明</span>
+                            </label>
+                            <label class="checkbox-item" style="grid-column: 1 / -1;">
+                                <input type="checkbox" id="ckGameRaw" class="form-check-input" disabled>
+                                <span class="form-check-label">实时真实压力&压力映射（实验）</span>
                             </label>
                         </div>
                         <div class="config-row">
@@ -3306,8 +3601,6 @@ input[type="range"]:disabled {
                             </div>
                         </div>
                     </div>
-
-                    </div>
                 </div>
             </section>
         </main>
@@ -3373,6 +3666,122 @@ input[type="range"]:disabled {
                 </div>
             </div>
         </div>
+        <!-- round69: INPUT TEST 逐键编辑气泡(点击按键格子弹出,复用 flash-modal 动画) -->
+        <div class="flash-modal" id="pkBubbleModal" style="display:none;" role="dialog" aria-modal="true">
+            <div class="flash-modal-card pk-bubble-card">
+                <div class="flash-modal-head">
+                    <span class="slider-label" id="pkBubbleTitle">键 tc1</span>
+                    <span class="slider-label-en" id="pkBubbleState">继承全局</span>
+                </div>
+                <div class="flash-modal-body">
+                    <!-- 逐键阈值气泡:与"参数调节"区同一套 slider-row 结构(标题/英文名/大数值/滑条) -->
+                    <div class="slider-group">
+                        <div class="slider-row">
+                            <div class="slider-top">
+                                <div class="slider-label-group">
+                                    <span class="slider-label">触发阈值</span>
+                                    <span class="slider-label-en">th_touch (per-key)</span>
+                                </div>
+                                <output class="slider-value" id="pkThTouchv"></output>
+                            </div>
+                            <div class="slider-track">
+                                <input type="range" id="pkThTouch" min="1" max="63" step="1" value="6" disabled>
+                            </div>
+                            <span class="field-hint">0 = 继承全局 th_touch</span>
+                        </div>
+                        <div class="slider-row" id="pkReleaseRow">
+                            <div class="slider-top">
+                                <div class="slider-label-group">
+                                    <span class="slider-label">释放阈值</span>
+                                    <span class="slider-label-en">th_release (per-key)</span>
+                                </div>
+                                <output class="slider-value" id="pkThReleasev"></output>
+                            </div>
+                            <div class="slider-track" id="pkReleaseTrack">
+                                <input type="range" id="pkThRelease" min="1" max="63" step="1" value="5" disabled>
+                            </div>
+                            <span class="field-hint" id="pkReleaseHint">0 = 继承全局 th_release</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flash-modal-foot">
+                    <button type="button" id="pkInheritBtn" class="btn">恢复继承(设为 0)</button>
+                    <button type="button" id="pkCloseBtn" class="btn">关闭</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- round71: 一键校准阈值向导弹窗(intro 说明 -> running 倒计时 -> result 报告),
+             取代 round70b 的报告 Toast。三屏共用一个卡片,JS 切 display;进出动画走 flash-modal 同款 -->
+        <div class="flash-modal" id="calWizardModal" style="display:none;" role="dialog" aria-modal="true" aria-label="一键校准阈值">
+            <div class="flash-modal-card cal-wizard-card">
+                <!-- 屏1: intro 规则说明 -->
+                <div class="cal-wizard-screen" id="calScreenIntro">
+                    <div class="flash-modal-head">
+                        <svg viewBox="0 0 16 16" fill="none">
+                            <path d="M8 2V3M3.05 4.05L3.76 4.76M2 9H3M13 9H14M12.24 4.76L12.95 4.05" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                            <circle cx="8" cy="10.5" r="4.5" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                        一键校准阈值
+                    </div>
+                    <div class="flash-modal-body cal-intro-body">
+                        <p class="cal-intro-p">校准分两轮运行，请按提示操作：</p>
+                        <div class="cal-phase-row">
+                            <span class="cal-phase-num">1</span>
+                            <div class="cal-phase-text"><strong>静置（20 秒）</strong>：不要触碰触摸板，双手离开滑条，让面板采集每键底噪。</div>
+                        </div>
+                        <div class="cal-phase-row">
+                            <span class="cal-phase-num">2</span>
+                            <div class="cal-phase-text"><strong>触摸（15 秒）</strong>：用手指轻触或在触摸板上轻轻滑动，<strong>最好每个键都摸到</strong>。</div>
+                        </div>
+                        <p class="cal-intro-note">两轮结束后将给出建议的触摸/释放阈值；点击「确认并开始修改」会自动进入配置模式并填入建议值。</p>
+                    </div>
+                    <div class="flash-modal-foot">
+                        <button type="button" id="calWizardCancelIntro" class="btn">取消</button>
+                        <button type="button" id="calWizardStart" class="btn btn-primary">开始校准</button>
+                    </div>
+                </div>
+                <!-- 屏2: running 环形倒计时 -->
+                <div class="cal-wizard-screen" id="calScreenRunning" style="display:none;">
+                    <div class="flash-modal-head">
+                        <svg viewBox="0 0 16 16" fill="none">
+                            <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+                            <path d="M8 5V8L10 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <span id="calRunTitle">正在校准…</span>
+                    </div>
+                    <div class="flash-modal-body cal-running-body">
+                        <!-- round72: 倒计时数字必须是 wrap 的直接子元素(flex 居中),
+                             不能放进 .cal-ring —— 它是 absolute + radial mask,会把数字裁成弧边残字 -->
+                        <div class="cal-ring-wrap">
+                            <div class="cal-ring" id="calRing"></div>
+                            <span class="cal-ring-num" id="calCountdown">20</span>
+                            <span class="cal-ring-unit">秒</span>
+                        </div>
+                        <div class="cal-run-hint" id="calRunHint">第一轮：请静置，不要触碰触摸板</div>
+                    </div>
+                    <div class="flash-modal-foot">
+                        <button type="button" id="calWizardAbort" class="btn btn-danger">取消校准</button>
+                    </div>
+                </div>
+                <!-- 屏3: result 校准报告 -->
+                <div class="cal-wizard-screen" id="calScreenResult" style="display:none;">
+                    <div class="flash-modal-head">
+                        <svg viewBox="0 0 16 16" fill="none">
+                            <path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        校准完成
+                    </div>
+                    <div class="flash-modal-body">
+                        <div class="cal-report-body" id="calReportBody"></div>
+                    </div>
+                    <div class="flash-modal-foot">
+                        <button type="button" id="calWizardCancelResult" class="btn">取消</button>
+                        <button type="button" id="calWizardApply" class="btn btn-primary">确认并开始修改</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
 
         <footer class="app-footer">
@@ -3409,13 +3818,23 @@ const CMD = {
     DETECT: 0xBC,
     GET_VERSION: 0xBD,
     // round57: 配置模式心跳。固件 0xC3 静默重置 60s 自动退出计时器。
-    CFG_KEEPALIVE: 0xC3
+    CFG_KEEPALIVE: 0xC3,
+    // round66: 逐键压力上报开关(会话态,仅普通模式)。0xC4 查询返回 RAW=0|1\n;
+    // 0xC5 跟 1B 0/1 设置后回 RAW=0|1\n。仅固件 1.6.0+ 可用(版本门禁,
+    // 见 queryDevInfo 的 rawReportSupported; API 恒为 0x10,不作命令门禁)。
+    GET_RAW_STATUS: 0xC4,
+    SET_RAW_REPORT: 0xC5
 };
 
 const CFG_MAGIC = 0x88;
 const CFG_VERSION = 0x02;
-const API_LEVEL = 0x10;
 const CFG_SIZE = 128;
+
+// round64: v1.6 逐键阈值偏移(lane 0-31, 0=继承全局)。与固件
+// include/share/nyanithm_shared.h 的 controller_config 布局一致。
+const CFG_OFF_TH_TOUCH_KEY = 26;
+const CFG_OFF_TH_RELEASE_KEY = 58;
+const CFG_NUM_KEYS = 32;
 
 const BIT_FORCE16 = 0b00000001;
 const BIT_MBR3116 = 0b00000010;
@@ -3424,9 +3843,11 @@ const BIT_KB_SLIDER = 0b00000001;
 const BIT_KB_AIR = 0b00000010;
 // round55 cfg2 bit0:置 1 = 关闭 LampArray / Windows 动态照明(disable 语义,旧配置默认开启)
 const BIT_DISABLE_LAMP_ARRAY = 0b00000001;
+// round68 cfg2 bit1:游戏内压力报送(实验,默认关;开启后 GET_INPUT 按下键报压力、释放 0)
+const BIT_GAME_RAW_SLIDER = 0b00000010;
 
 // 一代 hw_v1 固件版本白名单:0xBC 探测不可用(旧固件)时的回退门禁依据。
-const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3"];
+const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0"];
 
 // ====== UF2 固件文件解析(刷写前校验) ======
 const UF2_MAGIC0 = 0x0A324655;   // "UF2\n"
@@ -3852,6 +4273,17 @@ function validateUf2ForDevice(p, devInfo) {
     // ================================================================
     // 三代组件:odometer / 滑条 / 状态栏同步
     // ================================================================
+    // round72 重写状态机。条带几何 = [9副本][0..9][0副本] 共 12 格(头部 9 副本
+    // 占 idx0),因此数字 k 的静止位固定是 translateY(-(k+1)em)。round71d/e 当初
+    // 插入头部副本后仍沿用上游 translateY(-digit em) 公式,整体错位一格:静止的
+    // 0 位显示的是头部 9(再叠加 leading-zero 变淡,即用户看到的"幽灵 9"),进位
+    // 落点也全部偏移。
+    // 进位语义(round71b/71e 保留):9→0 经尾部 0 副本长滚后归位;0→9 经头部 9
+    // 副本反向长滚后归位。d.cur 恒等于"当前逻辑显示的数字"(0-9);每次写入先
+    // odoFinalize 收尾上一笔未完动画(清定时器/监听器、瞬态副本位无动画归位,
+    // 副本与本位字形相同故跳变不可见),再从静止位起滚。
+    function odRest(k) { return 'translateY(-' + (k + 1) + 'em)'; }
+
     function createOdometer(el, numDigits) {
         el.classList.add('odometer');
         el.innerHTML = '';
@@ -3861,25 +4293,88 @@ function validateUf2ForDevice(p, devInfo) {
             digitEl.className = 'odometer-digit';
             const strip = document.createElement('span');
             strip.className = 'odometer-strip';
+            const head = document.createElement('span');
+            head.textContent = '9';
+            strip.appendChild(head);
             for (let n = 0; n <= 9; n++) {
                 const numEl = document.createElement('span');
                 numEl.textContent = n;
                 strip.appendChild(numEl);
             }
+            const clone = document.createElement('span');
+            clone.textContent = '0';
+            strip.appendChild(clone);
+            strip.style.transform = odRest(0);   // 初始静止显示 0
             digitEl.appendChild(strip);
             el.appendChild(digitEl);
-            el._odometer.digits.push({ el: digitEl, strip });
+            el._odometer.digits.push({ el: digitEl, strip, cur: 0, snapTimer: null, onEnd: null });
         }
     }
 
+    // 结束某列未完成的进位动画:清定时器与监听器,若条带停在瞬态副本位则无动画
+    // 归到 d.cur 的静止位(字形一致,视觉连续),随后恢复过渡以便下一次滚动生效。
+    function odoFinalize(d) {
+        if (d.snapTimer) { clearTimeout(d.snapTimer); d.snapTimer = null; }
+        if (d.onEnd) { d.strip.removeEventListener('transitionend', d.onEnd); d.onEnd = null; }
+        d.strip.style.transition = 'none';
+        d.strip.style.transform = odRest(d.cur);
+        void d.strip.offsetWidth;
+        d.strip.style.transition = '';
+    }
+
+    // 把仍在副本位的条带无动画收回本位
+    function odoSnapHome(d) {
+        d.strip.style.transition = 'none';
+        d.strip.style.transform = odRest(d.cur);
+        void d.strip.offsetWidth;
+        d.strip.style.transition = '';
+    }
+
+    // 发起 cur→digit 的滚动。普通位移直接过渡到目标静止位;跨 9/0 边界时经副
+    // 本格长滚(transitionend 正常路径 + 450ms 兜底,页签隐藏时 end 不触发)。
+    function odoMove(d, digit) {
+        const from = d.cur;
+        d.cur = digit;
+        if (from === digit) return;
+        if (!((from === 9 && digit === 0) || (from === 0 && digit === 9))) {
+            d.strip.style.transform = odRest(digit);
+            return;
+        }
+        // round72b: 尾部 0 副本是条带第 12 格(idx11),完整可见位是 -11em。
+        // 此前误写 -12em——窗口滑出条带底缘,动画尾段整格空白,过渡结束才 snap
+        // 回本位"闪现"出 0(用户反馈的飞出空白)。头部 9 副本 idx0 对应 0em 不变。
+        d.strip.style.transform = (from === 9) ? 'translateY(-11em)' : 'translateY(0em)';
+        if (d.onEnd) d.strip.removeEventListener('transitionend', d.onEnd);
+        const onEnd = (e) => {
+            if (e.target !== d.strip || e.propertyName !== 'transform') return;
+            if (d.onEnd !== onEnd) return;   // 已被新一轮收尾覆盖
+            d.onEnd = null;
+            d.strip.removeEventListener('transitionend', onEnd);
+            if (d.snapTimer) { clearTimeout(d.snapTimer); d.snapTimer = null; }
+            odoSnapHome(d);
+        };
+        d.onEnd = onEnd;
+        d.strip.addEventListener('transitionend', onEnd);
+        d.snapTimer = setTimeout(() => {
+            if (d.onEnd !== onEnd) return;
+            d.onEnd = null;
+            d.strip.removeEventListener('transitionend', onEnd);
+            odoSnapHome(d);
+        }, 450);
+    }
+
     function setOdometerValue(el, value) {
-        if (!el || !el._odometer) return;
+        if (!el || !el._odometer || !Number.isFinite(value)) return;
         const { digits, numDigits } = el._odometer;
         const str = String(Math.max(0, Math.round(value))).padStart(numDigits, '0');
         let foundNonZero = false;
         for (let i = 0; i < numDigits; i++) {
             const digit = parseInt(str[i], 10);
-            digits[i].strip.style.transform = `translateY(-${digit}em)`;
+            const d = digits[i];
+            // 上一笔进位若仍挂在瞬态副本位:先无跳变收尾,再从静止位判断方向
+            if (d.snapTimer || d.onEnd) odoFinalize(d);
+            odoMove(d, digit);
+            // 前导零(非末位且未遇到非零数字)做浅色处理
             if (!foundNonZero && digit === 0 && i < numDigits - 1) digits[i].el.classList.add('leading-zero');
             else { digits[i].el.classList.remove('leading-zero'); if (digit !== 0) foundNonZero = true; }
         }
@@ -3940,6 +4435,11 @@ function validateUf2ForDevice(p, devInfo) {
             return;
         }
         const startTime = performance.now();
+        // round72: 同一滑条 600ms 内被再次 smoothSliderTo 时,取消旧动画环并按
+        // 身份删除登记——此前直接覆盖 Map 条目,旧环继续争写 value 且其收尾的
+        // delete 会误删新环登记(finishSliderAnims 在该窗口内收敛不到新环)
+        const prev = activeSliderAnims.get(slider.id);
+        if (prev) { cancelAnimationFrame(prev.raf); }
         const anim = { slider, target: targetValue, raf: 0 };
         activeSliderAnims.set(slider.id, anim);
         (function tick(now) {
@@ -3952,25 +4452,39 @@ function validateUf2ForDevice(p, devInfo) {
             updateStatusBar(slider.id, Math.round(current));
             if (progress < 1) anim.raf = requestAnimationFrame(tick);
             else {
-                activeSliderAnims.delete(slider.id);
+                if (activeSliderAnims.get(slider.id) === anim) activeSliderAnims.delete(slider.id);
                 setSlider(slider, targetValue);
                 requestAnimationFrame(() => { track.style.transition = ''; });
             }
         })(performance.now());
     }
 
-    const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, ledLimit: 3, ledSpeed: 3 };
+    const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, pkThTouch: 2, pkThRelease: 2 };
+    // round72: ledLimit/ledSpeed 是灯光面板的迷你直显滑条。此前先被通用循环
+    // odometer 化、又被下方文本直写摧毁,_odometer 残留指向孤立节点(僵尸表),
+    // 未来任何 setSlider 打到它们都会静默失更新——现在从建表环节直接排除。
+    const MINI_TEXT_SLIDERS = { ledLimit: 1, ledSpeed: 1 };
 
     function initSliderAnimations() {
         Object.entries(sbMap).forEach(([sid, sbid]) => {
             const sbEl = $(sbid);
-            if (sbEl) createOdometer(sbEl, 3);
+            if (!sbEl) return;
+            createOdometer(sbEl, 3);
+            // round72: 启动即按滑条当前值同步状态栏。此前只建表不赋值,sb 停在
+            // 全 0 直到用户第一次拖动滑条触发 input,造成页面加载期显示不一致。
+            const src = $(sid);
+            const v0 = parseInt(src && src.value, 10);
+            if (!isNaN(v0)) setOdometerValue(sbEl, v0);
         });
         document.querySelectorAll('input[type="range"]').forEach(slider => {
             const out = $(slider.id + 'v');
-            if (out) {
+            if (out && !MINI_TEXT_SLIDERS[slider.id]) {
                 createOdometer(out, sliderDigits[slider.id] || 3);
                 setOdometerValue(out, parseInt(slider.value, 10));
+            } else if (out) {
+                // 迷你直显滑条: 初始即纯文本,通用 input 监听器的 textContent
+                // 分支已覆盖其更新路径,无需(也不得)再挂第二套监听器
+                out.textContent = slider.value;
             }
             updateSliderFill(slider);
             slider.addEventListener('input', () => {
@@ -3979,14 +4493,12 @@ function validateUf2ForDevice(p, devInfo) {
                 else if (out) out.textContent = slider.value;
                 updateStatusBar(slider.id, parseInt(slider.value, 10));
                 if (slider.id === 'rgBright') updateLightLimitHint();
-                if (['rgThTouch', 'rgThRelease', 'rgDt', 'rgDr'].includes(slider.id)) checkThresholdHints();
+                if (['rgThTouch', 'rgThRelease', 'rgDt', 'rgDr'].includes(slider.id)) {
+                    checkThresholdHints();
+                    // round71: 配置模式下全局阈值变化实时反映到 INPUT TEST 格子
+                    if (slider.id === 'rgThTouch' || slider.id === 'rgThRelease') updateTcThresholdDisplay();
+                }
             });
-        });
-        // 迷你滑条(灯光面板)数值直显
-        ["ledLimit", "ledSpeed"].forEach(id => {
-            const s = $(id); if (!s) return;
-            s.addEventListener('input', () => { const o = $(id + 'v'); if (o) o.textContent = s.value; });
-            const o = $(id + 'v'); if (o) o.textContent = s.value;
         });
     }
 
@@ -4005,6 +4517,11 @@ function validateUf2ForDevice(p, devInfo) {
         buf[10] = 500 & 0xFF; buf[11] = (500 >> 8) & 0xFF;
         buf[12] = 200 & 0xFF; buf[13] = (200 >> 8) & 0xFF;
         buf[24] = 255; buf[25] = 10;
+        // round64: 逐键阈值全 0(继承); Mock 按 1.6.0 报版本以启用面板逐键 UI
+        for (let i = 0; i < CFG_NUM_KEYS; i++) {
+            buf[CFG_OFF_TH_TOUCH_KEY + i] = 0;
+            buf[CFG_OFF_TH_RELEASE_KEY + i] = 0;
+        }
         buf[127] = calcXorSum(buf);
         return buf;
     }
@@ -4015,6 +4532,7 @@ function validateUf2ForDevice(p, devInfo) {
             this.configMode = false;
             this.cfgSetPending = null;  // round63f: CFG_SET 载入流跨 write 累积
             this.tofCount = MOCK_GEN2 ? 3 : 4;  // gen2:ToF 数异常,应被门禁拦截
+            this.rawReport = false;  // round66: 压力上报状态
             this.cmdLog = [];  // round63h: 与真实固件 0xCE 命令日志同构(仅顶层命令字节)
             // 无定时器收发:后台标签页的 setTimeout 节流会把 Mock 卡死,
             // 因此数据入队即唤醒等待的 reader,不依赖轮询。
@@ -4082,11 +4600,25 @@ function validateUf2ForDevice(p, devInfo) {
                 if (this.cmdLog.length > 255) this.cmdLog.shift();
                 this.cmdLog.push(cmd);
                 if (cmd === CMD.DEV_DETECT) { this.send([CMD.DEV_DETECT]); }
-                else if (cmd === CMD.GET_API_LEVEL) { this.send([API_LEVEL]); }
+                else if (cmd === CMD.GET_API_LEVEL) { this.send([0x10]); }  // 一代设备 API 恒为 0x10
                 else if (cmd === CMD.GET_INPUT) { this.send(this.inputFrame()); }
                 else if (cmd === CMD.SET_LED) { i += 96; /* 无应答 */ }
                 else if (cmd === CMD.CONFIG_MODE) { this.configMode = true; }
                 else if (cmd === CMD.CFG_KEEPALIVE) { /* round57: 心跳,静默无响应 */ }
+                else if (cmd === CMD.GET_RAW_STATUS) {
+                    // round66: 压力上报开关查询
+                    // round68: 报 active 状态(会话开关 OR cfg2 bit1 游戏基线)
+                    const active = this.rawReport || ((this.cfg[5] & BIT_GAME_RAW_SLIDER) !== 0);
+                    this.sendText("RAW=" + (active ? "1" : "0"), 8);
+                }
+                else if (cmd === CMD.SET_RAW_REPORT) {
+                    // round66: 压力上报开关设置(1B)
+                    // round68: 0x00 仅关会话开关;0xC4 报 active(含游戏基线)
+                    const v = bytes[i++];
+                    this.rawReport = (v === 1);
+                    const active = this.rawReport || ((this.cfg[5] & BIT_GAME_RAW_SLIDER) !== 0);
+                    this.sendText("RAW=" + (active ? "1" : "0"), 8);
+                }
                 else if (cmd === 0xCE) {
                     // round63h: 命令日志转储, 与真机 handleCommand 0xCE 同构
                     const n = Math.min(this.cmdLog.length, 255);
@@ -4136,7 +4668,7 @@ function validateUf2ForDevice(p, devInfo) {
                     else this.sendText("flashing denied", 10);
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    const s = "FW:1.5.3 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.5.3;hw_v1";
+                    const s = "FW:1.6.0 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.0;hw_v1";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -4148,8 +4680,29 @@ function validateUf2ForDevice(p, devInfo) {
             const f = new Uint8Array(33);
             const t = Date.now() / 1000;
             for (let i = 0; i < 32; i++) {
-                const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
-                f[i] = Math.round(Math.min(255, bump * 220 + 15 * (0.5 + 0.5 * Math.sin(t * 3 + i))));
+                // round66: 模拟真实 diff 尺度(Idle 底噪 ~4-13、触碰 40-60、坏键偏置 +14)。
+                // rawReport=false(普通轮询演示): 高斯扫模拟划键;
+                // rawReport=true(校准会话): 静止 idle + 坏键偏置 + 轮转"按下"每 1.5s 一键,
+                // 使校准 Phase1(静置) 采到真实 idleMax、Phase2(划键) 采到每键 touchMin。
+                // round69: cfg2 bit1(游戏压力映射)开启且无会话开关时,模拟固件 game 分支
+                // (按下报映射值 MPR×4 clamp 255 / 释放 0)。
+                const gameRawOn = !this.rawReport && ((this.cfg[5] & BIT_GAME_RAW_SLIDER) !== 0);
+                let idleBias = 0;
+                if (i === 4) idleBias = 14;   // 坏键 A(高空闲)
+                else if (i === 16) idleBias = 6;  // 坏键 B(中等)
+                const base = 6 + 2 * (0.5 + 0.5 * Math.sin(t * 2.1 + i * 1.7));
+                let v = base + idleBias + 3 * (0.5 + 0.5 * Math.sin(t * 3 + i));
+                // rawReport=false(普通轮询演示): 高斯扫模拟划键,叠加坏键偏置;
+                // rawReport=true(校准会话): 纯静止 idle(用户手应离开), 两阶段都真实。
+                if (gameRawOn) {
+                    // 游戏映射模式: 按下=映射值(×4 clamp 255), 释放=0
+                    const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
+                    v = (bump > 0.3) ? Math.min(255, Math.round(v * 4)) : 0;
+                } else if (!this.rawReport) {
+                    const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
+                    v += bump * 44;
+                }
+                f[i] = Math.round(Math.min(255, v));
             }
             f[32] = (Math.sin(t * 1.7) > 0 ? 0b001100 : 0) | (Math.sin(t * 0.9) > 0.6 ? 0b110000 : 0);
             return f;
@@ -4251,6 +4804,7 @@ function validateUf2ForDevice(p, devInfo) {
         inputPolling = false;
         readLoopRunning = false;
         configMode = false;
+        updateTcThresholdDisplay();  // round71: 断开时格子恢复压力基线
         try { if (reader) await reader.cancel(); } catch (e) {}
         try { if (writer) await writer.close(); } catch (e) {}
         try { if (port) await port.close(); } catch (e) {}
@@ -4279,6 +4833,9 @@ function validateUf2ForDevice(p, devInfo) {
         readBuffer = new Uint8Array(0);
         connected = false;
         resetInputBtn();
+        updateTcThresholdDisplay();  // round71 复查 A1: 清格子阈值标记,重进配置才能正确重绘
+        // round71 终审 P3: 校准测量中断线,中止向导避免跑完弹出伪统计报告
+        if (calRunning) calAbort = true;
         updateUI();
         setStatus("连接已断开", "error");
         log(reason, "warn");
@@ -4373,9 +4930,10 @@ function validateUf2ForDevice(p, devInfo) {
                 const b = await waitForBytes(1, 800);
                 const lvl = b[0];
                 $("apiLevelVal").textContent = "0x" + lvl.toString(16).padStart(2, "0");
-                if (lvl === API_LEVEL) { log("API Level 匹配 v1 固件: 0x" + lvl.toString(16)); $("apiLevelVal").className = "metric-cell-value ok"; }
+                // round69: API 0x10(1.5.x)/0x11(v1.6) 均属一代固件; <0x10 才提示不匹配
+                if (lvl >= 0x10) { log("API Level 匹配 v1 固件: 0x" + lvl.toString(16)); $("apiLevelVal").className = "metric-cell-value ok"; }
                 else {
-                    log(`警告: 检测到 API Level 0x${lvl.toString(16).padStart(2, "0")},不是 v1 固件 (0x${API_LEVEL.toString(16)})`, "warn");
+                    log(`警告: 检测到 API Level 0x${lvl.toString(16).padStart(2, "0")},低于一代固件最低要求 (0x10)`, "warn");
                     $("apiLevelVal").className = "metric-cell-value err";
                     setStatus("设备版本不匹配", "error");
                 }
@@ -4405,6 +4963,26 @@ function validateUf2ForDevice(p, devInfo) {
             $("infoFw").textContent = devInfo.fw + (devInfo.var ? " · " + devInfo.var : "");
             $("infoApi").textContent = "0x" + devInfo.api.toString(16) + " / v" + devInfo.hwVer;
             $("infoVar").textContent = devInfo.var || "(旧固件)";
+            // round66/70: 压力上报会话门禁以固件版本为准(1.6.0+ 才有 0xC4/0xC5
+            // pressureSnap 管线)。API 是硬件/协议标识(一代=0x10),不能当新命令
+            // 门禁:旧面板曾用 api>=0x11 导致真机(API 0x10)永远不发 0xC5。
+            rawReportSupported = !!(devInfo.fw && cmpVersion(devInfo.fw, "1.6.0") >= 0);
+            // round64: v1.6 逐键阈值门禁。0xBD 版本 >=1.6.0 才允许编辑逐键;
+            // 旧固件保留 reserved 全 0, UI 显示全部"继承"并禁用。
+            // round68: ckGameRaw 同门禁(实验开关需 1.6.0 固件)。旧固件清勾选
+            // 防止用户勾选后保存被 sanitize 静默丢弃; disabled 由 updateUI 统一门禁。
+            if (devInfo.fw && cmpVersion(devInfo.fw, "1.6.0") >= 0) {
+                if (!perKeyFwSupport) {
+                    perKeyFwSupport = true;
+                    log("固件 1.6.0+: 逐键阈值已启用", "");
+                    updatePerKeyUi();
+                    updateTcThresholdDisplay();
+                }
+            } else {
+                if (perKeyFwSupport) perKeyFwSupport = false;
+                $("ckGameRaw").checked = false;
+                log("固件低于 1.6.0: 逐键阈值编辑禁用(全部继承全局)", "warn");
+            }
             // round56: 连接时即从 0xBD 直读 hwVer 并同步到硬件版本选择器
             // (普通模式唯一可读的配置字段;其余字段需进配置模式 0xB4 读取)。
             // 仅在尚未进入配置模式时同步,避免覆盖表单未保存的编辑。
@@ -4537,6 +5115,13 @@ function validateUf2ForDevice(p, devInfo) {
     const tcs = []; for (let i = 1; i <= 32; i++) tcs[i] = $("tc" + i);
     const airs = []; for (let i = 1; i <= 6; i++) airs[i] = $("air" + i);
 
+    // round69: INPUT TEST 格子点击 → 配置模式下弹出逐键编辑气泡(复用 openPerKeyBubble)
+    for (let i = 1; i <= 32; i++) {
+        const tc = tcs[i];
+        if (!tc) continue;
+        tc.addEventListener("click", () => { openPerKeyBubble(i - 1); });
+    }
+
     async function inputLoop() {
         if (inputLoopRunning) return;
         inputLoopRunning = true;
@@ -4574,14 +5159,28 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     function renderInput(data) {
+        // round71: MPR121 原生压力 0-63, 按 (0,63] 线性映射才不会满按只有一半亮度;
+        // MBR3116 原生 0-255。未开真实压力会话时固件输出恒定 128 判定帧,直接给最高亮度。
+        const sensorMax = perKeyIsMbr() ? 255 : 63;
         for (let i = 1; i <= 32; i++) {
             const tc = tcs[i];
             if (!tc) continue;
             const v = data[i - 1];
             const on = v > 0;
             tc.classList.toggle("active", on);
-            tc.style.opacity = on ? (0.35 + v / 255 * 0.65).toFixed(2) : "";
+            let op = "";
+            if (on) {
+                if (!rawReportOn && !perKeyGameRaw && v === 128) op = "1.00";
+                else op = Math.min(1, v / sensorMax) .toFixed(2);
+                op = (0.35 + parseFloat(op) * 0.65).toFixed(2);
+            }
+            tc.style.opacity = op;
             tc.innerText = "" + v;
+            // round67/69: 压力模式(会话开关或游戏映射)下叠加当前生效阈值提示
+            if (rawReportOn || perKeyGameRaw) {
+                const th = perKeyTouch[i - 1] || parseInt($("rgThTouch").value) || 6;
+                tc.title = `tc${i}: 当前 ${v} / 阈值 ${th}`;
+            }
         }
         for (let i = 0; i < 6; i++) {
             const a = airs[i + 1];
@@ -4620,19 +5219,72 @@ function validateUf2ForDevice(p, devInfo) {
         if (btn) setBtnState(btn, playIcon, ' 开始测试', 'btn-success');
     }
 
-    $("toggleInputBtn").addEventListener("click", () => {
+    // round66: 压力上报会话开关(仅普通模式, 固件 1.6.0+)。面板用 0xC5 显式
+    // 开/关; 固件在 CDC 断连/进配置/重启时自动回 0, 无需面板兜底。
+    let rawReportOn = false;
+    let rawReportSupported = false;  // 固件 1.6.0+ 或 Mock 时置真
+    async function setRawReport(on) {
+        if (!rawReportSupported) return false;
+        if (!connected) return false;
+        try {
+            return await withSerialLock(async () => {
+                flushReadBuffer();
+                await writeBytes(new Uint8Array([CMD.SET_RAW_REPORT, on ? 1 : 0]));
+                const line = await waitForLine(1000);
+                rawReportOn = (line.trim() === "RAW=1");
+                return rawReportOn;
+            });
+        } catch (e) {
+            log("压力上报切换失败: " + e.message, "warn");
+            return false;
+        }
+    }
+    async function queryRawReport() {
+        if (!rawReportSupported || !connected) return null;
+        try {
+            return await withSerialLock(async () => {
+                flushReadBuffer();
+                await writeBytes(new Uint8Array([CMD.GET_RAW_STATUS]));
+                const line = await waitForLine(1000);
+                rawReportOn = (line.trim() === "RAW=1");
+                return rawReportOn;
+            });
+        } catch (e) { return null; }
+    }
+
+    // round70: INPUT TEST 统一启动入口。连接/保存重启重连/刷写重连三条自动
+    // 路径都用它,保证 INPUT TEST 始终显示真实压力:
+    //   - 固件 1.6.0+: 自动开压力会话(0xC5 1),帧中每键报 0-255 模拟量,
+    //     否则真机 GET_INPUT 只能回 1.5.x 二进制帧(按下 128/松开 0),用户
+    //     看到的永远是固定 128——连接后不手动点"开始测试"就完全看不到压力。
+    //   - round70b: "实时真实压力&压力映射"开关(perKeyGameRaw)选中时同样
+    //     发 0xC5 会话开关——cfg2 bit1 是持久基线(游戏 DLL 用),0xC5 是
+    //     面板会话(INPUT TEST 用),两者独立。选中开关 = INPUT TEST 显示
+    //     实时真实压力;不选中 = 默认 0/128 判定帧。
+    // 返回 true 表示轮询已启动。
+    async function startInputPolling() {
+        if (!connected || configMode) return false;
+        inputPolling = true;
+        setBtnState($("toggleInputBtn"), stopIcon, ' 停止测试', 'btn-warning');
+        if (rawReportSupported) await setRawReport(true);
+        inputLoop();
+        return true;
+    }
+
+    $("toggleInputBtn").addEventListener("click", async () => {
         const btn = $("toggleInputBtn");
         if (inputPolling && connected) {
             inputPolling = false;
             setBtnState(btn, playIcon, ' 开始测试', 'btn-success');
             log("已暂停输入轮询");
+            // round70b: 停止测试即关会话开关(0xC5 0);cfg2 bit1 持久基线不受影响
+            if (rawReportOn) setRawReport(false);
         } else {
             if (!connected) { alert("需要先连接手台"); return; }
             if (configMode) { alert("配置模式下 HID 输入已暂停,请先退出配置模式"); return; }
-            inputPolling = true;
-            setBtnState(btn, stopIcon, ' 停止测试', 'btn-warning');
             log("已开始输入轮询");
-            inputLoop();
+            // round70: 统一入口(自动开压力会话,INPUT TEST 显示真实压力)
+            await startInputPolling();
         }
     });
 
@@ -4641,6 +5293,25 @@ function validateUf2ForDevice(p, devInfo) {
     // ================================================================
     function getHwVer() { return hwVerValue; }
     let hwVerValue = 1;
+
+    // round64: 逐键阈值状态(仅 fw >= 1.6.0 时启用编辑, 0 = 继承全局)。
+    // perKeyTouch[i]/perKeyRelease[i] 为原始字节 0-255, 0 表示继承。
+    const perKeyTouch = new Array(CFG_NUM_KEYS).fill(0);
+    const perKeyRelease = new Array(CFG_NUM_KEYS).fill(0);
+    // round69: cfg2 bit1 游戏压力映射开关的运行时镜像(pack/unpack 同步)。
+    // 开启时 INPUT TEST 不自动发 0xC5 会话开关,直接显示帧中映射值(与游戏 DLL 一致)。
+    let perKeyGameRaw = false;
+    let perKeyFwSupport = false;  // 0xBD 版本 >= 1.6.0 或 Mock 时置真
+    // round67: 校准已回填但尚未确认保存时置真; unpackConfig(进配置模式读回)保留回填值,
+    // 直到退出/重启(设备重枚举)后清除——保证"校准→进配置→保存并重启"链路不丢结果。
+    let calPendingBackfill = false;
+
+    function perKeyIsMbr() {
+        return !!$("ckMbr3116").checked;
+    }
+    function perKeyRange() {
+        return perKeyIsMbr() ? { min: 129, max: 255 } : { min: 1, max: 63 };
+    }
 
     function packConfig() {
         const base = lastReadConfig && lastReadConfig.length === CFG_SIZE ? lastReadConfig.slice() : new Uint8Array(CFG_SIZE);
@@ -4661,7 +5332,11 @@ function validateUf2ForDevice(p, devInfo) {
         buf[4] = cfg1;
 
         // round55: cfg2 bit0 = 关闭 LampArray(disable 语义);cfg3 = 附加输入延迟 0-15ms
-        buf[5] = $("ckLampArray").checked ? 0 : BIT_DISABLE_LAMP_ARRAY;
+        // round68/69: cfg2 bit1 = 压力报送&压力映射(单开关,默认关)——开启后面板
+        // INPUT TEST 与游戏内 DLL 都收到线性归一化 0-255 映射值
+        buf[5] = ($("ckLampArray").checked ? 0 : BIT_DISABLE_LAMP_ARRAY) |
+                 ($("ckGameRaw").checked ? BIT_GAME_RAW_SLIDER : 0);
+        perKeyGameRaw = $("ckGameRaw").checked;
         buf[6] = Math.max(0, Math.min(15, parseInt($("rgLatency").value) || 0));
 
         buf[7] = Math.max(1, Math.min(63, parseInt($("rgThTouch").value) || 1));
@@ -4693,6 +5368,17 @@ function validateUf2ForDevice(p, devInfo) {
         rawLightLimit = { byte: buf[24], pct: brightPct };
         buf[25] = parseInt($("rgHeight").value) || 0;
 
+        // round64: 逐键阈值(0 = 继承,仅在 fw>=1.6.0 允许编辑)。底包保真:
+        // 未编辑的键保持 lastReadConfig 原字节,编辑过的按 perKey 状态写回。
+        if (perKeyFwSupport) {
+            for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                const tv = perKeyTouch[i];
+                const rv = perKeyRelease[i];
+                if (tv !== null && tv !== undefined) buf[CFG_OFF_TH_TOUCH_KEY + i] = tv & 0xFF;
+                if (rv !== null && rv !== undefined && !perKeyIsMbr()) buf[CFG_OFF_TH_RELEASE_KEY + i] = rv & 0xFF;
+            }
+        }
+
         buf[127] = calcXorSum(buf);
         return buf;
     }
@@ -4723,9 +5409,15 @@ function validateUf2ForDevice(p, devInfo) {
         $("ckKbAir").checked = !!(buf[4] & BIT_KB_AIR);
         // round55: cfg2 bit0 为 disable 语义(置1=关),复选框勾选=开启动态照明
         $("ckLampArray").checked = !(buf[5] & BIT_DISABLE_LAMP_ARRAY);
+        $("ckGameRaw").checked = !!(buf[5] & BIT_GAME_RAW_SLIDER);
+        perKeyGameRaw = $("ckGameRaw").checked;  // round69: 面板感知游戏映射开关,INPUT TEST 不覆盖
         setSlider($("rgLatency"), Math.min(15, buf[6] || 0), { quiet: true });
-        smoothSliderTo($("rgThTouch"), buf[7]);
-        smoothSliderTo($("rgThRelease"), buf[8]);
+        // round70b: 校准回填后(calPendingBackfill)进配置模式时,全局 th_touch/
+        // th_release 同样保留回填建议值,不被设备旧值覆盖(与下方逐键回填同保护)。
+        if (!calPendingBackfill) {
+            smoothSliderTo($("rgThTouch"), buf[7]);
+            smoothSliderTo($("rgThRelease"), buf[8]);
+        }
         setSlider($("rgDt"), buf[9] & 0x0F, { quiet: true });
         setSlider($("rgDr"), (buf[9] >> 4) & 0x0F, { quiet: true });
         smoothSliderTo($("rgAirMax"), buf[10] | (buf[11] << 8));
@@ -4739,6 +5431,19 @@ function validateUf2ForDevice(p, devInfo) {
         }
         smoothSliderTo($("rgBright"), Math.round(buf[24] * 100 / 255));
         setSlider($("rgHeight"), buf[25] || 10, { quiet: true });
+        // round64: 逐键阈值读回(0 = 继承)。仅 fw>=1.6.0 时这些偏移才可能非 0;
+        // 旧固件读到的 reserved 全 0, 逐键 UI 显示"全部继承"。
+        // round67: 校准回填后(calPendingBackfill)进入配置模式的这次 unpack 不能
+        // 用设备旧值覆盖回填结果——用户按弹窗提示"进配置模式→保存并重启"时,
+        // 校准建议必须原样出现在网格里; 保存成功(EXIT/重启)后标志清除, 恢复正常读回。
+        if (!calPendingBackfill) {
+            for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                perKeyTouch[i] = buf[CFG_OFF_TH_TOUCH_KEY + i];
+                perKeyRelease[i] = buf[CFG_OFF_TH_RELEASE_KEY + i];
+            }
+        }
+        updatePerKeyUi();
+        updateTcThresholdDisplay();
         $("xorVal").value = "0x" + buf[127].toString(16).padStart(2, "0");
         updateLightLimitHint();
         checkThresholdHints();
@@ -4794,8 +5499,10 @@ function validateUf2ForDevice(p, devInfo) {
                         await gateRejectDevice(`固件版本 ${devInfo.fw} 不在一代 hw_v1 白名单 [${KNOWN_V1_FW.join(", ")}] 内。二代设备与其他变体的配置功能不同,已拦截。`);
                         return false;
                     }
-                    if (devInfo.api !== null && devInfo.api !== API_LEVEL) {
-                        await gateRejectDevice(`API Level 0x${devInfo.api.toString(16)} 与一代固件 (0x${API_LEVEL.toString(16)}) 不匹配。`);
+                    // round69: API 是协议/硬件信息标识, 0x10(1.5.x) 与 0x11(v1.6) 都是一代设备,
+                    // 不应因 API 升级而拦截旧固件——仅拒绝低于一代最低 API 的情况。
+                    if (devInfo.api !== null && devInfo.api < 0x10) {
+                        await gateRejectDevice(`API Level 0x${devInfo.api.toString(16)} 低于一代固件最低要求 (0x10),可能为二代/其他变体设备。`);
                         return false;
                     }
                 } else {
@@ -4820,10 +5527,12 @@ function validateUf2ForDevice(p, devInfo) {
         // 配置模式下:退出并重启
         if (configMode) {
             if (!confirm("退出配置模式将重启设备,是否继续?")) return;
+            calPendingBackfill = false;  // round67: 未保存退出,放弃校准回填保护
             try {
                 await writeBytes(new Uint8Array([CMD.EXIT]));
                 log("已发送退出命令 (0xB9),设备正在重启");
                 configMode = false;
+                updateTcThresholdDisplay();  // round71: 退出配置,格子恢复压力基线
                 await sleep(200);
                 await closePort();
             } catch (e) { log("退出配置模式失败: " + e.message, "error"); }
@@ -4957,6 +5666,7 @@ function validateUf2ForDevice(p, devInfo) {
         try {
             const ok = await doSaveConfig();
             if (!ok) { log("保存未成功,取消重启", "warn"); return; }
+            calPendingBackfill = false;  // round67: 校准回填已写入设备,恢复正常读回
             await sleep(100);
             await writeBytes(new Uint8Array([CMD.EXIT]));
             log("已保存并发送重启命令,设备正在重启");
@@ -4989,9 +5699,8 @@ function validateUf2ForDevice(p, devInfo) {
             if (!ok) return false;
             log("保存并重启完成,已自动重连");
             await autoHandshake();
-            inputPolling = true;
-            setBtnState($("toggleInputBtn"), stopIcon, ' 停止测试', 'btn-warning');
-            inputLoop();
+            // round70: 统一启动入口(自动开压力会话,INPUT TEST 显示真实压力)
+            await startInputPolling();
             stopSaveRebootReconnect();
             return true;
         } catch (e) { return false; }
@@ -5110,6 +5819,437 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     // ================================================================
+    // 逐键阈值 UI(v1.6, fw>=1.6.0 门禁; round70: 移除参数调节区 32 格网格,
+    // 仅保留 INPUT TEST 气泡编辑;气泡滑条复用"参数调节"区 slider-row 样式)
+    // ================================================================
+    let pkSelectedKey = -1;  // 0-31 或 -1(未选)
+
+    function updatePerKeyUi() {
+        // 参数调节区网格已移除;仅用于气泡可用性提示(配置模式 + 固件支持)
+        const hint = $("perKeyHint");
+        if (hint) hint.style.display = (perKeyFwSupport && configMode) ? "" : "none";
+    }
+
+    // ================================================================
+    // round71: 配置模式下 INPUT TEST 格子显示生效触摸/释放阈值。
+    // 配置模式进入时输入轮询已停,不能挂 renderInput 逐帧;此函数事件驱动:
+    // 进配置解包后 / 改全局或逐键滑条时刷新;退出配置/断开时恢复压力基线。
+    // 触摸+释放都有则上下两行,仅触摸(继承 0 或 MBR)单值居中;颜色统一 accent。
+    // ================================================================
+    function effectiveKeyThresholds(i) {
+        const globTouch = parseInt($("rgThTouch").value, 10) || 0;
+        const globRelease = parseInt($("rgThRelease").value, 10) || 0;
+        return {
+            touch: perKeyTouch[i] || globTouch,
+            release: perKeyIsMbr() ? 0 : (perKeyRelease[i] || globRelease),
+            custom: !!perKeyTouch[i],
+        };
+    }
+    function updateTcThresholdDisplay() {
+        for (let i = 1; i <= CFG_NUM_KEYS; i++) {
+            const tc = tcs[i];
+            if (!tc) continue;
+            if (!configMode || !perKeyFwSupport) {
+                // 恢复压力基线: 清掉阈值 DOM 与缓存标记(内容由 renderInput/clearInputDisplay 接管)
+                if (tc._thMode) {
+                    tc._thMode = false;
+                    tc._thSig = "";
+                    tc.innerHTML = "";
+                    tc.title = "";
+                    tc.style.color = "";
+                    tc.classList.remove("th-mode");  // round72: 恢复 BASE 通道数字伪元素
+                }
+                continue;
+            }
+            const t = effectiveKeyThresholds(i - 1);
+            const sig = `${t.touch}|${t.release}`;
+            if (tc._thSig === sig && tc._thMode) continue;
+            tc._thSig = sig;
+            tc._thMode = true;
+            tc.classList.add("th-mode");  // round72: 配合 CSS 隐藏通道数字伪元素
+            tc.classList.remove("active");
+            tc.style.opacity = "";
+            if (t.touch > 0 && t.release > 0) {
+                tc.innerHTML = `<span class="tc-th-touch">${t.touch}</span><span class="tc-th-release">${t.release}</span>`;
+                tc.title = `tc${i}: 触摸 ${t.touch} / 释放 ${t.release}` + (t.custom ? " (逐键)" : "");
+            } else {
+                const only = t.touch > 0 ? t.touch : t.release;
+                tc.innerHTML = `<span class="tc-th-single">${only}</span>`;
+                tc.title = `tc${i}: 阈值 ${only}` + (t.custom ? " (逐键)" : "");
+            }
+        }
+    }
+
+    // 气泡数显更新: initSliderAnimations 已对数显做 odometer 化,直接
+    // textContent 会破坏滚动数字结构;odometer 感知地写值。
+    function setPkVal(el, text) {
+        if (!el) return;
+        if (el._odometer) {
+            const n = parseInt(text, 10);
+            if (!isNaN(n)) setOdometerValue(el, n);
+            else { el._odometer = null; el.classList.remove("odometer"); el.innerHTML = ""; el.textContent = text; }
+        } else {
+            el.textContent = text;
+        }
+    }
+
+    // round69/70: 气泡编辑——配置模式下点 INPUT TEST 格子弹出
+    function openPerKeyBubble(i) {
+        if (!perKeyFwSupport || !configMode || i < 0 || i >= CFG_NUM_KEYS) return;
+        pkSelectedKey = i;
+        const modal = $("pkBubbleModal");
+        if (!modal) return;
+        const rng = perKeyRange();
+        $("pkBubbleTitle").textContent = `键 tc${i + 1}`;
+        $("pkBubbleState").textContent = perKeyTouch[i] ? `自定义: ${perKeyTouch[i]}` : "继承全局";
+        const tsl = $("pkThTouch");
+        const tslOut = $("pkThTouchv");
+        tsl.min = rng.min; tsl.max = rng.max; tsl.step = 1;
+        // 触发滑条: 0 由"恢复继承"表达;滑条实际值落在有效区间,数显展示存储字节
+        tsl.value = perKeyTouch[i] || rng.min;
+        tsl.disabled = false;
+        setPkVal(tslOut, perKeyTouch[i] ? String(perKeyTouch[i]) : "0");
+        tsl.oninput = () => {
+            const v = parseInt(tsl.value, 10);
+            perKeyTouch[i] = v;
+            $("pkBubbleState").textContent = `自定义: ${v}`;
+            setPkVal(tslOut, String(v));
+            updateSliderFill(tsl);
+            updateTcThresholdDisplay();
+        };
+        updateSliderFill(tsl);
+        // 释放滑条: MBR 无意义,置灰
+        const isMbr = perKeyIsMbr();
+        const rsl = $("pkThRelease");
+        const rslOut = $("pkThReleasev");
+        const trk = $("pkReleaseTrack");
+        const rrow = $("pkReleaseRow");
+        const rhint = $("pkReleaseHint");
+        if (isMbr) {
+            if (trk) trk.style.display = "none";
+            if (rrow) rrow.style.display = "";
+            if (rhint) rhint.textContent = "MBR3116 不支持逐键释放,始终继承全局";
+            setPkVal(rslOut, "继承");
+            rsl.disabled = true;
+            perKeyRelease[i] = 0;
+        } else {
+            if (trk) trk.style.display = "";
+            if (rrow) rrow.style.display = "";
+            if (rhint) rhint.textContent = "0 = 继承全局 th_release";
+            rsl.min = rng.min; rsl.max = rng.max; rsl.step = 1;
+            rsl.value = perKeyRelease[i] || (rng.min + 1);
+            rsl.disabled = false;
+            setPkVal(rslOut, perKeyRelease[i] ? String(perKeyRelease[i]) : "0");
+            rsl.oninput = () => {
+                const v = parseInt(rsl.value, 10);
+                perKeyRelease[i] = v;
+                setPkVal(rslOut, String(v));
+                updateSliderFill(rsl);
+                updateTcThresholdDisplay();
+            };
+            updateSliderFill(rsl);
+        }
+        $("pkInheritBtn").onclick = () => {
+            perKeyTouch[i] = 0;
+            perKeyRelease[i] = 0;
+            $("pkBubbleState").textContent = "继承全局";
+            tsl.value = rng.min;
+            setPkVal(tslOut, "0");
+            updateSliderFill(tsl);
+            if (!isMbr) {
+                rsl.value = rng.min + 1;
+                setPkVal(rslOut, "0");
+                updateSliderFill(rsl);
+            }
+            updateTcThresholdDisplay();
+        };
+        $("pkCloseBtn").onclick = closePerKeyBubble;
+        // 打开(带入场动画: flash-modal 的 fadeIn/fadeUp 自动触发)
+        openModalAnimated(modal);
+    }
+
+    // round71: 通用弹窗关闭助手(抽自 closePerKeyBubble)——加 .closing 播放
+    // fadeOut/fadeUpOut, animationend 后隐藏并移除类;400ms 兜底防动画异常。
+    // 所有 flash-modal 系弹窗(firmware 更新/设备详情/逐键气泡/校准向导)统一走这里,
+    // 保证退出都有动画。_hideTok 代际令牌防竞态: 关闭后 400ms 内重开时,
+    // 旧定时器/旧 animationend 监听不得把新弹窗隐藏(复查 C1)。
+    function closeModalAnimated(modal) {
+        if (!modal || modal.style.display === "none") return;
+        const tok = modal._hideTok = {};
+        modal.classList.add("closing");
+        const hide = () => {
+            if (modal._hideTok !== tok) return;  // 已被新一次打开作废
+            modal._hideTok = null;
+            modal.style.display = "none";
+            modal.classList.remove("closing");
+            modal.removeEventListener("animationend", onEnd);
+        };
+        const onEnd = (e) => { if (e.target === modal) hide(); };
+        modal.addEventListener("animationend", onEnd);
+        setTimeout(() => { if (modal._hideTok === tok) hide(); }, 400);
+    }
+    // round71: 配套打开助手——清旧 closing 态并作废旧 hide 代际,统一入场。
+    function openModalAnimated(modal) {
+        if (!modal) return;
+        modal._hideTok = null;  // 作废未触发的 hide 定时器/监听
+        modal.classList.remove("closing");
+        modal.style.display = "flex";
+    }
+
+    function closePerKeyBubble() {
+        const modal = $("pkBubbleModal");
+        if (!modal || modal.style.display === "none") return;
+        pkSelectedKey = -1;
+        closeModalAnimated(modal);
+    }
+
+    // ================================================================
+    // 一键阈值检测向导(round67, 移植 calibrate_thresholds.ps1 两阶段统计法)
+    // Phase 1 静置 20s: 每键 idleMax[k] 与直方图; Phase 2 划全滑条 15s:
+    // 每键 touchMin[k]。建议: 全局 th_touch = clamp(p85(idleMax)+2);
+    // 异常键(idleMax[k]+2 > 全局)设 thTouchKey[k]; 释放 = th-1(MPR)/继承(MBR)。
+    // 数据源 = inputLoop 的 GET_INPUT 帧(压力模式开启时 0-255 模拟量)。
+    // ================================================================
+    // round70b: 校准报告内容用 escapeHtml 转义防注入。
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    // round71: 校准改为三屏向导弹窗(intro 规则说明 -> running 环形倒计时 -> result 报告),
+    // 取代 round70b 的报告 Toast。测量循环由 tick 回调驱动倒计时,calAbort 支持中途取消;
+    // Mock(?mock=)下时长 ÷20 加速,真机仍为 20s/15s。
+    const CAL_IS_MOCK = /[?&]mock/.test(location.search);
+    function calPhaseSeconds(sec) { return CAL_IS_MOCK ? Math.max(1, Math.round(sec / 20)) : sec; }
+
+    function calShowScreen(id) {
+        for (const s of ["calScreenIntro", "calScreenRunning", "calScreenResult"]) {
+            $(s).style.display = (s === id) ? "" : "none";
+        }
+    }
+    function calOpenWizard() {
+        const modal = $("calWizardModal");
+        if (!modal) return;
+        calShowScreen("calScreenIntro");
+        openModalAnimated(modal);
+    }
+    function calCloseWizard() {
+        closeModalAnimated($("calWizardModal"));
+    }
+    // 倒计时渲染:剩 remain 秒,ratio 为已消耗比例(0-1)。环形进度用 conic-gradient。
+    let calRingLastRatio = -1;
+    function calRenderRing(remain, ratio) {
+        const num = $("calCountdown");
+        if (num && num.textContent !== String(remain)) num.textContent = remain;
+        const ring = $("calRing");
+        if (ring && Math.abs(ratio - calRingLastRatio) > 0.004) {
+            const deg = Math.round(Math.min(1, Math.max(0, ratio)) * 360);
+            ring.style.background = `conic-gradient(var(--c-accent) ${deg}deg, var(--c-surface-3, #262a33) ${deg}deg)`;
+            calRingLastRatio = ratio;
+        }
+    }
+
+    let calRunning = false;
+    let calAbort = false;
+    async function startCalibration() {
+        if (calRunning) { log("校准向导已在运行"); return; }
+        if (!connected) { alert("需要先连接手台"); return; }
+        if (configMode) { alert("请先退出配置模式再开始校准"); return; }
+        if (!rawReportSupported) { alert("固件低于 1.6.0,不支持压力上报,无法校准"); return; }
+        calRunning = false;
+        calAbort = false;
+        calShowScreen("calScreenIntro");
+        calOpenWizard();
+    }
+
+    // 向导实际执行体(从 intro 屏「开始校准」进入)。沿用 round67 两阶段统计法:
+    // Phase1 静置采 idleMax+直方图, Phase2 划键采 touchMin,建议全局 th_touch=p85(idleMax)+2,
+    // 异常键逐键抬升。差异仅在 UI:每帧刷新倒计时/进度环/阶段文案,可中止。
+    async function runCalibrationSequence() {
+        // 需在配置模式读到的配置基础上写回: 若未进过配置模式, 用当前表单值
+        if (!lastReadConfig) {
+            log("提示: 尚未读取设备配置,将基于表单当前值给出建议(保存前请先读配置)", "warn");
+        }
+        calRunning = true;
+        calAbort = false;
+        // 校准依赖 GET_INPUT 帧流; 若输入测试没在跑, 先自动开启(并同步按钮状态)。
+        // round70: 统一入口(自动开压力会话——校准的 Phase 1/2 需要真实压力采样)
+        if (!inputPolling) await startInputPolling();
+        const touch = [];
+        const release = [];
+        for (let i = 0; i < CFG_NUM_KEYS; i++) { touch[i] = 0; release[i] = 0; }
+
+        const samples = { idleMax: new Array(CFG_NUM_KEYS).fill(0), idleHist: [] };
+        for (let i = 0; i < CFG_NUM_KEYS; i++) samples.idleHist.push(new Array(256).fill(0));
+        const touchMin = new Array(CFG_NUM_KEYS).fill(256);
+        const touchHit = new Array(CFG_NUM_KEYS).fill(0);
+
+        // 收集即弃: inputLoop 每帧把最新帧放 latestInputData, 这里直接读共享变量
+        const probeInputFn = () => latestInputData;
+
+        let aborted = false;
+        try {
+            const ph1 = calPhaseSeconds(20), ph2 = calPhaseSeconds(15);
+            calShowScreen("calScreenRunning");
+            $("calRunTitle").textContent = "正在校准 · 第 1 轮 (静置)";
+            $("calRunHint").textContent = "第一轮：请静置，不要触碰触摸板";
+
+            log("--- 一键校准 Phase 1: 请离开滑条 20s ---");
+            await setRawReport(true);
+            const phase1Start = performance.now();
+            while ((performance.now() - phase1Start) / 1000 < ph1) {
+                if (calAbort) { aborted = true; break; }
+                await nextTick();
+                const remain = Math.max(0, Math.ceil(ph1 - (performance.now() - phase1Start) / 1000));
+                calRenderRing(remain, (performance.now() - phase1Start) / 1000 / ph1);
+                const f = probeInputFn();
+                if (!f) continue;
+                for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                    const v = f[i];
+                    if (v > samples.idleMax[i]) samples.idleMax[i] = v;
+                    samples.idleHist[i][v]++;
+                }
+            }
+            if (!aborted) log(`Phase 1 完成: idleMax = [${samples.idleMax.join(",")}]`);
+
+            if (!aborted) {
+                $("calRunTitle").textContent = "正在校准 · 第 2 轮 (触摸)";
+                $("calRunHint").textContent = "第二轮：请轻触或在触摸板上轻轻滑动，最好每个键都摸到";
+                log("--- 一键校准 Phase 2: 请用一根手指划完全部滑条 15s ---");
+                const phase2Start = performance.now();
+                while ((performance.now() - phase2Start) / 1000 < ph2) {
+                    if (calAbort) { aborted = true; break; }
+                    await nextTick();
+                    const remain = Math.max(0, Math.ceil(ph2 - (performance.now() - phase2Start) / 1000));
+                    calRenderRing(remain, (performance.now() - phase2Start) / 1000 / ph2);
+                    const f = probeInputFn();
+                    if (!f) continue;
+                    for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                        if (f[i] < touchMin[i]) touchMin[i] = f[i];
+                        if (f[i] > 0) touchHit[i]++;
+                    }
+                }
+                if (!aborted) log(`Phase 2 完成: touchMin = [${touchMin.join(",")}] 命中 = [${touchHit.join(",")}]`);
+            }
+
+            if (aborted) {
+                log("校准已取消", "warn");
+                calRevertBackfill();  // 复查 B1: 中止同样撤销回填
+                calCloseWizard();
+                return;
+            }
+
+            // 统计: 全局 p85(idleMax) = 取所有键 idleMax 排序第 85 百分位
+            const sorted = samples.idleMax.slice().sort((a,b)=>a-b);
+            const p85 = sorted[Math.floor(sorted.length * 0.85)];
+            const globTh = Math.max(1, Math.min(63, p85 + 2));
+            log(`建议全局 th_touch = ${globTh} (p85(idleMax)=${p85}+2)`);
+
+            const useMbr = perKeyIsMbr();
+            const rng = perKeyRange();
+            let customCount = 0;
+            for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                const idleMax = samples.idleMax[i];
+                if (idleMax + 2 > globTh) {
+                    // round67: MBR 有效下限 129(计划 D4.1, ≤128 只等价默认 80, 无收紧效果),
+                    // 用 rng.min 而非 1 作为下限, 避免生成"无效收紧"建议值误导用户。
+                    let v = Math.max(rng.min, Math.min(rng.max, idleMax + 2));
+                    touch[i] = v;
+                    release[i] = useMbr ? 0 : ((v > 1) ? v - 1 : 1);
+                    customCount++;
+                } else {
+                    touch[i] = 0;  // 继承
+                    release[i] = 0;
+                }
+            }
+            log(`建议逐键设置: ${customCount} 个异常键需抬升,其余继承全局`);
+
+            // 回填 UI(perKey 状态 + 全局滑条)
+            calPendingBackfill = true;  // 保护回填值,进配置模式读回时不覆盖
+            setSlider($("rgThTouch"), globTh, { quiet: true });
+            for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                perKeyTouch[i] = touch[i];
+                perKeyRelease[i] = release[i];
+            }
+            if (useMbr) {
+                // MBR: 释放无意义, 但滑条的全局 th_release 仍然保留表单值
+            } else {
+                setSlider($("rgThRelease"), Math.max(1, globTh - 1), { quiet: true });
+            }
+            updatePerKeyUi();
+            updateUI();
+
+            // round71: 报告展示于 result 屏;确认按钮=「确认并开始修改」,自动进配置模式
+            const detail = [];
+            for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                if (touch[i]) {
+                    detail.push(`tc${i+1}: 建议 ${touch[i]} (idleMax=${samples.idleMax[i]}, touchMin=${touchMin[i]===256?"-":touchMin[i]})`);
+                } else if (touchMin[i] === 256) {
+                    detail.push(`tc${i+1}: 未检测到按下(可能失灵)`);
+                }
+            }
+            const lines = [
+                `建议全局 th_touch = <b>${globTh}</b>`,
+                customCount
+                    ? `<div style="margin-top:8px">${customCount} 个键建议独立抬升:<br>${detail.slice(0, 8).map(d => escapeHtml(d)).join("<br>")}${detail.length > 8 ? `<br>…(其余 ${detail.length - 8} 个见 INPUT TEST 气泡)` : ""}</div>`
+                    : "<div style='margin-top:8px'>所有键建议继承全局阈值</div>",
+                "<div style='margin-top:10px' class='cal-report-note'>点击「确认并开始修改」将自动进入配置模式并填入上述建议值，保存并重启后生效。</div>",
+            ];
+            $("calReportBody").innerHTML = lines.join("");
+            calShowScreen("calScreenResult");
+            log("--- 一键校准完成: 请查看报告并确认 ---");
+        } catch (e) {
+            log("校准向导出错: " + e.message, "error");
+            calCloseWizard();
+        } finally {
+            calRunning = false;
+            await setRawReport(false);
+        }
+    }
+
+    // 向导按钮接线(intro 开始/取消、running 中止、result 应用/取消)。
+    // round71 复查 B1: 回填发生在测量完成时;结果屏「取消」必须撤销——
+    // 复位 calPendingBackfill 并还原校准前的全局滑条与逐键数组快照,
+    // 否则用户视角"取消"了,表单却带着建议值静默等待保存。
+    let calPreTouch = null, calPreRelease = null, calPreGlobTouch = null, calPreGlobRel = null;
+    function calSnapshotBefore() {
+        calPreTouch = perKeyTouch.slice();
+        calPreRelease = perKeyRelease.slice();
+        calPreGlobTouch = $("rgThTouch").value;
+        calPreGlobRel = $("rgThRelease").value;
+    }
+    function calRevertBackfill() {
+        calPendingBackfill = false;
+        if (!calPreTouch) return;
+        perKeyTouch.splice(0, CFG_NUM_KEYS, ...calPreTouch);
+        perKeyRelease.splice(0, CFG_NUM_KEYS, ...calPreRelease);
+        setSlider($("rgThTouch"), parseInt(calPreGlobTouch, 10) || 1, { quiet: true });
+        setSlider($("rgThRelease"), parseInt(calPreGlobRel, 10) || 1, { quiet: true });
+        updatePerKeyUi();
+        updateUI();
+        calPreTouch = null;
+    }
+    (() => {
+        if (!$("calWizardModal")) return;
+        $("calWizardStart").addEventListener("click", () => { calSnapshotBefore(); runCalibrationSequence(); });
+        $("calWizardCancelIntro").addEventListener("click", () => calCloseWizard());
+        $("calWizardCancelResult").addEventListener("click", () => { calRevertBackfill(); calCloseWizard(); });
+        $("calWizardApply").addEventListener("click", () => {
+            calCloseWizard();
+            calPreTouch = null;  // 已确认,快照作废(复查 B1)
+            // 确认修改:自动进入配置模式(回填值已在上面写入 perKeyTouch/perKeyRelease,
+            // calPendingBackfill=true 保证 unpackConfig 不覆盖)。若已在配置模式则直接更新 UI。
+            // round71 复查 D1: 校准刚结束 inputPolling 仍在跑,必须持事务锁再发 0xB3,
+            // 否则 GET_INPUT 帧可与配置读取流交错(与其余 enterConfigMode 调用点一致)。
+            if (configMode) { updatePerKeyUi(); updateUI(); }
+            else { withSerialLock(() => enterConfigMode()); }
+            log("校准建议已回填,进入配置模式确认后请点「保存并重启」应用", "info");
+        });
+        $("calWizardAbort").addEventListener("click", () => { calAbort = true; });
+        // 遮罩点击不关闭(running 中误点遮罩会丢两轮采样),仅 running 屏的取消按钮可中止
+    })();
+
+    /* 原 startCalibration 测量主体已迁移至 runCalibrationSequence(round71 向导化) */
+
+    // ================================================================
     // 触摸 UI 联动(MPR121 / 3116)
     // ================================================================
     function updateTouchUi() {
@@ -5127,6 +6267,7 @@ function validateUf2ForDevice(p, devInfo) {
         $("mbrSection").style.display = (use3116 && configMode) ? "" : "none";
         if (use3116 && !mbrTable) loadMbrTemplate();
         updateTofVisibility();
+        updatePerKeyUi();
     }
 
     // round54: 阈值区间标定提示(依据固件实测:空闲噪声底 ≤13,真实触摸 20-50)
@@ -5398,6 +6539,27 @@ function validateUf2ForDevice(p, devInfo) {
     // ================================================================
     // 灯光测试
     // ================================================================
+    // round71: 读取当前主题高亮色(暗色=工业黄 #FFD60A / 亮色=蓝 #0D44D4)。
+    // CSS 变量只存在于样式层,这里是全文件首个 getComputedStyle 调用点。
+    function getAccentHex() {
+        const v = getComputedStyle(document.documentElement).getPropertyValue("--c-accent").trim();
+        return /^#[0-9a-fA-F]{6}$/.test(v) ? v : "#ffd60a";
+    }
+    // round71: Light Test 默认准备色与主题 accent 联动(覆盖 HTML 写死的初始值)。
+    // 仅更新取色器+本地预览;是否发送由调用方决定(未连接/配置模式/动画中不发)。
+    function syncLedDefaultColor(send) {
+        const input = $("ledColor");
+        if (!input) return;
+        const hex = getAccentHex();
+        if (input.value.toLowerCase() !== hex.toLowerCase()) {
+            input.value = hex;
+            setLedPreview(solidColors(...hexToRgb(hex)));
+        }
+        if (send && connected && !configMode && !inputPolling && !ledAnimId) {
+            sendLedColors(solidColors(...hexToRgb(hex)));
+        }
+    }
+
     function initLedStrip() {
         const strip = $("ledStrip");
         for (let i = 0; i < 31; i++) {
@@ -5606,7 +6768,7 @@ function validateUf2ForDevice(p, devInfo) {
         updateFlashUi();
     }
 
-    function hideFlashModal() { $("flashConfirmModal").style.display = "none"; }
+    function hideFlashModal() { closeModalAnimated($("flashConfirmModal")); }
 
     function sanitizeUF2Name(name) {
         if (!name) return "Nyanithm.uf2";
@@ -5732,9 +6894,8 @@ function validateUf2ForDevice(p, devInfo) {
         if (!ok) return false;
         setFlashPhase("verifying");
         await autoHandshake();
-        inputPolling = true;
-        setBtnState($("toggleInputBtn"), stopIcon, ' 停止测试', 'btn-warning');
-        inputLoop();
+        // round70: 统一启动入口(自动开压力会话,INPUT TEST 显示真实压力)
+        await startInputPolling();
         verifyFlashResult();
         return true;
     }
@@ -5801,7 +6962,7 @@ function validateUf2ForDevice(p, devInfo) {
     });
 
     function openFlashModal() {
-        $("flashConfirmModal").style.display = "flex";
+        openModalAnimated($("flashConfirmModal"));
         if (!uf2Parsed) {
             setFlashPhase("idle");
             // 自动唤起文件选择(用户手势内,满足 FSA 激活要求)
@@ -5903,9 +7064,8 @@ function validateUf2ForDevice(p, devInfo) {
         if (ok) {
             setStatus("串口已连接", "");
             await autoHandshake();
-            inputPolling = true;
-            setBtnState($("toggleInputBtn"), stopIcon, ' 停止测试', 'btn-warning');
-            inputLoop();
+            // round70: 统一启动入口(自动开压力会话,INPUT TEST 显示真实压力)
+            await startInputPolling();
         }
     });
 
@@ -5979,11 +7139,11 @@ function validateUf2ForDevice(p, devInfo) {
         const body = $("infoDetailBody");
         if (devInfo && devInfo.raw) body.textContent = devInfo.raw;
         else body.textContent = "尚未读取设备信息。请先连接设备并点「读取设备信息」。";
-        $("infoDetailModal").style.display = "flex";
+        openModalAnimated($("infoDetailModal"));
     });
-    $("infoDetailClose").addEventListener("click", () => { $("infoDetailModal").style.display = "none"; });
-    $("infoDetailModal").addEventListener("click", (e) => { if (e.target.id === "infoDetailModal") $("infoDetailModal").style.display = "none"; });
-    window.addEventListener("keydown", (e) => { if (e.key === "Escape") $("infoDetailModal").style.display = "none"; });
+    $("infoDetailClose").addEventListener("click", () => closeModalAnimated($("infoDetailModal")));
+    $("infoDetailModal").addEventListener("click", (e) => { if (e.target.id === "infoDetailModal") closeModalAnimated($("infoDetailModal")); });
+    window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModalAnimated($("infoDetailModal")); });
 
     // ================================================================
     // UI 总开关状态
@@ -6005,15 +7165,24 @@ function validateUf2ForDevice(p, devInfo) {
 
         const connectBtn = $("connectBtn");
         connectBtn.lastChild.textContent = connected ? " 断开连接" : " 连接串口";
+        // round71: 语义高亮——未连接=高亮黄(主要入口引导),已连接=红(破坏性断开)。
+        // btn-connect-acc / btn-disconnect-danger 由 head_patch.css 定义。
+        connectBtn.classList.toggle("btn-connect-acc", !connected);
+        connectBtn.classList.toggle("btn-disconnect-danger", connected);
 
-        const normalIds = ["btnDevInfo", "flashBtn"];
+        const normalIds = ["btnDevInfo"];
         normalIds.forEach(id => $(id).disabled = !connected);
+        $("flashBtn").disabled = !connected;
+        $("flashBtn").classList.add("btn-flash-warm");  // round71: 固件刷写橙色警示
         // 连接串口始终可点(它是连接的总入口);未连接时其余交互控件全部禁用。
         $("connectBtn").disabled = false;
 
         // 配置模式内的工具:连接中且处于配置模式才可用
         const cfgTools = ["btnGetStatus", "btnPollTof"];
         cfgTools.forEach(id => $(id).disabled = !connected || !inCfg);
+        // round67: 一键校准(普通模式实时压力流):连接 + 非配置模式 + 固件 1.6.0+
+        const btnCal = $("btnCalibrate");
+        if (btnCal) btnCal.disabled = !connected || inCfg || !rawReportSupported;
         // 导入/导出:已连接即可用。导入只填表单(不写设备),导出优先导出设备
         // 读取值(普通模式下导出当前表单构建的配置)。
         $("btnImportCfg").disabled = !connected;
@@ -6031,6 +7200,9 @@ function validateUf2ForDevice(p, devInfo) {
             "rgDt", "rgDr", "rgHeight", "rgLatency", "off0", "off1", "off2", "off3", "off4"];
         inputs.forEach(id => $(id).disabled = !inCfg);
         hwBtns.forEach(b => b.disabled = !inCfg);
+        // round68: ckGameRaw 在配置模式可用, 但需 1.6.0 固件(旧固件 sanitize
+        // 会丢弃该位)+ fw 门禁在 0xBD 处理同步(旧固件置灰并清勾选)。
+        $("ckGameRaw").disabled = !inCfg || !perKeyFwSupport;
 
         const mbrIds = ["mbrChip", "mbrThreshold", "mbrDebounce", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply"];
         const mbrEnabled = inCfg && MBR_CRC_OK;
@@ -6074,12 +7246,19 @@ function validateUf2ForDevice(p, devInfo) {
     initLogAutoDock();
 
     $("ckMbr3116").addEventListener("change", () => { updateTouchUi(); refreshMbrChips(); });
+    // round67: 一键校准阈值向导(压力上报 + 统计法)
+    const btnCal = $("btnCalibrate");
+    if (btnCal) btnCal.addEventListener("click", () => startCalibration());
 
     // ================================================================
     // 启动初始化
     // ================================================================
     initLedStrip();
     initSliderAnimations();
+    syncLedDefaultColor(false);  // round71: Light Test 默认色对齐当前主题 accent
+    // round71 终审: THEME TOGGLE 是独立顶层 IIFE, 看不到本作用域的 syncLedDefaultColor;
+    // 经 window 桥接(视觉审查发现的 ReferenceError 被空 catch 吞掉导致联动失效)。
+    window.__syncLedDefaultColor = syncLedDefaultColor;
     setHwVer(1, true);
     updateTofVisibility();
     updateTouchUi();
@@ -6162,6 +7341,21 @@ function validateUf2ForDevice(p, devInfo) {
         document.body.classList.add('theme-transition');
         document.documentElement.setAttribute('data-theme', newTheme);
         localStorage.setItem('theme', newTheme);
+
+        // round71: 主题切换后 Light Test 默认准备色跟随新主题 accent;
+        // 已连接且未在输入轮询/动画中时补发一次,让灯条即时跟随。
+        // 延迟到过渡结束后执行,避免与 theme-transition 全属性过渡抢帧。
+        // round71 终审: syncLedDefaultColor 在主 IIFE 作用域,经 window 桥接调用。
+        // 桥接缺失(未来重命名)时告警而非静默,避免同类 bug 再被吞。
+        setTimeout(() => {
+            try {
+                if (typeof window.__syncLedDefaultColor !== "function") {
+                    console.warn("[round71c] __syncLedDefaultColor 桥接缺失,主题联动灯色跳过");
+                    return;
+                }
+                window.__syncLedDefaultColor(true);
+            } catch (e) { console.warn("[round71c] 主题联动灯色失败:", e); }
+        }, 1150);
 
         setTimeout(() => {
             document.body.classList.remove('theme-transition');

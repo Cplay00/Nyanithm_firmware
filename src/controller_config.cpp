@@ -31,6 +31,8 @@ controller_config defaultConfig{
     .heightOffset = { 0, 0, 0, 0, 0 },   //
     .lightLimit = 255,                    //
     .heightRangeCfg = 0,                  // 0 = runtime default (10mm)
+    .thTouchKey = { 0 },                  // round64: per-key touch, 0 = inherit th_touch
+    .thReleaseKey = { 0 },                // round64: per-key release, 0 = inherit th_release
     .xorSum = 0,                          // 前127字节异或和
 };
 
@@ -66,10 +68,26 @@ static void sanitizeConfig(controller_config* config) {
         config->airMin = defaultConfig.airMin;
         config->airMax = defaultConfig.airMax;
     }
-    // round55: new cfg2/cfg3 fields. cfg2: only bit0 defined, mask the rest.
+    // round55: new cfg2/cfg3 fields. cfg2: bit0 (LampArray) + bit1 (round68
+    // experimental game-raw-slider) defined, mask the rest.
     // cfg3: clamp latency to INPUT_LATENCY_MAX_MS (15ms).
-    config->cfg2 &= CFG2_BIT_DISABLE_LAMP_ARRAY;
+    config->cfg2 &= (CFG2_BIT_DISABLE_LAMP_ARRAY | CFG2_BIT_GAME_RAW_SLIDER);
     if (config->cfg3 > INPUT_LATENCY_MAX_MS) config->cfg3 = INPUT_LATENCY_MAX_MS;
+    // round64: per-key threshold clamping. 0 = inherit global (preserved).
+    // MPR121: same 1-63 scale as th_touch. MBR3116: byte range 1-255 (values
+    // <=128 are kept but only take effect above the 128 hardware gate).
+    bool useMbr = (config->cfg0 & CFG0_BIT_MBR3116) || config->hwVer >= 3;
+    uint8_t maxKey = useMbr ? 255 : 63;
+    for (int i = 0; i < 32; i++) {
+        if (config->thTouchKey[i] > maxKey) config->thTouchKey[i] = maxKey;
+        if (useMbr) {
+            // release threshold is meaningless on MBR (no per-sensor register);
+            // treat any non-zero value as invalid -> inherit global.
+            config->thReleaseKey[i] = 0;
+        } else if (config->thReleaseKey[i] > maxKey) {
+            config->thReleaseKey[i] = maxKey;
+        }
+    }
 }
 
 static void recomputeXorSum(controller_config* config) {

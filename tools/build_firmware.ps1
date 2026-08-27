@@ -14,6 +14,17 @@ if (-not (Test-Path $J[$Variant])) { New-Item -ItemType Junction -Path $J[$Varia
 $B = "$($J[$Variant])\$BuildDir"
 if (-not (Test-Path "$B\build.ninja")) { New-Item -ItemType Directory -Path $B -Force | Out-Null; Push-Location $B; cmake -G Ninja -DCMAKE_BUILD_TYPE=Release $J[$Variant]; Pop-Location }
 Push-Location $B
+# round73: 构建时间一致性保障。固件把 __DATE__/__TIME__ 烧进版本串(0xBD 响应/启动日志),
+# 但增量构建下未被改动的编译单元不会重编,UF2 会带着陈旧的构建时刻。
+# 每次构建前扫描全部引用 __DATE__/__TIME__ 的源文件并刷新 mtime,强制 Ninja 重编它们;
+# 以后新增使用时间宏的文件会被自动纳入,无需维护清单。
+Write-Host "=== Refreshing __DATE__/__TIME__ sources ===" -ForegroundColor Cyan
+Get-ChildItem "$($S[$Variant])\src", "$($S[$Variant])\include" -Recurse -Include *.c, *.cpp, *.h -ErrorAction SilentlyContinue |
+    Select-String -Pattern '__DATE__|__TIME__' -List |
+    ForEach-Object {
+        Write-Host ("  touch " + $_.Path)
+        (Get-Item $_.Path).LastWriteTime = Get-Date
+    }
 Write-Host "=== Compiling ($Variant) ===" -ForegroundColor Cyan
 & "$NJ\ninja.exe" -j4 2>&1 | Where-Object { $_ -match "^\[" }
 $lb = "$B\_link.bat"

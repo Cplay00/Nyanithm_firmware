@@ -152,6 +152,25 @@ static uint32_t latencyFrameMs = 0;  // round55: arrival timestamp of the frame 
 volatile bool pending_config_mode = false;
 volatile bool in_config_mode = false;
 
+// round68: game-raw baseline from cfg2 bit1 (persisted, default off). The
+// active pressure report mode is rawModeActive():
+//   cfg2 bit1=1  -> game-raw mode (GET_INPUT: pressed=max(1,pressure), released=0)
+//   0xC5 0x01    -> panel mode (GET_INPUT: all lanes report raw pressure)
+//   0xC5 0x00    -> back to the cfg2 bit1 baseline
+// Binary mode (both off) keeps GET_INPUT byte-identical to 1.5.x.
+// gameRawEnabled itself is defined in hw_devices.cpp (round66 rawReportMode pattern).
+// round73: 基线改为每次命令逐值重算,不再一次性锁存——Core1 在 main()->initUSBDevice()
+// 即启动并开始跑 cdc_respond(),早于 boot_mode 的 readConfig();原实现的首次锁存读到的
+// 是全零 ControllerConfig,cfg2 bit1 在所有冷启动下永不生效(P1)。逐次求值顺带让
+// 保存后的 cfg2 改动无需重启即可反映到基线;0xC5 会话(rawReportMode)仍独立于该基线。
+void updateGameRawBaseline() {
+    gameRawEnabled = !!(ControllerConfig.cfg2 & CFG2_BIT_GAME_RAW_SLIDER);
+}
+
+bool rawModeActive() {
+    return rawReportMode || gameRawEnabled;
+}
+
 // CDC command responder running on Core1. Replaces the CDC portion of maindev_loop
 // (which ran on Core0 and was blocked by updateInputState). Bulk tud_cdc I/O avoids
 // per-byte stdio_cdc mutex overhead; responses land in ~2-3ms instead of 6ms+jitter.
@@ -165,6 +184,8 @@ void cdc_respond() {
     if (in_config_mode) {
         return;
     }
+    // round68: lazily sync the game-raw baseline from cfg2 on first command.
+    updateGameRawBaseline();
     // Standby timeout (normalMode only): 5s without CDC activity -> return to idle
     // (game_connected=false), re-enabling LampArray/Windows dynamic lighting.
     if (game_connected && to_ms_since_boot(get_absolute_time()) - connected_time > 5000) {
@@ -224,13 +245,23 @@ void cdc_respond() {
         // DLL is never blocked more than 5ms; it gets the last state instead.
         uint32_t g;
         uint8_t air = 0;
+        // round66: pressure snapshot + touch bits copied in the SAME seqlock
+        // scope; declared at function scope so the raw-mode substitution below
+        // (after the loop) can read them.
+        uint8_t tmpSlider[32];
+        uint8_t tmpPressure[32];
+        // round73: 仅当本轮真正提交了新帧(seqlock 成功且未被 cfg3 持帧)才做
+        // raw 压力替换。超时路径若照旧替换,tmpPressure 可能是奇偶栅栏切换中途
+        // 的新旧混合快照,违背"超时保留 last-good"约定;持帧路径重替换也会让
+        // 已服务状态被同轮新采样覆盖。两种情况都应原样保持上一服务帧。
+        bool frameFresh = false;
         uint32_t spinStart = to_ms_since_boot(get_absolute_time());
         while (true) {
             do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 5);
             // round47b-patch: read into temp buffer; only commit to inputState on
             // seqlock success. On timeout, keep last good inputState (no torn data).
-            uint8_t tmpSlider[32];
             for (int i = 0; i < 32; i++) tmpSlider[i] = touchData32[i];
+            for (int i = 0; i < 32; i++) tmpPressure[i] = pressureSnap[i];
             air = 0;
             for (int i = 0; i < 6; i++) {
                 if (airKeys[i]) air |= 1 << i;
@@ -251,11 +282,42 @@ void cdc_respond() {
                 }
                 memcpy(inputState.slider, tmpSlider, 32);
                 inputState.air = air;
+                frameFresh = true;
                 break;
             }
             if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) { air = inputState.air; break; }  // round47b-patch: timeout - sync air to last good value for telemetry consistency
         }
         // inputState already committed on success; on timeout it retains last good value
+
+        // round66/68/69: raw pressure substitution - tmpPressure was copied in
+        // the same seqlock scope as touchData32. Panel mode (rawReportMode):
+        // all lanes report raw pressure. Game mode (cfg2 bit1 baseline):
+        // pressed lanes report linear-normalized pressure (0-255 scale), released
+        // lanes 0. Both off keeps the 0/128 frame byte-identical to 1.5.x.
+        // round73: 追加 frameFresh 门控(见上)。
+        if (rawModeActive() && frameFresh) {
+            if (rawReportMode) {
+                // panel mode: full 0-255 pressure, untouched keys report idle values
+                for (int i = 0; i < 32; i++) {
+                    inputState.slider[i] = tmpPressure[i];
+                }
+            } else {
+                // game mode: linear-normalized 0-255 pressure. MPR121 native
+                // diff scale is narrow (th_touch 1-63), MBR3116 DIFFERENCE_COUNT
+                // is natively 0-255 - map MPR *4 (clamp 255) so both report a
+                // comparable full-scale. Round69: binary-compatible non-zero =
+                // pressed, but with continuous magnitude for the DLL.
+                for (int i = 0; i < 32; i++) {
+                    uint8_t pressed = tmpSlider[i] ? 1 : 0;
+                    uint8_t p = tmpPressure[i];
+                    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
+                        uint16_t v = (uint16_t)p * 4;
+                        p = (v > 255) ? 255 : (uint8_t)v;
+                    }
+                    inputState.slider[i] = pressed ? (p > 0 ? p : 1) : 0;
+                }
+            }
+        }
 
         // round46: telemetry - record response edges + counters
         if (g_tele.servedCount > 0) {
@@ -478,6 +540,36 @@ void cdc_respond() {
         tud_cdc_write_flush();
         g_tele.cdcTxBytes += sizeof(buf);
     }
+    if (cmd == CMD_GET_RAW_STATUS) {
+        // round66: query the raw pressure report switch. Text line (style of 0xB8)
+        // so the panel's waitForLine can read it. round68: reports the ACTIVE mode
+        // (panel session OR cfg2 bit1 game baseline), not just rawReportMode.
+        const char* resp = rawModeActive() ? "RAW=1\n" : "RAW=0\n";
+        tud_cdc_write((const uint8_t*)resp, strlen(resp));
+        tud_cdc_write_flush();
+        g_tele.cdcTxBytes += strlen(resp);
+    }
+    if (cmd == CMD_SET_RAW_REPORT) {
+        // round66: set the raw pressure report switch. Host sends 1 byte 0/1.
+        // round68: 0x00 reverts to the cfg2 bit1 game-raw baseline (not a hard
+        // binary mode) so a panel session on a game-raw-enabled device does not
+        // permanently flip the device back to binary.
+        uint8_t v = 0;
+        uint32_t deadline = to_ms_since_boot(get_absolute_time()) + 100;
+        while (tud_cdc_available() == 0 && to_ms_since_boot(get_absolute_time()) < deadline) {
+            tud_task();
+            sleep_us(100);
+        }
+        if (tud_cdc_read(&v, 1) == 1) {
+            // Only 0/1 accepted; anything else keeps the current state.
+            if (v == 0) rawReportMode = false;
+            else if (v == 1) rawReportMode = true;
+        }
+        const char* resp = rawModeActive() ? "RAW=1\n" : "RAW=0\n";
+        tud_cdc_write((const uint8_t*)resp, strlen(resp));
+        tud_cdc_write_flush();
+        g_tele.cdcTxBytes += strlen(resp);
+    }
     if (cmd == CMD_SET_LED) {
         uint8_t leds[96];
         uint32_t got = 0;
@@ -530,6 +622,10 @@ void cdc_respond() {
     if (cmd == CMD_CONFIG_MODE) {
         RGB_LED.fill(0x00, 0x0f, 0x00);
         RGB_LED.flush();
+        // round66: pressure reporting is a session/panel feature - turn it off
+        // before handing the CDC channel to Core0's config-mode command handler
+        // (GET_INPUT is paused there; stale raw state must not leak back).
+        rawReportMode = false;
         hid_working = false;
         in_config_mode = true;  // Core1 stops reading CDC; Core0 handleCommand takes over
         // round51: Core0 becomes the sole tud_task() driver in config mode
