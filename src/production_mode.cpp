@@ -9,6 +9,7 @@
 #include <cy8cmbr3116.h>
 #include <cy8cmbr3116_cfg.h>
 
+#include <hardware/watchdog.h>
 #include <production_mode.h>
 #include <stdio.h>
 #include <tusb.h>
@@ -40,6 +41,31 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
     buf[1] = 0xff;  // 软复位
     i2c_write(0, addr, buf, 2, true);
     sleep_ms(10);
+}
+
+// round75: post-burn read-back for the panel 0xBA path. After the soft
+// reset the chip needs a moment before I2C answers again; poll briefly,
+// then compare the THRESHOLD register (0x0C) with what was written.
+// Diagnostic only -- the caller has already printed "done", so a skipped
+// verify must not look like a failed burn.
+void verify_cy8cmbr3116_burn(uint8_t addr, uint8_t* cfg) {
+    for (int attempt = 0; attempt < 30; attempt++) {
+        tud_task();  // keep the USB stack serviced while we wait
+        watchdog_update();
+        uint8_t reg = 0x0C;
+        uint8_t val = 0;
+        if (i2c_write(0, addr, &reg, 1, true) == 1 &&
+            i2c_read(0, addr, &val, 1, false) == 1) {
+            if (val == cfg[0x0C]) {
+                printf("verify ok\n");
+            } else {
+                printf("verify mismatch: reg 0x0C wrote 0x%02X read 0x%02X\n", cfg[0x0C], val);
+            }
+            return;
+        }
+        sleep_ms(10);
+    }
+    printf("verify skipped (chip busy)\n");
 }
 
 void program3116() {

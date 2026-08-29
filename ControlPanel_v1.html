@@ -3596,7 +3596,7 @@ input[type="range"]:disabled {
                                         <button id="btnMbrTemplate" class="btn" disabled>载入固件模板</button>
                                         <button id="btnMbrLoadFile" class="btn" disabled>导入表文件</button>
                                         <button id="btnMbrSaveFile" class="btn" disabled>导出表文件</button>
-                                        <button id="btnMbrApply" class="btn btn-danger" disabled>应用于手台 (0xBA)</button>
+                                        <button id="btnMbrApply" class="btn btn-danger" disabled>应用于手台</button>
                                     </div>
                                     <span class="field-hint">应用前自动重算表尾 CRC (0x7E/0x7F)；写入芯片 NVM 立即生效并软复位。</span>
                                 </details>
@@ -4556,6 +4556,8 @@ function validateUf2ForDevice(p, devInfo) {
             this.cfg = buildMockConfig();
             this.configMode = false;
             this.cfgSetPending = null;  // round63f: CFG_SET 载入流跨 write 累积
+            this.mbrPending = null;  // round75: 0xBA 载荷跨 write 累积(面板改双写)
+            this.mbrPendingTimer = null;  // round75 审查: 载入流断流超时, 仿固件 readCdcPayload
             this.tofCount = MOCK_GEN2 ? 3 : 4;  // gen2:ToF 数异常,应被门禁拦截
             this.rawReport = false;  // round66: 压力上报状态
             this.cmdLog = [];  // round63h: 与真实固件 0xCE 命令日志同构(仅顶层命令字节)
@@ -4600,8 +4602,34 @@ function validateUf2ForDevice(p, devInfo) {
             this.send(new TextEncoder().encode(text + "\n"));
         }
 
+        // round75 审查: 仿固件 readCdcPayload 的 1s 总时限——载入流断流时丢弃
+        // 半截载荷, 避免杂散 0xBA 之后 Mock 永久吞掉后续命令(固件侧是真复位风险,
+        // Mock 侧是命令通道卡死)。
+        mbrArm() {
+            if (this.mbrPendingTimer) clearTimeout(this.mbrPendingTimer);
+            this.mbrPendingTimer = setTimeout(() => { this.mbrPending = null; this.mbrPendingTimer = null; }, 1000);
+        }
+        mbrComplete() {
+            if (this.mbrPendingTimer) { clearTimeout(this.mbrPendingTimer); this.mbrPendingTimer = null; }
+            this.mbrPending = null;
+            this.sendText("programing 3116 chip", 10);
+            this.sendText("done", 600);
+            this.sendText("verify ok", 700);
+        }
+
         onHostWrite(bytes) {
             let i = 0;
+            // round75: 若正处于 0xBA 载入流中, 本次 write 的全部字节都是
+            // addr+128B 表负载续段(面板双写发送), 不可能是新的命令字节。
+            if (this.mbrPending !== null) {
+                while (i < bytes.length && this.mbrPending.length < 129) {
+                    this.mbrPending.push(bytes[i++]);
+                }
+                if (this.mbrPending.length === 129) {
+                    this.mbrComplete();
+                }
+                return;  // 载入流未凑满 129 也直接返回, 剩余字节留到下一次 write
+            }
             // round63f: 若正处于 CFG_SET 载入流中, 本次 write 的全部字节都是
             // 配置负载续段(面板分块发送), 不可能是新的命令字节, 直接累积。
             if (this.cfgSetPending !== null) {
@@ -4687,7 +4715,17 @@ function validateUf2ForDevice(p, devInfo) {
                     this.sendText("using config in page 3", 40);
                 }
                 else if (cmd === CMD.EXIT) { this.configMode = false; }
-                else if (cmd === CMD.LOAD3116CONFIG) { i += 129; this.sendText("programing 3116 chip", 10); this.sendText("done", 600); }
+                else if (cmd === CMD.LOAD3116CONFIG) {
+                    // round75: 面板改双写后 0xBA 与 129B 载荷分两次 write 到达,
+                    // Mock 与 CFG_SET 同理跨 write 状态化累积(addr+128B)再应答。
+                    if (this.mbrPending === null) { this.mbrPending = []; this.mbrArm(); }
+                    while (i < bytes.length && this.mbrPending.length < 129) {
+                        this.mbrPending.push(bytes[i++]);
+                    }
+                    if (this.mbrPending.length === 129) {
+                        this.mbrComplete();
+                    }
+                }
                 else if (cmd === CMD.FLASHING) {
                     if (bytes[i] === 0xA5) { i++; /* 进 BOOTSEL,mock 无盘符 */ }
                     else this.sendText("flashing denied", 10);
@@ -4758,6 +4796,10 @@ function validateUf2ForDevice(p, devInfo) {
     // 串口读写(一代引擎)
     // ================================================================
     async function openPort(portArg, quiet) {
+        // round75 审查: 幂等守卫——自动重连轮询与手动点击并发时, 已连接状态
+        // 直接成功返回, 防止同端口二次 open 抛 InvalidStateError 打出与实际
+        // 状态矛盾的「串口连接失败」文案(存量+新增窗口一并关闭)。
+        if (connected) return true;
         if (!navigator.serial) {
             alert("当前浏览器不支持 Web Serial API,请使用 Chrome / Edge 并通过 https 或 localhost 访问。");
             return false;
@@ -4828,6 +4870,7 @@ function validateUf2ForDevice(p, devInfo) {
         stopCfgKeepalive();
         stopLedAnim();
         stopTofPoll();
+        stopUnplugReconnect();  // round75: 主动关闭时停掉意外断开重连轮询
         inputPolling = false;
         readLoopRunning = false;
         configMode = false;
@@ -4866,6 +4909,8 @@ function validateUf2ForDevice(p, devInfo) {
         updateUI();
         setStatus("连接已断开", "error");
         log(reason, "warn");
+        // round75: 设备复位/重枚举后自动尝试重连, 不再要求用户手动点连接。
+        startUnplugReconnect();
     }
 
     async function readLoop() {
@@ -5745,6 +5790,52 @@ function validateUf2ForDevice(p, devInfo) {
         }, 1000);
     }
 
+    // round75: 意外断开(设备看门狗复位/掉电/重枚举)后的自动重连。此前只有
+    // 保存重启(startSaveRebootReconnect)与刷写(startReconnectWatch)两条流程
+    // 有自动重连, 普通断开后必须手点「连接串口」——0xBA 缺陷时代设备频繁
+    // 2s 看门狗复位, 面板每次都停在"连接已断开"等用户手动恢复。复用
+    // save-reboot 的轮询机制, 15s 内每秒尝试重开同一 VID/PID 端口。
+    let unplugWatch = null;
+    let unplugDeadline = 0;
+    function stopUnplugReconnect() {
+        if (unplugWatch) { clearInterval(unplugWatch); unplugWatch = null; }
+    }
+    async function unplugReconnectOnce() {
+        if (connected) { stopUnplugReconnect(); return; }
+        try {
+            const ports = await navigator.serial.getPorts();
+            const ny = ports.find(p => {
+                const i = p.getInfo();
+                return i.usbVendorId === 0xCAFE && i.usbProductId === 0x4009;
+            });
+            if (!ny) return;
+            const ok = await openPort(ny, true);
+            if (!ok) return;
+            stopUnplugReconnect();
+            log("设备已重新出现,已自动重连");
+            await autoHandshake();
+            // round70: 统一启动入口(自动开压力会话,INPUT TEST 显示真实压力)
+            await startInputPolling();
+        } catch (e) { /* 轮询失败静默重试至截止时间 */ }
+    }
+    function startUnplugReconnect() {
+        if (reconnectWatch) return;  // 刷写重连激活时让位, 避免双定时器抢开端口
+        // round75 复查: 刷写会话进行中(0xBB→BOOTSEL→选盘符→写盘→重连验证)不启动,
+        // 否则用户在盘符选择器停留超 15s 会打出误导性的"设备未重新出现"提示,
+        // 且重连成功也不会跑 verifyFlashResult, 刷写结果展示会停留 stale。
+        if (!["idle", "done", "error"].includes(flashPhase)) return;
+        stopUnplugReconnect();
+        unplugDeadline = Date.now() + 15000;
+        unplugWatch = setInterval(async () => {
+            if (Date.now() > unplugDeadline) {
+                stopUnplugReconnect();
+                log("设备 15 秒内未重新出现,请点击「连接串口」手动连接", "warn");
+                return;
+            }
+            await unplugReconnectOnce();
+        }, 1000);
+    }
+
     async function doEraseConfig() {
         if (!configMode) { log("请先进入配置模式", "warn"); return; }
         try {
@@ -6468,19 +6559,36 @@ function validateUf2ForDevice(p, devInfo) {
                 const addr = mbrChipAddr();
                 const size = (probeInfo && probeInfo.tofCount === 5) ? "32寸" : "27寸";
                 log(`向芯片 0x${addr.toString(16).toUpperCase()} 烧录 128 字节寄存器表(${size} 设备)...`);
-                const pkt = new Uint8Array(2 + 128);
-                pkt[0] = CMD.LOAD3116CONFIG;
-                pkt[1] = addr;
                 const table = mbrTable.slice();
                 table[0x51] = addr;        // 表内 I2C 地址与目标芯片一致
                 mbrUpdateTableCrc(table);  // 重算表尾 CRC
-                pkt.set(table, 2);
+                // round75 审查: 载荷=addr+128B 共 129B, 命令字节单独首发;
+                // 不再维护含命令字节的 130B 大缓冲, 以免误读为整包发送。
+                const payload = new Uint8Array(1 + 128);
+                payload[0] = addr;
+                payload.set(table, 1);
                 flushReadBuffer();
-                await writeBytes(pkt);
+                // round75: 与 doSaveConfig 的 CFG_SET 双写同理(round63i 真机定论)。
+                // 单次 130B write 在 Web Serial/USB 驱动层被打成 [64][64][2] 三个包,
+                // 尾包撞上设备端单缓冲 OUT 端点未及时重武装而 NAK, 旧固件的无界
+                // getchar() 会永等缺尾字节并触发 2s 看门狗复位(表现为设备消失)。
+                // 先单独发 0xBA 让固件进入载荷读取, 再发 addr+128B 载入流, 逐包
+                // 重武装, 稳定续流。
+                await writeBytes(new Uint8Array([CMD.LOAD3116CONFIG]));
+                await writeBytes(payload);
                 const line1 = await waitForLine(3000);
                 log("0xBA 响应: " + line1);
                 const line2 = await waitForLine(8000);
                 log("3116 烧录结果: " + line2);
+                // round75: 新固件烧录后追加 verify 诊断行(回读 0x0C 比对, 固件侧
+                // 最坏 ~600ms 才发出); 旧固件或芯片忙时无此行, 800ms 窗口静默略过,
+                // 不影响 done 判定。
+                if (line2.includes("done")) {
+                    try {
+                        const vline = await waitForLine(800);
+                        if (vline) log("烧录校验: " + vline, vline.includes("verify ok") ? "" : "warn");
+                    } catch (e) { /* 旧固件无 verify 行 */ }
+                }
                 if (!line2.includes("done")) {
                     await sleep(20);
                     while (readBuffer.length > 0) log("额外输出: " + await waitForLine(300));
@@ -6929,6 +7037,7 @@ function validateUf2ForDevice(p, devInfo) {
 
     function startReconnectWatch() {
         stopReconnectWatch();
+        stopUnplugReconnect();  // round75: 刷写重连接管, 停掉意外断开重连轮询
         setFlashPhase("waitingReconnect");
         reconnectDeadline = Date.now() + 20000;
         reconnectWatch = setInterval(async () => {

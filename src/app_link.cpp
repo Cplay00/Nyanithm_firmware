@@ -7,6 +7,7 @@
 
 #include <app_link.h>
 #include <button.h>
+#include <hardware/watchdog.h>
 #include <production_mode.h>
 #include <boot_mode.h>
 #include <controller_config.h>
@@ -55,6 +56,31 @@ void getStatus() {
     }
 }
 
+
+// round75: bounded CDC payload read for config-mode commands. The old
+// 0xBA/0xBB handlers used unbounded getchar(), which never pumps
+// tud_task(): once the RX FIFO drained mid-payload (host stall, or the
+// [64][64][x] packet split NAKing against the single-buffer OUT endpoint)
+// Core0 wedged, updateInputState() stopped feeding the 2s hardware
+// watchdog and the board rebooted under the host. Same mechanism as
+// setConfig(): tud_cdc_read() plus an explicit tud_task() pump and
+// watchdog_update() every iteration, bounded by a total deadline.
+static bool readCdcPayload(uint8_t* buf, int len, uint32_t timeout_ms) {
+    uint32_t totalStart = to_ms_since_boot(get_absolute_time());
+    int count = 0;
+    while (count < len) {
+        tud_task();
+        watchdog_update();
+        if (tud_cdc_available()) {
+            int n = tud_cdc_read(&buf[count], (uint32_t)(len - count));
+            if (n > 0) count += n;
+        } else if (to_ms_since_boot(get_absolute_time()) - totalStart > timeout_ms) {
+            printf("read timeout at byte %d of %d. payload aborted.\n", count, len);
+            return false;
+        }
+    }
+    return true;
+}
 
 void handleCommand() {
     // round46f: config-mode idle auto-exit. If no CDC command arrives for
@@ -109,22 +135,31 @@ void handleCommand() {
         } else if (cmd == CMD_EXIT) {
             reboot();
         } else if (cmd == CMD_LOAD3116CONFIG) {
-            uint8_t address = getchar();
-            uint8_t cfg[128];
-            for (int i = 0; i < 128; i++) {
-                cfg[i] = getchar();
+            // round75: bounded payload read + address whitelist + post-burn
+            // read-back. The old unbounded getchar() loop rebooted the board
+            // whenever the payload stalled, and a misaligned command stream
+            // could reach the programmer with an arbitrary I2C address.
+            uint8_t cfg[129];
+            if (readCdcPayload(cfg, (int)sizeof(cfg), 1000)) {
+                uint8_t address = cfg[0];
+                if (address == 0x37 || (address >= 0x40 && address <= 0x44)) {
+                    printf("programing 3116 chip\n");
+                    program_cy8cmbr3116_custom(address, &cfg[1]);
+                    printf("done\n");
+                    verify_cy8cmbr3116_burn(address, &cfg[1]);
+                } else {
+                    printf("load3116: address 0x%02X not allowed. burn aborted.\n", address);
+                }
             }
-            printf("programing 3116 chip\n");
-            program_cy8cmbr3116_custom(address, cfg);
-            printf("done\n");
-
         } else if (cmd == CMD_FLASHING) {
             // round51: irreversible flash erase now requires an explicit
             // confirmation byte (0xA5) right after the command. A stray 0xBB
             // inside a misaligned command stream must not brick the board
             // (BOOTSEL rescue is the only recovery).
-            uint8_t flashingConfirm = getchar();
-            if (flashingConfirm == 0xA5) {
+            // round75: the confirm wait is bounded now (was unbounded
+            // getchar()); a timeout denies flashing instead of wedging.
+            uint8_t flashingConfirm = 0;
+            if (readCdcPayload(&flashingConfirm, 1, 500) && flashingConfirm == 0xA5) {
                 boot_flashing();
             } else {
                 printf("flashing denied\n");
