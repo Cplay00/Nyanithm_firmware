@@ -375,6 +375,14 @@ char const* string_desc_arr[] = {
 
 static uint16_t _desc_str[32 + 1];
 
+// USB string descriptors are UTF-16-LE; a byte-wise memcpy would pack two ASCII
+// chars into one uint16_t and the host would render them as CJK mojibake
+static void ascii_to_utf16le(uint16_t* dest, const char* src, size_t max_chars) {
+    for (size_t i = 0; i < max_chars && src[i] != '\0'; i++) {
+        dest[i] = (uint16_t)src[i] & 0xFF;
+    }
+}
+
 // Invoked when received GET STRING DESCRIPTOR request
 // Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
 uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
@@ -389,12 +397,12 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
     case STRID_MANUFACTURER:
         chr_count = strlen(string_desc_arr[1]);
-        memcpy(&_desc_str[1], string_desc_arr[1], chr_count);
+        ascii_to_utf16le(&_desc_str[1], string_desc_arr[1], chr_count);
         break;
 
     case STRID_PRODUCT:
         chr_count = strlen(string_desc_arr[2]);
-        memcpy(&_desc_str[1], string_desc_arr[2], chr_count);
+        ascii_to_utf16le(&_desc_str[1], string_desc_arr[2], chr_count);
         break;
 
     case STRID_SERIAL:
@@ -403,17 +411,17 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
     case STRID_HID_KBD_INTERFACE:
         chr_count = strlen(string_desc_arr[4]);
-        memcpy(&_desc_str[1], string_desc_arr[4], chr_count);
+        ascii_to_utf16le(&_desc_str[1], string_desc_arr[4], chr_count);
         break;
 
     case STRID_HID_LAMP_INTERFACE:
         chr_count = strlen(string_desc_arr[5]);
-        memcpy(&_desc_str[1], string_desc_arr[5], chr_count);
+        ascii_to_utf16le(&_desc_str[1], string_desc_arr[5], chr_count);
         break;
 
     case STRID_CDC_INTERFACE:
         chr_count = strlen(string_desc_arr[6]);
-        memcpy(&_desc_str[1], string_desc_arr[6], chr_count);
+        ascii_to_utf16le(&_desc_str[1], string_desc_arr[6], chr_count);
         break;
 
     default:
