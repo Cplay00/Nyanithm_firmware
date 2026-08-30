@@ -182,15 +182,26 @@ void handleCommand() {
             // flags:   bit0 = PCA9545 mux present (i2c1 0x70), bit1 = useMuxScan
             // Absent addresses cost one 10ms findI2CDevice timeout each, so the
             // full probe may take ~150ms on sparsely populated hardware.
+            // round76c: worst case is ~1.7s (10 retry iterations x ~11ms per
+            // absent probe, x 10 probes, + mux channel scan) -- right against
+            // the 2s watchdog, and updateInputState() is NOT running while
+            // handleCommand blocks here. A slow bus crossed the line and
+            // watchdog-reset the device mid-probe (real-device repro). Pump
+            // the dog (and USB) between probes.
             uint8_t mprMask = 0;
             for (int i = 0; i < 3; i++) {
+                tud_task();
+                watchdog_update();
                 if (findI2CDevice(0, 0x5A + i)) mprMask |= (1 << i);
             }
             static const uint8_t mbrAddrs[6] = { 0x37, 0x40, 0x41, 0x42, 0x43, 0x44 };
             uint8_t mbrMask = 0;
             for (int i = 0; i < 6; i++) {
+                tud_task();
+                watchdog_update();
                 if (findI2CDevice(0, mbrAddrs[i])) mbrMask |= (1 << i);
             }
+            watchdog_update();
             bool muxPresent = findI2CDevice(1, 0x70);
             uint8_t flags = (muxPresent ? 0b00000001 : 0) | (useMuxScan ? 0b00000010 : 0);
             uint8_t tofCount = 0;
@@ -202,6 +213,8 @@ void handleCommand() {
                     // restore the mask initToF established (see checkToF).
                     mux.setReg(0x1F);
                     for (int i = 0; i < 5; i++) {
+                        tud_task();
+                        watchdog_update();
                         if (findI2CDevice(1, 0x30 + i)) tofCount++;
                     }
                     mux.setReg((ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 0x1F : 0x0F);
@@ -210,11 +223,14 @@ void handleCommand() {
                     // channel. updateAir switches channels per cycle, so leaving
                     // the mux on the last probed channel is fine (see checkToF).
                     for (int ch = 0; ch < 5; ch++) {
+                        tud_task();
+                        watchdog_update();
                         mux.setChannel(ch);
                         if (findI2CDevice(1, 0x29)) tofCount++;
                     }
                 }
             }
+            watchdog_update();
             putchar(CMD_DETECT);
             putchar(mprMask);
             putchar(mbrMask);

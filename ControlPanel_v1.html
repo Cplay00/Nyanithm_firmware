@@ -5111,7 +5111,9 @@ function validateUf2ForDevice(p, devInfo) {
 
     // round54e: 探测 + 读配置合并为一次流式会话。连发 [0xBC, 0xB4] 后解析
     // 设备输出流(详见一代面板注释:应对输出滞留/任意拆包,500ms 轻推)。
-    async function readConfigStream(totalTimeout = 5000) {
+    // round76c: 真机实测 0xBC I2C 探测耗时随总线状态在 1-6s 波动(缺席设备
+    // 重试 + mux 通道扫描),总超时 5s→8s 避免慢探测轮误报连接失败。
+    async function readConfigStream(totalTimeout = 8000) {
         flushReadBuffer();
         await writeBytes(new Uint8Array([CMD.DETECT, CMD.CFG_READ]));
         const deadline = performance.now() + totalTimeout;
