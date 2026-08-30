@@ -150,6 +150,7 @@ static uint32_t latencyFrameMs = 0;  // round55: arrival timestamp of the frame 
 // Core0/Core1 split. Kept inputState/NyanithmInput definitions below for cdc_respond.
 
 volatile bool pending_config_mode = false;
+volatile bool pending_flashing = false;
 volatile bool in_config_mode = false;
 
 // round68: game-raw baseline from cfg2 bit1 (persisted, default off). The
@@ -564,8 +565,9 @@ void cdc_respond() {
         // binary mode) so a panel session on a game-raw-enabled device does not
         // permanently flip the device back to binary.
         uint8_t v = 0;
-        uint32_t deadline = to_ms_since_boot(get_absolute_time()) + 100;
-        while (tud_cdc_available() == 0 && to_ms_since_boot(get_absolute_time()) < deadline) {
+        // round78: subtraction compare (wrap-safe); was a 49.7-day rollover hazard.
+        uint32_t rawStart = to_ms_since_boot(get_absolute_time());
+        while (tud_cdc_available() == 0 && to_ms_since_boot(get_absolute_time()) - rawStart < 100) {
             tud_task();
             sleep_us(100);
         }
@@ -587,7 +589,8 @@ void cdc_respond() {
         // round51: bounded wait (500ms). A partial transfer (host close / unplug)
         // used to wedge Core1 here forever while Core0 kept feeding the watchdog,
         // freezing HID input until power cycle.
-        uint32_t ledDeadline = to_ms_since_boot(get_absolute_time()) + 500;
+        // round78: subtraction compare (wrap-safe); was a 49.7-day rollover hazard.
+        uint32_t ledStart = to_ms_since_boot(get_absolute_time());
         while (got < 96) {
             uint32_t r = tud_cdc_read(leds + got, 96 - got);
             got += r;
@@ -596,7 +599,7 @@ void cdc_respond() {
                 if (!tud_cdc_available()) {
                     sleep_us(50);
                 }
-                if (to_ms_since_boot(get_absolute_time()) >= ledDeadline) {
+                if (to_ms_since_boot(get_absolute_time()) - ledStart >= 500) {
                     return;  // stale payload bytes are dropped as unknown commands
                 }
             }
@@ -641,8 +644,40 @@ void cdc_respond() {
         // (handleCommand's idle loop pumps it). Prevents the cross-core
         // tud_task() race with Core1's loop via the stdio_cdc printf/getchar path.
         core0_owns_usb = true;
-        // Delegate to Core0: handleCommand() needs flash_safe_execute context
-        // (Core0 is the core that can safely stall Core1 for flash write/erase).
+        // Delegate to Core0: handleCommand() runs the config command loop with
+        // watchdog feeding there (the CDC console in config mode lives on
+        // Core0 by design; normal-mode 0xBB separately arms pending_flashing).
         pending_config_mode = true;
+    }
+    if (cmd == CMD_FLASHING) {
+        // round78: flashing used to be config-mode-only (app_link
+        // handleCommand). A 0xBB sent while the device is in NORMAL mode --
+        // e.g. the panel's config-mode state desynced after the 60s idle
+        // auto-exit rebooted the board -- was silently ignored here, and the
+        // panel then opened the drive picker with no RPI-RP2 ever appearing
+        // (real-device repro). Honor it in normal mode too, but do NOT run
+        // boot_flashing() here: the flash erase must run on Core0 (caller of
+        // flash_safe_execute; a direct Core1 call of the rom USB-boot entry
+        // wedged Core1 on real hardware), so arm a flag for the Core0 normal
+        // loop. The 0xA5 confirm requirement (round51) is kept in both modes
+        // so a stray 0xBB inside a misaligned command stream cannot reboot
+        // the board; the wait is bounded so garbage cannot stall GET_INPUT
+        // for long.
+        uint8_t flashingConfirm = 0;
+        // round78 review: subtraction compare (wrap-safe after 49.7 days of
+        // uptime), same idiom as readCdcPayload.
+        uint32_t confirmStart = to_ms_since_boot(get_absolute_time());
+        while (tud_cdc_available() == 0 && to_ms_since_boot(get_absolute_time()) - confirmStart < 2000) {
+            tud_task();  // Core1 owns the USB stack in normal mode
+            sleep_us(100);
+        }
+        if (tud_cdc_read(&flashingConfirm, 1) == 1 && flashingConfirm == 0xA5) {
+            pending_flashing = true;  // Core0: boot_flashing()
+            return;
+        }
+        const char* denyMsg = "flashing denied\n";
+        tud_cdc_write((const uint8_t*)denyMsg, strlen(denyMsg));
+        tud_cdc_write_flush();
+        g_tele.cdcTxBytes += strlen(denyMsg);
     }
 }

@@ -98,9 +98,15 @@ void boot_normalMode() {
         updateInputState();
         // CDC command response moved to Core1 (cdc_respond); Core0 focuses on
         // sensor scanning to eliminate input jitter at 120fps.
+        if (pending_flashing) {
+            // round78: normal-mode 0xBB+0xA5 (cdc_respond, Core1) arms this;
+            // the flash erase itself must run here on Core0.
+            pending_flashing = false;
+            boot_flashing();  // returns only on safe-erase failure (stays alive)
+        }
         if (pending_config_mode) {
             pending_config_mode = false;
-            handleCommand();  // flash_safe_execute context lives on Core0
+            handleCommand();  // round78: flashing/config CDC handled on Core0
         }
         // NOTE 1: do NOT call update_rainbow_frame() here. When game_connected=false
         // the LampArray driver (lamp_array_apply on Core1) owns the WS2812 strip; a
@@ -170,7 +176,40 @@ void boot_otherModes() {
     }
 }
 
+static void flash_erase_vectors(void* p) {
+    (void)p;
+    flash_range_erase(0, 4096);
+}
+
 void boot_flashing() {
-    flash_safe_execute([](void* p) { flash_range_erase(0, 4096); }, nullptr, 100);
+    // round78: the return code of flash_safe_execute is now honored. The old
+    // code ignored it -- the SDK SKIPS the erase when the cross-core lockout
+    // handshake fails, and reboot() then came back up in normal firmware with
+    // no RPI-RP2 drive ever appearing (silent failure). Retry once with a
+    // generous window; if it still cannot be done safely, STAY in firmware so
+    // the host's "device must reboot" verification reports a clean error
+    // instead of a missing drive. Must run on Core0 (caller side of
+    // flash_safe_execute; Core1 is the initialized lockout victim). A direct
+    // Core1 rom_reset_usb_boot() call wedged Core1 on real hardware, which is
+    // why normal-mode 0xBB routes through pending_flashing to get here.
+    int rc = flash_safe_execute(flash_erase_vectors, nullptr, 1000);
+    if (rc != PICO_OK) {
+        // round78 review: Core0 is the only watchdog feeder and is blocked
+        // here for the whole handshake wait; re-arm between attempts or the
+        // "stay alive and report" path itself trips the 2s reset and the
+        // silent-failure UX this round fixes comes right back.
+        watchdog_update();
+        sleep_ms(5);
+        watchdog_update();
+        rc = flash_safe_execute(flash_erase_vectors, nullptr, 1000);
+    }
+    if (rc != PICO_OK) {
+        if (core0_owns_usb) {
+            // config mode: Core0 owns the CDC console. In normal mode Core0
+            // must not printf (Core1 drives tud_task; round51 single-driver).
+            printf("boot_flashing: safe-erase unavailable (rc=%d), staying in firmware\n", rc);
+        }
+        return;
+    }
     reboot();
 }

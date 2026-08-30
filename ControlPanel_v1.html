@@ -4644,6 +4644,32 @@ function validateUf2ForDevice(p, devInfo) {
             if (this.flashingTimer) { clearTimeout(this.flashingTimer); this.flashingTimer = null; }
             this.flashingPending = false;
         }
+        // round78: 0xBB 确认流辅助。固件语义:0xBB 后读 1 字节确认(跨 write 或
+        // 同 write 续段),readCdcPayload 只取 1 字节,非 0xA5 即 deny,deny 后
+        // 剩余字节回到命令循环。返回 true 表示设备已离开(BOOTSEL 模拟断开)。
+        flashingArm() {
+            this.flashingPending = true;
+            if (this.flashingTimer) clearTimeout(this.flashingTimer);
+            this.flashingTimer = setTimeout(() => {
+                this.flashingPending = false;
+                this.flashingTimer = null;
+                this.sendText("flashing denied", 10);
+            }, 5000);
+        }
+        flashingConsume(b) {
+            this.flashingClear();
+            if (b === 0xA5) {
+                // 仿固件进入 BOOTSEL:设备离开(端口消失)。面板刷写流程的
+                // "重启验证"(轮询 connected)据此放行;mock 无真实盘符,
+                // 后续盘符选择以浏览器不支持/用户取消自然收尾。
+                this.dev.closed = true;
+                this.dev.waiters.forEach(w => w());
+                this.dev.waiters = [];
+                return true;
+            }
+            this.sendText("flashing denied", 10);
+            return false;
+        }
 
         onHostWrite(bytes) {
             let i = 0;
@@ -4675,6 +4701,13 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 return;  // 载入流未凑满 128 也直接返回, 剩余字节留到下一次 write
+            }
+            // round78: 0xBB 确认窗开启中——本笔 write 的首字节即确认字节
+            // (固件 readCdcPayload 语义), 与 cfgSetPending/mbrPending 同模式。
+            if (this.flashingPending) {
+                const b = bytes[i++];
+                if (this.flashingConsume(b)) return;  // 设备已离开(BOOTSEL)
+                // denied: 剩余字节作为新命令流继续走下方分发
             }
             while (i < bytes.length) {
                 const cmd = bytes[i++];
@@ -4755,22 +4788,15 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.FLASHING) {
-                    // round76b: 面板 0xBB 与 0xA5 分两次 write 到达,跨 write 状态化
-                    // 等确认字节;5s 无 0xA5 视为 denied(仿固件确认窗)。
-                    while (i < bytes.length) {
+                    // round78 重写: 0xBB 武装 5s 确认窗(仿固件),确认字节由
+                    // onHostWrite 顶部 flashingPending pre-check 消费(跨 write)。
+                    // 旧实现(round76b)把同 write 的 0xA5 也当"武装"字节、第二笔
+                    // [0xA5] 落到 unknown command——确认链路从未走通。
+                    // 旧式合并写([0xBB,0xA5] 单笔)由下方立即消费兼容。
+                    this.flashingArm();
+                    if (i < bytes.length && this.flashingPending) {
                         const b = bytes[i++];
-                        if (this.flashingPending) {
-                            this.flashingClear();
-                            if (b === 0xA5) { /* 进 BOOTSEL,mock 无盘符 */ }
-                            else this.sendText("flashing denied", 10);
-                        } else {
-                            this.flashingPending = true;
-                            this.flashingTimer = setTimeout(() => {
-                                this.flashingPending = false;
-                                this.flashingTimer = null;
-                                this.sendText("flashing denied", 10);
-                            }, 5000);
-                        }
+                        if (this.flashingConsume(b)) return;  // 设备已离开
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
@@ -7063,16 +7089,37 @@ function validateUf2ForDevice(p, devInfo) {
             return;
         }
         configMode = false;
-        bootselReady = true;
         updateUI();
-        await sleep(600);
-        await closePort();
+        // round78: 盲发改为验证——等设备真的重启(串口自行消失;readLoop 的意外
+        // 断开处理会把 connected/port 清空)后才弹盘符框。旧流程固定 sleep 后
+        // 直接弹框,若 0xBB 落空(设备不在配置模式被静默忽略,或确认字节丢失被
+        // deny),弹窗里永远等不到 RPI-RP2 且没有任何报错。
+        const sendT0 = performance.now();
+        let wentAway = false;
+        while (performance.now() - sendT0 < 3000) {
+            await sleep(80);
+            if (!connected || !port) { wentAway = true; break; }
+        }
+        if (!wentAway) {
+            const denied = new TextDecoder().decode(readBuffer).includes("flashing denied");
+            await closePort();
+            bootselReady = false;
+            updateFlashUi();
+            log(denied
+                ? "设备拒绝了刷写(0xA5 确认未按时到达,固件回 flashing denied)。请重试;若反复出现请反馈日志"
+                : "设备未重启——未进入 BOOTSEL。请重试;若反复出现,按住板载 BOOTSEL 键插拔 USB 手动进入,再用「手动选择盘符写入」",
+                "error");
+            setFlashPhase("error", denied ? "✗ 刷写被固件拒绝" : "✗ 设备未进入 BOOTSEL");
+            return;
+        }
+        bootselReady = true;
+        await closePort();  // 幂等清理(端口已被断开处理清空)并停掉通用重连轮询
         if (!window.showDirectoryPicker) {
             log("当前浏览器不支持直接写入(需要 Chrome/Edge 的 File System Access API)。请手动打开 RPI-RP2 盘符复制固件文件", "warn");
             setFlashPhase("bootsel-manual", "已进入 BOOTSEL——请手动复制固件文件到 RPI-RP2");
             return;
         }
-        // 等 Windows 完成挂载 RPI-RP2(设备重启 ~0.2s + USB 枚举 + 卷挂载)
+        // 等 Windows 完成挂载 RPI-RP2(断开已确认,再给枚举+卷挂载留时间)
         await sleep(2600);
         setFlashPhase("picking");
         let dir;

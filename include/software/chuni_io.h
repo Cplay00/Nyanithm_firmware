@@ -20,6 +20,7 @@ void hid_task_chuni_input();
 
 extern bool game_connected;
 extern volatile bool pending_config_mode;
+extern volatile bool pending_flashing;  // round78: normal-mode 0xBB -> Core0 executes
 extern volatile bool in_config_mode;
 
 // CDC command responder, called from Core1 (usb_device.cpp multicore_entry).
