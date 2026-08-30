@@ -193,6 +193,7 @@ void boot_flashing() {
     // Core1 rom_reset_usb_boot() call wedged Core1 on real hardware, which is
     // why normal-mode 0xBB routes through pending_flashing to get here.
     int rc = flash_safe_execute(flash_erase_vectors, nullptr, 1000);
+    flashDiagRc = (uint8_t)rc;  // round78c: post-mortem via CMD_FLASH_DIAG
     if (rc != PICO_OK) {
         // round78 review: Core0 is the only watchdog feeder and is blocked
         // here for the whole handshake wait; re-arm between attempts or the
@@ -202,6 +203,7 @@ void boot_flashing() {
         sleep_ms(5);
         watchdog_update();
         rc = flash_safe_execute(flash_erase_vectors, nullptr, 1000);
+        flashDiagRc = (uint8_t)rc;
     }
     if (rc != PICO_OK) {
         if (core0_owns_usb) {

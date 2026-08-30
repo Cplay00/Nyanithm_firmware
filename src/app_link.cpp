@@ -115,25 +115,36 @@ void handleCommand() {
         // (chuni_io.cpp). The panel runs in Chrome, whose serial stack holds
         // the trailing 0xA5 write for seconds (no flush semantics; real-device
         // repro: the confirm never landed within the old readCdcPayload(5s)
-        // window). 0xBB only arms a 10s window; the next 0xA5 -- whenever it
-        // lands -- boots, a wrong byte or expiry denies once. round51's
-        // stray-0xBB protection is unchanged in strength.
-        if (flashingArmed && to_ms_since_boot(get_absolute_time()) - flashingArmedAt > 10000) {
+        // window). 0xBB only arms a window (round78c: 30s -- Chrome's hold is
+        // unbounded-ish and closePort's flush releases the backlog); the next
+        // 0xA5 -- whenever it lands -- boots, a wrong byte or expiry denies
+        // once. round51's stray-0xBB protection is unchanged in strength.
+        if (flashingArmed && to_ms_since_boot(get_absolute_time()) - flashingArmedAt > 30000) {
             flashingArmed = false;
+            flashDiagCode = 2;  // deny: window expired
+            flashDiagGapMs = to_ms_since_boot(get_absolute_time()) - flashingArmedAt;
+            flashDiagRc = 0xFF;
             printf("flashing denied\n");
         }
         if (flashingArmed) {
             if (cmd == 0xA5) {
                 flashingArmed = false;
+                flashDiagCode = 1;  // boot attempted (rc recorded in boot_flashing)
+                flashDiagGapMs = to_ms_since_boot(get_absolute_time()) - flashingArmedAt;
+                flashDiagRc = 0xFF;
                 boot_flashing();  // returns only on safe-erase failure (stays alive)
                 continue;
             }
             flashingArmed = false;
+            flashDiagGapMs = to_ms_since_boot(get_absolute_time()) - flashingArmedAt;
+            flashDiagRc = 0xFF;
             if (cmd == CMD_FLASHING) {
                 flashingArmed = true;  // host retry: re-arm, consume
                 flashingArmedAt = to_ms_since_boot(get_absolute_time());
+                flashDiagCode = 0;
                 continue;
             }
+            flashDiagCode = 3;  // deny: interloping byte
             printf("flashing denied\n");  // byte consumed, matching the old confirm read
             continue;
         }
@@ -142,7 +153,20 @@ void handleCommand() {
             // window above instead of blocking in readCdcPayload.
             flashingArmed = true;
             flashingArmedAt = to_ms_since_boot(get_absolute_time());
+            flashDiagCode = 0;
             continue;
+        } else if (cmd == CMD_FLASH_DIAG) {
+            // round78c: post-mortem dump for silent flashing outcomes. Binary:
+            // [0xCD][code][rc][gap u32 LE]. Normal mode has the same handler.
+            uint32_t g = flashDiagGapMs;
+            putchar(CMD_FLASH_DIAG);
+            putchar(flashDiagCode);
+            putchar(flashDiagRc);
+            putchar(g & 0xFF);
+            putchar((g >> 8) & 0xFF);
+            putchar((g >> 16) & 0xFF);
+            putchar((g >> 24) & 0xFF);
+            stdio_flush();
         } else if (cmd == CMD_DEV_DETECT) {
             putchar(CMD_DEV_DETECT);
         } else if (cmd == CMD_CFG_READ) {

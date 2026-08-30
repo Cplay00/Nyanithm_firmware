@@ -155,6 +155,9 @@ volatile bool pending_flashing = false;
 // Core1) and handleCommand (config mode, Core0) -- the two never run at once.
 volatile bool flashingArmed = false;
 volatile uint32_t flashingArmedAt = 0;
+volatile uint8_t flashDiagCode = 0;
+volatile uint8_t flashDiagRc = 0xFF;
+volatile uint32_t flashDiagGapMs = 0;
 volatile bool in_config_mode = false;
 
 // round68: game-raw baseline from cfg2 bit1 (persisted, default off). The
@@ -222,23 +225,36 @@ void cdc_respond() {
     // The panel runs in Chrome, whose serial stack holds the trailing 0xA5
     // write for seconds (no flush semantics), so the confirm must be honored
     // whenever it lands, not within a blocking window. Expiry or a wrong
-    // byte denies once; a host retry re-arms.
+    // byte denies once; a host retry re-arms. round78c: the window is 30s --
+    // Chrome's hold is unbounded-ish (observed >10s) and the panel's
+    // closePort flush releases the backlog, so the late confirm must still
+    // land inside the window.
     if (flashingArmed) {
-        if (to_ms_since_boot(get_absolute_time()) - flashingArmedAt > 10000) {
+        if (to_ms_since_boot(get_absolute_time()) - flashingArmedAt > 30000) {
             flashingArmed = false;
+            flashDiagCode = 2;  // deny: window expired
+            flashDiagGapMs = to_ms_since_boot(get_absolute_time()) - flashingArmedAt;
+            flashDiagRc = 0xFF;
             const char* denyMsg = "flashing denied\n";
             tud_cdc_write((const uint8_t*)denyMsg, strlen(denyMsg));
             tud_cdc_write_flush();
             g_tele.cdcTxBytes += strlen(denyMsg);
         } else if (cmd == 0xA5) {
             flashingArmed = false;
+            flashDiagCode = 1;  // boot attempted (rc recorded in boot_flashing)
+            flashDiagGapMs = to_ms_since_boot(get_absolute_time()) - flashingArmedAt;
+            flashDiagRc = 0xFF;
             pending_flashing = true;  // Core0 normal loop: boot_flashing()
             return;
         } else if (cmd == CMD_FLASHING) {
             flashingArmedAt = to_ms_since_boot(get_absolute_time());  // host retry: re-arm
+            flashDiagCode = 0;
             return;
         } else {
             flashingArmed = false;
+            flashDiagCode = 3;  // deny: interloping byte
+            flashDiagGapMs = to_ms_since_boot(get_absolute_time()) - flashingArmedAt;
+            flashDiagRc = 0xFF;
             const char* denyMsg = "flashing denied\n";
             tud_cdc_write((const uint8_t*)denyMsg, strlen(denyMsg));
             tud_cdc_write_flush();
@@ -692,6 +708,19 @@ void cdc_respond() {
         // stays: only a 0xA5 inside the window boots, anything else denies.
         flashingArmed = true;
         flashingArmedAt = to_ms_since_boot(get_absolute_time());
+        flashDiagCode = 0;
         return;
+    }
+    if (cmd == CMD_FLASH_DIAG) {
+        // round78c: post-mortem dump for silent flashing outcomes. Binary:
+        // [0xCD][code][rc][gap u32 LE]. Works in normal mode; config mode has
+        // the same handler (app_link.cpp).
+        uint32_t g = flashDiagGapMs;
+        uint8_t frame[7] = { CMD_FLASH_DIAG, flashDiagCode, flashDiagRc,
+                             (uint8_t)(g & 0xFF), (uint8_t)((g >> 8) & 0xFF),
+                             (uint8_t)((g >> 16) & 0xFF), (uint8_t)((g >> 24) & 0xFF) };
+        tud_cdc_write(frame, sizeof(frame));
+        tud_cdc_write_flush();
+        g_tele.cdcTxBytes += sizeof(frame);
     }
 }

@@ -24,6 +24,14 @@ extern volatile bool pending_flashing;  // round78: normal-mode 0xBB -> Core0 ex
 extern volatile bool flashingArmed;     // round78b: stateful 0xBB confirm window
 extern volatile uint32_t flashingArmedAt;
 extern volatile bool in_config_mode;
+// round78c: flashing post-mortem, readable via CMD_FLASH_DIAG (0xCD) after a
+// silent failure (deny/boot-fail text went to an already-closed host port).
+// code: 0=none 1=boot attempted 2=deny window expired 3=deny wrong byte.
+// rc: flash_safe_execute return (0xFF = never reached); gapMs: device-side
+// 0xBB->confirm/timeout distance.
+extern volatile uint8_t flashDiagCode;
+extern volatile uint8_t flashDiagRc;
+extern volatile uint32_t flashDiagGapMs;
 
 // CDC command responder, called from Core1 (usb_device.cpp multicore_entry).
 // Uses bulk tud_cdc read/write instead of stdio getchar/putchar (old maindev_loop,

@@ -102,6 +102,7 @@ typedef enum {
     CMD_CFG_KEEPALIVE = 0xC3,  // round57: 配置模式心跳,静默重置 60s 自动退出计时器
     CMD_GET_RAW_STATUS = 0xC4,  // round66: 压力上报开关查询,回文本行 RAW=0|1\n
     CMD_SET_RAW_REPORT = 0xC5,  // round66: 压力上报开关设置,跟 1B 0/1,回 RAW=0|1\n
+    CMD_FLASH_DIAG = 0xCD,      // round78c: 刷写结局诊断,回 [0xCD][code][rc][gap u32 LE];仅事后查询
 } NyanithmCmd;
 
 #endif
