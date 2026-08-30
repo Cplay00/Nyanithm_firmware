@@ -7076,22 +7076,16 @@ function validateUf2ForDevice(p, devInfo) {
             await withSerialLock(async () => {
                 flushReadBuffer();
                 // 0xBB 必须紧跟确认字节 0xA5(round51 防命令流错位变砖的保护)。
-                // round76b: 两字节必须分两次独立 write(round63i 铁律)——单笔合并
-                // 写时 usbser 会把 0xA5 尾包扣到下一笔主机写才发出(真机实测迟到
-                // ~4s),固件确认窗超时回 "flashing denied",永远进不了 BOOTSEL。
-                await writeBytes(new Uint8Array([CMD.FLASHING]));
-                await writeBytes(new Uint8Array([0xA5]));
-                // round78b: Chrome Web Serial 无 flush API——最后一笔 write 的
-                // 尾字节滞留在串口服务缓冲里,直到下一笔主机写或 ~4s 惰性超时
-                // 才发出(pyserial flush() 会立即冲刷,故 rig 复现不出;0xA5 迟到
-                // 使设备在面板重启验证窗口内不动,报错后 closePort 才把字节冲
-                // 出去,设备"迟到"的进 BOOTSEL 表现为异常断连)。补发一笔 0xC3
-                // (CFG_KEEPALIVE: 配置模式=静默心跳,正常模式=无分支忽略)立即
-                // 冲出 0xA5;它自身作为尾字节滞留也完全无害。尽力而为:设备若
-                // 已在两写之间重启离开,writer 已被断开处理置空,冲刷无意义。
-                try { await writeBytes(new Uint8Array([CMD.CFG_KEEPALIVE])); } catch (e) {}
+                // round78e: 两字节合并为一次 write——一个 chunk 一次 WriteFile
+                // 一次 USB OUT 包,物理上不存在包间隙(Electron 台架实测:同毫秒
+                // 连发的三笔单字节写会在宿主栈内卡死 >11s 不达设备,而所有间隔
+                // 发出的单笔写都瞬时到达;WICG/serial #166 维护者亦确认合并单写
+                // 是"立即发完"的正解)。固件侧 round78c 起为状态化确认:0xBB 武装
+                // 30s 窗,0xA5 任意时刻落地即触发,合并写/分离写均兼容。
+                // round76b 的"必须分两笔写"结论仅适用于旧的阻塞式确认窗。
+                await writeBytes(new Uint8Array([CMD.FLASHING, 0xA5]));
             });
-            log("已发送刷写命令 (0xBB+0xA5),设备正在重启进入 BOOTSEL 模式...");
+            log("已发送刷写命令 (0xBB+0xA5 合并单笔),设备正在重启进入 BOOTSEL 模式...");
         } catch (e) {
             log("发送刷写命令失败: " + e.message, "error");
             setFlashPhase("error", "发送刷写命令失败");
@@ -7100,31 +7094,45 @@ function validateUf2ForDevice(p, devInfo) {
         configMode = false;
         updateUI();
         // round78: 盲发改为验证——等设备真的重启(串口自行消失;readLoop 的意外
-        // 断开处理会把 connected/port 清空)后才弹盘符框。旧流程固定 sleep 后
-        // 直接弹框,若 0xBB 落空(设备不在配置模式被静默忽略,或确认字节丢失被
-        // deny),弹窗里永远等不到 RPI-RP2 且没有任何报错。
-        // round78b: 窗口 3s→5.5s 并在出现 "flashing denied" 时提前退出——正常
-        // 模式 deny 在 ~2s、配置模式 deny 在 ~5s,都能得到精确归因;0xA5 已由
-        // 尾随 0xC3 冲刷写立即送达,正常路径 ~0.3s 内即重启。
+        // 断开处理会把 connected/port 清空)后才弹盘符框。
+        // round78e: 窗口 11s→35s 并周期重发。台架实测宿主栈可能把刷写字节扣留
+        // >11s(closePort 才送达,甚至被 PURGE 丢弃),11s 窗必然误报;固件武装窗
+        // 为 30s,面板窗覆盖之。每 1.5s 重发一次合并对——每笔重发都是独立的单笔
+        // 写(台架实测该形态总能瞬时到达),任意一笔落地即触发 boot;0xBB 亦会
+        // 重置配置模式 60s 自动退出计时,长窗内设备不会自行掉线。等待期间绝不
+        // closePort(Chromium 关闭走 PurgeComm(PURGE_TXCLEAR) 是丢弃而非冲刷,
+        // 依赖"关闭冲出滞留字节"不可靠)。
         const sendT0 = performance.now();
         let wentAway = false, denied = false;
-        while (performance.now() - sendT0 < 5500) {
-            await sleep(80);
-            if (!connected || !port) { wentAway = true; break; }
-            if (!denied && readBuffer.length && new TextDecoder().decode(readBuffer).includes("flashing denied")) {
-                denied = true; break;
+        while (performance.now() - sendT0 < 35000) {
+            const waitEnd = performance.now() + 1500;
+            while (performance.now() < waitEnd) {
+                await sleep(80);
+                // round78e(审查 P3): deny 文本先于断开判定——断开清理会清
+                // readBuffer,反序会让同轮的 deny 丢失
+                if (!denied && readBuffer.length && new TextDecoder().decode(readBuffer).includes("flashing denied")) {
+                    denied = true; break;
+                }
+                if (!connected || !port) { wentAway = true; break; }
             }
+            if (wentAway || denied) break;
+            // 重发(尽力而为:设备已离开时 write 会抛错,属 boot 进行中的正常现象)
+            try {
+                await withSerialLock(async () => {
+                    await writeBytes(new Uint8Array([CMD.FLASHING, 0xA5]));
+                });
+            } catch (e) { /* port gone -> next inner loop 观察 wentAway */ }
         }
         if (!wentAway) {
             await closePort();
-            // round78c: 固件确认窗(10s)比面板验证窗(5.5s)长,且 closePort 会
-            // 冲出 Chrome 滞留的字节——设备可能在报错后"迟到"进 BOOTSEL。
-            // 保留手动写入路径,提示用户留意稍后出现的盘符。
+            // round78e: 35s 窗到期仍无重启——不再指望"迟到进 BOOTSEL"(Chromium
+            // close 语义是丢弃),直接引导重试/手动。bootselReady 保留,手动选择
+            // 盘符路径仍可用(若字节最终极晚送达而进入 BOOTSEL)。
             bootselReady = true;
             updateFlashUi();
             log(denied
                 ? "设备拒绝了刷写(0xA5 确认未按时到达,固件回 flashing denied)。请重试;若反复出现请反馈日志"
-                : "设备未在窗口期内重启。若稍后 RPI-RP2 盘符出现(滞留字节被冲出、迟到进入 BOOTSEL),可直接点「手动选择盘符写入」;否则请重试,或按住板载 BOOTSEL 键插拔 USB 手动进入",
+                : "设备未在窗口期内重启。请重试一次;若仍失败,请按住板载 BOOTSEL 键插拔 USB 手动进入后用「手动选择盘符写入」",
                 "error");
             setFlashPhase("error", denied ? "✗ 刷写被固件拒绝" : "✗ 设备未进入 BOOTSEL");
             return;
@@ -7138,6 +7146,42 @@ function validateUf2ForDevice(p, devInfo) {
         }
         // 等 Windows 完成挂载 RPI-RP2(断开已确认,再给枚举+卷挂载留时间)
         await sleep(2600);
+        // round78e(审查 P2 判别守卫): 窗内固件软重启(如配置模式 60s 自动退出)
+        // 同样表现为"端口消失",需与真 BOOTSEL 区分——真 BOOTSEL 下 CDC 口不会
+        // 以同 VID/PID 重枚举,软重启会在 1~2s 内回来。+2.6s 与 +6s 两次采样:
+        // 若 CDC 口回归且持续在线 → 判为软重启,按错误收场不弹盘符框(避免 UI
+        // 谎报"已进入 BOOTSEL");若回归后又消失(滞留字节在重启后的正常模式里
+        // 迟到触发真 BOOTSEL)则继续按成功走。Mock 的 getPorts 每次发新假端口,
+        // 无判别意义,门控跳过。
+        if (!MOCK) {
+            const cdcBack = async () => {
+                try {
+                    const ports = await navigator.serial.getPorts();
+                    return ports.some((p) => {
+                        if (!p || typeof p.getInfo !== "function") return false;
+                        const i = p.getInfo();
+                        return i.usbVendorId === 0xCAFE && i.usbProductId === 0x4009;
+                    });
+                } catch (e) { return false; }
+            };
+            let softReboot = false;
+            if (await cdcBack()) {
+                const guardDeadline = performance.now() + 3500;
+                let stillBack = true;
+                while (performance.now() < guardDeadline) {
+                    await sleep(300);
+                    if (!(await cdcBack())) { stillBack = false; break; }
+                }
+                if (stillBack) softReboot = true;
+            }
+            if (softReboot) {
+                log("设备串口在刷写窗口内重新枚举——这是一次固件软重启(例如配置模式自动退出),并非 BOOTSEL。请直接重试", "error");
+                setFlashPhase("error", "✗ 设备重启了,但未进入 BOOTSEL");
+                bootselReady = false;
+                updateFlashUi();
+                return;
+            }
+        }
         setFlashPhase("picking");
         let dir;
         try {
