@@ -30,7 +30,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NYANITHM Control Panel · hw_v1</title>
+    <title>NYANITHM Control Panel v1.1.1-beta1 · hw_v1</title>
     <style>
 @font-face {
   font-family: 'Chakra Petch';
@@ -2718,6 +2718,22 @@ input[type="range"]:disabled {
     line-height: 1;
 }
 
+/* round77: 面板版本标识(页头品牌区,文本由 app_ui.js 按 PANEL_VERSION 填充) */
+.header-master .panel-version {
+    font-family: var(--font-mono, Consolas, monospace);
+    font-size: 10px;
+    font-weight: var(--fw-bold, 700);
+    letter-spacing: .08em;
+    color: inherit;
+    filter: var(--logo-filter);
+    opacity: .8;
+    white-space: nowrap;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    padding: 2px 6px;
+    line-height: 1;
+}
+
 /* round61: 设备信息四格自动换行/增高/对齐 + 固件版本可点击弹详情 */
 .info-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -3031,6 +3047,7 @@ input[type="range"]:disabled {
 
             <div class="header-master">
                 <span class="master-text">CONTROLLER GEN 1</span>
+                <span class="panel-version" id="panelVer"></span>
             </div>
             <div class="header-actions">
                     <button class="theme-toggle" id="themeToggle" title="切换主题" aria-label="切换主题"><svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3849,7 +3866,11 @@ const BIT_DISABLE_LAMP_ARRAY = 0b00000001;
 const BIT_GAME_RAW_SLIDER = 0b00000010;
 
 // 一代 hw_v1 固件版本白名单:0xBC 探测不可用(旧固件)时的回退门禁依据。
-const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0"];
+const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1"];
+// round77: 面板自身版本标识(显示于页头品牌区)。cmpVersion 对 "1-beta1" 这类
+// 带后缀补丁段按 0 处理(NaN||0),即 1.6.1-beta1 在版本门禁中等价 1.6.0,≥1.6.0
+// 的功能门禁(0xC4/0xC5/逐键阈值)全部照常通过。
+const PANEL_VERSION = "1.1.1-beta1";
 
 // ====== UF2 固件文件解析(刷写前校验) ======
 const UF2_MAGIC0 = 0x0A324655;   // "UF2\n"
@@ -4753,7 +4774,7 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    const s = "FW:1.6.0 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.0;hw_v1";
+                    const s = "FW:1.6.1-beta1 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.1-beta1;hw_v1";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -7438,6 +7459,9 @@ function validateUf2ForDevice(p, devInfo) {
     // ================================================================
     initLedStrip();
     initSliderAnimations();
+    // round77: 页头面板版本标识(值来自 app_core.js 的 PANEL_VERSION)
+    const panelVerEl = $("panelVer");
+    if (panelVerEl) panelVerEl.textContent = "Panel v" + PANEL_VERSION;
     syncLedDefaultColor(false);  // round71: Light Test 默认色对齐当前主题 accent
     // round71 终审: THEME TOGGLE 是独立顶层 IIFE, 看不到本作用域的 syncLedDefaultColor;
     // 经 window 桥接(视觉审查发现的 ReferenceError 被空 catch 吞掉导致联动失效)。
