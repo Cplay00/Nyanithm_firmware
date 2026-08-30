@@ -158,8 +158,15 @@ void handleCommand() {
             // (BOOTSEL rescue is the only recovery).
             // round75: the confirm wait is bounded now (was unbounded
             // getchar()); a timeout denies flashing instead of wedging.
+            // round76b: 500ms proved too tight on real hardware -- a host that
+            // sends [0xBB,0xA5] as ONE burst can have the 0xA5 held back by
+            // usbser for seconds until the next host write flushes it (same
+            // tail-packet physics as CFG_SET round63i). The panel now sends
+            // the two bytes as separate writes, and this window tolerates a
+            // late confirm instead of denying the flash. readCdcPayload pumps
+            // tud_task + watchdog for the whole wait, so nothing wedges.
             uint8_t flashingConfirm = 0;
-            if (readCdcPayload(&flashingConfirm, 1, 500) && flashingConfirm == 0xA5) {
+            if (readCdcPayload(&flashingConfirm, 1, 5000) && flashingConfirm == 0xA5) {
                 boot_flashing();
             } else {
                 printf("flashing denied\n");

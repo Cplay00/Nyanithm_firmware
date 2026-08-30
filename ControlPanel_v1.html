@@ -4558,6 +4558,8 @@ function validateUf2ForDevice(p, devInfo) {
             this.cfgSetPending = null;  // round63f: CFG_SET 载入流跨 write 累积
             this.mbrPending = null;  // round75: 0xBA 载荷跨 write 累积(面板改双写)
             this.mbrPendingTimer = null;  // round75 审查: 载入流断流超时, 仿固件 readCdcPayload
+            this.flashingPending = false;  // round76b: 0xBB 确认字节跨 write(面板改双写)
+            this.flashingTimer = null;  // round76b: 仿固件 5s 确认窗,超时 denied
             this.tofCount = MOCK_GEN2 ? 3 : 4;  // gen2:ToF 数异常,应被门禁拦截
             this.rawReport = false;  // round66: 压力上报状态
             this.cmdLog = [];  // round63h: 与真实固件 0xCE 命令日志同构(仅顶层命令字节)
@@ -4616,6 +4618,10 @@ function validateUf2ForDevice(p, devInfo) {
             this.sendText("programing 3116 chip", 10);
             this.sendText("done", 600);
             this.sendText("verify ok", 700);
+        }
+        flashingClear() {
+            if (this.flashingTimer) { clearTimeout(this.flashingTimer); this.flashingTimer = null; }
+            this.flashingPending = false;
         }
 
         onHostWrite(bytes) {
@@ -4728,8 +4734,23 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.FLASHING) {
-                    if (bytes[i] === 0xA5) { i++; /* 进 BOOTSEL,mock 无盘符 */ }
-                    else this.sendText("flashing denied", 10);
+                    // round76b: 面板 0xBB 与 0xA5 分两次 write 到达,跨 write 状态化
+                    // 等确认字节;5s 无 0xA5 视为 denied(仿固件确认窗)。
+                    while (i < bytes.length) {
+                        const b = bytes[i++];
+                        if (this.flashingPending) {
+                            this.flashingClear();
+                            if (b === 0xA5) { /* 进 BOOTSEL,mock 无盘符 */ }
+                            else this.sendText("flashing denied", 10);
+                        } else {
+                            this.flashingPending = true;
+                            this.flashingTimer = setTimeout(() => {
+                                this.flashingPending = false;
+                                this.flashingTimer = null;
+                                this.sendText("flashing denied", 10);
+                            }, 5000);
+                        }
+                    }
                 }
                 else if (cmd === CMD.GET_VERSION) {
                     const s = "FW:1.6.0 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.0;hw_v1";
@@ -7005,8 +7026,12 @@ function validateUf2ForDevice(p, devInfo) {
         try {
             await withSerialLock(async () => {
                 flushReadBuffer();
-                // 0xBB 必须紧跟确认字节 0xA5(round51 防命令流错位变砖的保护)
-                await writeBytes(new Uint8Array([CMD.FLASHING, 0xA5]));
+                // 0xBB 必须紧跟确认字节 0xA5(round51 防命令流错位变砖的保护)。
+                // round76b: 两字节必须分两次独立 write(round63i 铁律)——单笔合并
+                // 写时 usbser 会把 0xA5 尾包扣到下一笔主机写才发出(真机实测迟到
+                // ~4s),固件确认窗超时回 "flashing denied",永远进不了 BOOTSEL。
+                await writeBytes(new Uint8Array([CMD.FLASHING]));
+                await writeBytes(new Uint8Array([0xA5]));
             });
             log("已发送刷写命令 (0xBB+0xA5),设备正在重启进入 BOOTSEL 模式...");
         } catch (e) {
