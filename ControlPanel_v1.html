@@ -7081,6 +7081,15 @@ function validateUf2ForDevice(p, devInfo) {
                 // ~4s),固件确认窗超时回 "flashing denied",永远进不了 BOOTSEL。
                 await writeBytes(new Uint8Array([CMD.FLASHING]));
                 await writeBytes(new Uint8Array([0xA5]));
+                // round78b: Chrome Web Serial 无 flush API——最后一笔 write 的
+                // 尾字节滞留在串口服务缓冲里,直到下一笔主机写或 ~4s 惰性超时
+                // 才发出(pyserial flush() 会立即冲刷,故 rig 复现不出;0xA5 迟到
+                // 使设备在面板重启验证窗口内不动,报错后 closePort 才把字节冲
+                // 出去,设备"迟到"的进 BOOTSEL 表现为异常断连)。补发一笔 0xC3
+                // (CFG_KEEPALIVE: 配置模式=静默心跳,正常模式=无分支忽略)立即
+                // 冲出 0xA5;它自身作为尾字节滞留也完全无害。尽力而为:设备若
+                // 已在两写之间重启离开,writer 已被断开处理置空,冲刷无意义。
+                try { await writeBytes(new Uint8Array([CMD.CFG_KEEPALIVE])); } catch (e) {}
             });
             log("已发送刷写命令 (0xBB+0xA5),设备正在重启进入 BOOTSEL 模式...");
         } catch (e) {
@@ -7094,14 +7103,19 @@ function validateUf2ForDevice(p, devInfo) {
         // 断开处理会把 connected/port 清空)后才弹盘符框。旧流程固定 sleep 后
         // 直接弹框,若 0xBB 落空(设备不在配置模式被静默忽略,或确认字节丢失被
         // deny),弹窗里永远等不到 RPI-RP2 且没有任何报错。
+        // round78b: 窗口 3s→5.5s 并在出现 "flashing denied" 时提前退出——正常
+        // 模式 deny 在 ~2s、配置模式 deny 在 ~5s,都能得到精确归因;0xA5 已由
+        // 尾随 0xC3 冲刷写立即送达,正常路径 ~0.3s 内即重启。
         const sendT0 = performance.now();
-        let wentAway = false;
-        while (performance.now() - sendT0 < 3000) {
+        let wentAway = false, denied = false;
+        while (performance.now() - sendT0 < 5500) {
             await sleep(80);
             if (!connected || !port) { wentAway = true; break; }
+            if (!denied && readBuffer.length && new TextDecoder().decode(readBuffer).includes("flashing denied")) {
+                denied = true; break;
+            }
         }
         if (!wentAway) {
-            const denied = new TextDecoder().decode(readBuffer).includes("flashing denied");
             await closePort();
             bootselReady = false;
             updateFlashUi();
