@@ -7117,11 +7117,14 @@ function validateUf2ForDevice(p, devInfo) {
         }
         if (!wentAway) {
             await closePort();
-            bootselReady = false;
+            // round78c: 固件确认窗(10s)比面板验证窗(5.5s)长,且 closePort 会
+            // 冲出 Chrome 滞留的字节——设备可能在报错后"迟到"进 BOOTSEL。
+            // 保留手动写入路径,提示用户留意稍后出现的盘符。
+            bootselReady = true;
             updateFlashUi();
             log(denied
                 ? "设备拒绝了刷写(0xA5 确认未按时到达,固件回 flashing denied)。请重试;若反复出现请反馈日志"
-                : "设备未重启——未进入 BOOTSEL。请重试;若反复出现,按住板载 BOOTSEL 键插拔 USB 手动进入,再用「手动选择盘符写入」",
+                : "设备未在窗口期内重启。若稍后 RPI-RP2 盘符出现(滞留字节被冲出、迟到进入 BOOTSEL),可直接点「手动选择盘符写入」;否则请重试,或按住板载 BOOTSEL 键插拔 USB 手动进入",
                 "error");
             setFlashPhase("error", denied ? "✗ 刷写被固件拒绝" : "✗ 设备未进入 BOOTSEL");
             return;

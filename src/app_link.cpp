@@ -7,6 +7,7 @@
 
 #include <app_link.h>
 #include <button.h>
+#include <chuni_io.h>
 #include <hardware/watchdog.h>
 #include <production_mode.h>
 #include <boot_mode.h>
@@ -110,7 +111,39 @@ void handleCommand() {
         cfgCmdLog[cfgCmdLogWr & 0xFF] = cmd;
         cfgCmdLogWr++;
         cfgCmdLogTotal++;
-        if (cmd == CMD_DEV_DETECT) {
+        // round78b: stateful flashing confirm, shared with cdc_respond
+        // (chuni_io.cpp). The panel runs in Chrome, whose serial stack holds
+        // the trailing 0xA5 write for seconds (no flush semantics; real-device
+        // repro: the confirm never landed within the old readCdcPayload(5s)
+        // window). 0xBB only arms a 10s window; the next 0xA5 -- whenever it
+        // lands -- boots, a wrong byte or expiry denies once. round51's
+        // stray-0xBB protection is unchanged in strength.
+        if (flashingArmed && to_ms_since_boot(get_absolute_time()) - flashingArmedAt > 10000) {
+            flashingArmed = false;
+            printf("flashing denied\n");
+        }
+        if (flashingArmed) {
+            if (cmd == 0xA5) {
+                flashingArmed = false;
+                boot_flashing();  // returns only on safe-erase failure (stays alive)
+                continue;
+            }
+            flashingArmed = false;
+            if (cmd == CMD_FLASHING) {
+                flashingArmed = true;  // host retry: re-arm, consume
+                flashingArmedAt = to_ms_since_boot(get_absolute_time());
+                continue;
+            }
+            printf("flashing denied\n");  // byte consumed, matching the old confirm read
+            continue;
+        }
+        if (cmd == CMD_FLASHING) {
+            // round51: confirmation byte required -- round78b arms the stateful
+            // window above instead of blocking in readCdcPayload.
+            flashingArmed = true;
+            flashingArmedAt = to_ms_since_boot(get_absolute_time());
+            continue;
+        } else if (cmd == CMD_DEV_DETECT) {
             putchar(CMD_DEV_DETECT);
         } else if (cmd == CMD_CFG_READ) {
             readConfig();
@@ -150,26 +183,6 @@ void handleCommand() {
                 } else {
                     printf("load3116: address 0x%02X not allowed. burn aborted.\n", address);
                 }
-            }
-        } else if (cmd == CMD_FLASHING) {
-            // round51: irreversible flash erase now requires an explicit
-            // confirmation byte (0xA5) right after the command. A stray 0xBB
-            // inside a misaligned command stream must not brick the board
-            // (BOOTSEL rescue is the only recovery).
-            // round75: the confirm wait is bounded now (was unbounded
-            // getchar()); a timeout denies flashing instead of wedging.
-            // round76b: 500ms proved too tight on real hardware -- a host that
-            // sends [0xBB,0xA5] as ONE burst can have the 0xA5 held back by
-            // usbser for seconds until the next host write flushes it (same
-            // tail-packet physics as CFG_SET round63i). The panel now sends
-            // the two bytes as separate writes, and this window tolerates a
-            // late confirm instead of denying the flash. readCdcPayload pumps
-            // tud_task + watchdog for the whole wait, so nothing wedges.
-            uint8_t flashingConfirm = 0;
-            if (readCdcPayload(&flashingConfirm, 1, 5000) && flashingConfirm == 0xA5) {
-                boot_flashing();
-            } else {
-                printf("flashing denied\n");
             }
         } else if (cmd == CMD_DETECT) {
             // round52: read-only hardware identity probe so the host control

@@ -151,6 +151,10 @@ static uint32_t latencyFrameMs = 0;  // round55: arrival timestamp of the frame 
 
 volatile bool pending_config_mode = false;
 volatile bool pending_flashing = false;
+// round78b: stateful 0xBB confirm window, shared by cdc_respond (normal mode,
+// Core1) and handleCommand (config mode, Core0) -- the two never run at once.
+volatile bool flashingArmed = false;
+volatile uint32_t flashingArmedAt = 0;
 volatile bool in_config_mode = false;
 
 // round68: game-raw baseline from cfg2 bit1 (persisted, default off). The
@@ -213,6 +217,35 @@ void cdc_respond() {
         return;
     }
     g_tele.cdcRxBytes++;  // round46: telemetry - count command byte
+
+    // round78b: stateful flashing confirm (see the CMD_FLASHING handler).
+    // The panel runs in Chrome, whose serial stack holds the trailing 0xA5
+    // write for seconds (no flush semantics), so the confirm must be honored
+    // whenever it lands, not within a blocking window. Expiry or a wrong
+    // byte denies once; a host retry re-arms.
+    if (flashingArmed) {
+        if (to_ms_since_boot(get_absolute_time()) - flashingArmedAt > 10000) {
+            flashingArmed = false;
+            const char* denyMsg = "flashing denied\n";
+            tud_cdc_write((const uint8_t*)denyMsg, strlen(denyMsg));
+            tud_cdc_write_flush();
+            g_tele.cdcTxBytes += strlen(denyMsg);
+        } else if (cmd == 0xA5) {
+            flashingArmed = false;
+            pending_flashing = true;  // Core0 normal loop: boot_flashing()
+            return;
+        } else if (cmd == CMD_FLASHING) {
+            flashingArmedAt = to_ms_since_boot(get_absolute_time());  // host retry: re-arm
+            return;
+        } else {
+            flashingArmed = false;
+            const char* denyMsg = "flashing denied\n";
+            tud_cdc_write((const uint8_t*)denyMsg, strlen(denyMsg));
+            tud_cdc_write_flush();
+            g_tele.cdcTxBytes += strlen(denyMsg);
+            // fall through: the interloping byte is dispatched normally
+        }
+    }
 
     if (cmd == CMD_GET_API_LEVEL) {
         uint8_t v = NYANITHM_API_LEVEL;
@@ -650,34 +683,15 @@ void cdc_respond() {
         pending_config_mode = true;
     }
     if (cmd == CMD_FLASHING) {
-        // round78: flashing used to be config-mode-only (app_link
-        // handleCommand). A 0xBB sent while the device is in NORMAL mode --
-        // e.g. the panel's config-mode state desynced after the 60s idle
-        // auto-exit rebooted the board -- was silently ignored here, and the
-        // panel then opened the drive picker with no RPI-RP2 ever appearing
-        // (real-device repro). Honor it in normal mode too, but do NOT run
-        // boot_flashing() here: the flash erase must run on Core0 (caller of
-        // flash_safe_execute; a direct Core1 call of the rom USB-boot entry
-        // wedged Core1 on real hardware), so arm a flag for the Core0 normal
-        // loop. The 0xA5 confirm requirement (round51) is kept in both modes
-        // so a stray 0xBB inside a misaligned command stream cannot reboot
-        // the board; the wait is bounded so garbage cannot stall GET_INPUT
-        // for long.
-        uint8_t flashingConfirm = 0;
-        // round78 review: subtraction compare (wrap-safe after 49.7 days of
-        // uptime), same idiom as readCdcPayload.
-        uint32_t confirmStart = to_ms_since_boot(get_absolute_time());
-        while (tud_cdc_available() == 0 && to_ms_since_boot(get_absolute_time()) - confirmStart < 2000) {
-            tud_task();  // Core1 owns the USB stack in normal mode
-            sleep_us(100);
-        }
-        if (tud_cdc_read(&flashingConfirm, 1) == 1 && flashingConfirm == 0xA5) {
-            pending_flashing = true;  // Core0: boot_flashing()
-            return;
-        }
-        const char* denyMsg = "flashing denied\n";
-        tud_cdc_write((const uint8_t*)denyMsg, strlen(denyMsg));
-        tud_cdc_write_flush();
-        g_tele.cdcTxBytes += strlen(denyMsg);
+        // round78b: 0xBB only ARMS a 10s confirm window and returns -- no
+        // blocking wait. The panel runs in Chrome, whose serial stack may
+        // hold the trailing 0xA5 write for seconds (no flush semantics;
+        // real-device repro: confirm never landed within the old blocking
+        // windows). Whenever the 0xA5 finally lands, the armed check at the
+        // top of this function honors it. round51's stray-0xBB protection
+        // stays: only a 0xA5 inside the window boots, anything else denies.
+        flashingArmed = true;
+        flashingArmedAt = to_ms_since_boot(get_absolute_time());
+        return;
     }
 }
