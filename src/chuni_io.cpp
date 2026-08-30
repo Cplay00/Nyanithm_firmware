@@ -188,8 +188,17 @@ void cdc_respond() {
     updateGameRawBaseline();
     // Standby timeout (normalMode only): 5s without CDC activity -> return to idle
     // (game_connected=false), re-enabling LampArray/Windows dynamic lighting.
+    // round76: a host still holding the port open (DTR high; the control panel
+    // asserts it explicitly on open) is not idle -- keep LampArray suppressed
+    // across gaps between panel transactions, else the strip snaps back to the
+    // Windows accent color (usually blue) 5s after the last 0xB2 frame. A crashed
+    // host that never closes the port keeps DTR high until replug.
     if (game_connected && to_ms_since_boot(get_absolute_time()) - connected_time > 5000) {
-        game_connected = false;
+        if (tud_cdc_connected()) {
+            connected_time = to_ms_since_boot(get_absolute_time());
+        } else {
+            game_connected = false;
+        }
     }
     if (!tud_cdc_available()) {
         return;

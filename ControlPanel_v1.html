@@ -4588,6 +4588,7 @@ function validateUf2ForDevice(p, devInfo) {
         }
         getInfo() { return { usbVendorId: 0xCAFE, usbProductId: 0x4009 }; }
         async open() { this.opened = true; return; }
+        async setSignals() {}  // round76: 真实 Web Serial 有此 API,Mock 补 no-op
         async close() { this.opened = false; }
         get readable() { return { getReader: () => this.readerObj }; }
         get writable() { return { getWriter: () => this.writerObj }; }
@@ -4824,6 +4825,10 @@ function validateUf2ForDevice(p, devInfo) {
                 }
             }
             await port.open({ baudRate: 115200, bufferSize: 8192 });
+            // round76: 显式拉高 DTR。固件 standby 超时据此识别"主机仍握着端口",
+            // 在面板事务间隙继续抑制 Windows 动态照明抢写,否则最后一次 0xB2
+            // 五秒后灯带就被系统强调色(默认蓝)刷掉。
+            try { await port.setSignals({ dataTerminalReady: true }); } catch (e) { log("DTR 置位失败(动态照明抑制可能不生效): " + e.message, "warn"); }
             writer = port.writable.getWriter();
             reader = port.readable.getReader();
             readBuffer = new Uint8Array(0);
@@ -4871,6 +4876,8 @@ function validateUf2ForDevice(p, devInfo) {
         stopLedAnim();
         stopTofPoll();
         stopUnplugReconnect();  // round75: 主动关闭时停掉意外断开重连轮询
+        // round76 审查: 显式释放 DTR 兜底,不依赖 OS 在 port.close() 时反断言
+        try { if (port) await port.setSignals({ dataTerminalReady: false }); } catch (e) {}
         inputPolling = false;
         readLoopRunning = false;
         configMode = false;
@@ -6682,7 +6689,12 @@ function validateUf2ForDevice(p, devInfo) {
     }
     // round71: Light Test 默认准备色与主题 accent 联动(覆盖 HTML 写死的初始值)。
     // 仅更新取色器+本地预览;是否发送由调用方决定(未连接/配置模式/动画中不发)。
+    // round76: 用户手动选过颜色(预设/取色器/自定义)后联动让位——否则亮色主题
+    // 加载/切换会把用户所选色静默顶回 accent 蓝 #0D44D4。
+    let ledColorTouched = false;
+    let ledAnimWarned = false;  // round76 审查: 动画中取色警告按会话去重,避免拖拽取色器刷屏
     function syncLedDefaultColor(send) {
+        if (ledColorTouched) return;
         const input = $("ledColor");
         if (!input) return;
         const hex = getAccentHex();
@@ -6753,6 +6765,7 @@ function validateUf2ForDevice(p, devInfo) {
 
     function stopLedAnim() {
         if (ledAnimId) { cancelAnimationFrame(ledAnimId); ledAnimId = null; }
+        ledAnimWarned = false;
     }
 
     function ledFpsTick(state, now) {
@@ -6764,13 +6777,20 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }
 
-    $("ledOff").addEventListener("click", () => { stopLedAnim(); sendLedColors(solidColors(0, 0, 0)); });
-    $("ledWhite").addEventListener("click", () => { stopLedAnim(); sendLedColors(solidColors(255, 255, 255)); });
-    $("ledRed").addEventListener("click", () => { stopLedAnim(); sendLedColors(solidColors(255, 0, 0)); });
-    $("ledGreen").addEventListener("click", () => { stopLedAnim(); sendLedColors(solidColors(0, 255, 0)); });
-    $("ledBlue").addEventListener("click", () => { stopLedAnim(); sendLedColors(solidColors(0, 0, 255)); });
-    $("ledCustom").addEventListener("click", () => { stopLedAnim(); sendLedColors(solidColors(...hexToRgb($("ledColor").value))); });
-    $("ledColor").addEventListener("input", () => { if (!ledAnimId) sendLedColors(solidColors(...hexToRgb($("ledColor").value))); });
+    $("ledOff").addEventListener("click", () => { ledColorTouched = true; stopLedAnim(); sendLedColors(solidColors(0, 0, 0)); });
+    $("ledWhite").addEventListener("click", () => { ledColorTouched = true; stopLedAnim(); sendLedColors(solidColors(255, 255, 255)); });
+    $("ledRed").addEventListener("click", () => { ledColorTouched = true; stopLedAnim(); sendLedColors(solidColors(255, 0, 0)); });
+    $("ledGreen").addEventListener("click", () => { ledColorTouched = true; stopLedAnim(); sendLedColors(solidColors(0, 255, 0)); });
+    $("ledBlue").addEventListener("click", () => { ledColorTouched = true; stopLedAnim(); sendLedColors(solidColors(0, 0, 255)); });
+    $("ledCustom").addEventListener("click", () => { ledColorTouched = true; stopLedAnim(); sendLedColors(solidColors(...hexToRgb($("ledColor").value))); });
+    $("ledColor").addEventListener("input", () => {
+        ledColorTouched = true;
+        if (ledAnimId) {
+            if (!ledAnimWarned) { log("灯光动画运行中,请先点「停止动画」再选色", "warn"); ledAnimWarned = true; }
+            return;
+        }
+        sendLedColors(solidColors(...hexToRgb($("ledColor").value)));
+    });
     $("ledLimit").addEventListener("input", () => { if (!ledAnimId) sendLedColors(solidColors(...hexToRgb($("ledColor").value))); });
 
     $("ledChase").addEventListener("click", () => {
@@ -7464,6 +7484,10 @@ function validateUf2ForDevice(p, devInfo) {
             document.documentElement.setAttribute('data-theme', 'light');
         }
     }
+    // round76 审查: 主 IIFE 的初始 syncLedDefaultColor 跑在本 IIFE 应用已存主题之前,
+    // 初始默认色会 stale 一拍——应用主题后补一次对齐(send=false 仅刷取色器/预览)。
+    try { if (typeof window.__syncLedDefaultColor === "function") window.__syncLedDefaultColor(false); }
+    catch (e) { /* 桥接未就绪时忽略,首次切换主题后自愈 */ }
 
     let isTransitioning = false;
     toggle.addEventListener('click', () => {
