@@ -7070,7 +7070,104 @@ function validateUf2ForDevice(p, devInfo) {
         return true;
     }
 
-    async function runFlashSequence() {
+    // ================================================================
+    // round78f: RPI-RP2 盘符句柄存档与全自动写盘
+    // showDirectoryPicker 要求"用户激活"(点击后 ~5s 内),而 round78e 的重启
+    // 验证窗普遍超过激活寿命——首刷之后的弹框必抛 NotAllowedError。根治:
+    // 首次取得的目录句柄存入 IndexedDB;此后每次刷写在「开始刷写」点击激活
+    // 期内完成 queryPermission/requestPermission(小确认框,非文件框),
+    // BOOTSEL 出现后轮询卷就绪直接写入,零弹窗。浏览器无法凭空创建句柄,
+    // 首次使用(或句柄失效)仍需一次选择。
+    // ================================================================
+    const RP2_DIR_KEY = "rp2BootselDir";
+    let rp2DirHandle = null;  // 会话内缓存(免 IndexedDB 往返)
+
+    function idbHandles() {
+        return new Promise((resolve) => {
+            try {
+                const req = indexedDB.open("nyanithm-panel", 1);
+                req.onupgradeneeded = () => req.result.createObjectStore("fsHandles");
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(null);
+            } catch (e) { resolve(null); }  // file:// 等异常环境:降级为会话内缓存
+        });
+    }
+    async function idbGet(key) {
+        const db = await idbHandles();
+        if (!db) return undefined;
+        return new Promise((resolve) => {
+            try {
+                const rq = db.transaction("fsHandles").objectStore("fsHandles").get(key);
+                rq.onsuccess = () => resolve(rq.result);
+                rq.onerror = () => resolve(undefined);
+            } catch (e) { resolve(undefined); }
+        });
+    }
+    async function idbSet(key, val) {
+        const db = await idbHandles();
+        if (!db) return;
+        try { db.transaction("fsHandles", "readwrite").objectStore("fsHandles").put(val, key); } catch (e) {}
+    }
+    async function idbDel(key) {
+        const db = await idbHandles();
+        if (!db) return;
+        try { db.transaction("fsHandles", "readwrite").objectStore("fsHandles").delete(key); } catch (e) {}
+    }
+
+    async function loadStoredRp2Dir() {
+        if (rp2DirHandle) return rp2DirHandle;
+        const stored = await idbGet(RP2_DIR_KEY);
+        if (stored) rp2DirHandle = stored;
+        return rp2DirHandle;
+    }
+    async function storeRp2Dir(h) {
+        rp2DirHandle = h;
+        await idbSet(RP2_DIR_KEY, h);
+        log("已记住此盘符——下次刷写将全程无弹窗自动写入");
+    }
+    async function clearRp2Dir() {
+        rp2DirHandle = null;
+        await idbDel(RP2_DIR_KEY);
+    }
+
+    // 「开始刷写」点击激活期内调用:取回已存句柄并落实读写权限(必要时弹一个
+    // 小的"允许编辑"确认)。失败则清档,交由本次的选择框/手动路径兜底。
+    async function prepareRp2DirAtClick() {
+        if (MOCK) return null;
+        const h = await loadStoredRp2Dir();
+        if (!h) return null;
+        try {
+            let perm = await h.queryPermission({ mode: "readwrite" });
+            if (perm !== "granted") {
+                log("正在请求已保存盘符的写入权限…");
+                perm = await h.requestPermission({ mode: "readwrite" });
+            }
+            if (perm === "granted") return h;
+            log("已保存盘符的写入权限被拒绝,本次将弹盘符选择框", "warn");
+        } catch (e) {
+            log(`已保存盘符不可用 (${e.name}),本次将弹盘符选择框`, "warn");
+        }
+        await clearRp2Dir();
+        return null;
+    }
+
+    // 轮询 BOOTSEL 卷就绪:句柄能读到 INFO_UF2.TXT 且带 RP2040 标识才返回。
+    // 不直接调 validateAndWriteToBootsel——卷未挂载时它会把 entries=[] 误判为
+    // "非 BOOTSEL 盘"而弹强制写入确认框。
+    async function waitRp2VolumeReady(h, ms) {
+        const end = performance.now() + ms;
+        while (performance.now() < end) {
+            try {
+                const fh = await h.getFileHandle("INFO_UF2.TXT");
+                const t = await (await fh.getFile()).text();
+                if (/RP2040|RPI-RP2|UF2\s*Bootloader|Raspberry Pi RP2/i.test(t)) return h;
+            } catch (e) { /* 卷未挂载/句柄暂不可解析——RP2 BOOTSEL 固定提供该文件 */ }
+            await sleep(300);
+        }
+        return null;
+    }
+
+    async function runFlashSequence(readyDir, earlyPicker) {
         setFlashPhase("bootsel");
         try {
             await withSerialLock(async () => {
@@ -7146,13 +7243,6 @@ function validateUf2ForDevice(p, devInfo) {
         }
         // 等 Windows 完成挂载 RPI-RP2(断开已确认,再给枚举+卷挂载留时间)
         await sleep(2600);
-        // round78e(审查 P2 判别守卫): 窗内固件软重启(如配置模式 60s 自动退出)
-        // 同样表现为"端口消失",需与真 BOOTSEL 区分——真 BOOTSEL 下 CDC 口不会
-        // 以同 VID/PID 重枚举,软重启会在 1~2s 内回来。+2.6s 与 +6s 两次采样:
-        // 若 CDC 口回归且持续在线 → 判为软重启,按错误收场不弹盘符框(避免 UI
-        // 谎报"已进入 BOOTSEL");若回归后又消失(滞留字节在重启后的正常模式里
-        // 迟到触发真 BOOTSEL)则继续按成功走。Mock 的 getPorts 每次发新假端口,
-        // 无判别意义,门控跳过。
         if (!MOCK) {
             const cdcBack = async () => {
                 try {
@@ -7182,17 +7272,87 @@ function validateUf2ForDevice(p, devInfo) {
                 return;
             }
         }
-        setFlashPhase("picking");
-        let dir;
-        try {
-            dir = await window.showDirectoryPicker({ mode: "readwrite" });
-        } catch (e) {
-            if (e.name === "AbortError") log("已取消选择盘符。若弹窗里没看到 RPI-RP2(挂载较慢),稍候点击「手动选择盘符写入」重试", "warn");
-            else log("盘符选择器打开失败 (" + e.name + ")。请点击「手动选择盘符写入」重试", "warn");
+        // round78e(审查 P2 判别守卫): 窗内固件软重启(如配置模式 60s 自动退出)
+        // 同样表现为"端口消失",需与真 BOOTSEL 区分——真 BOOTSEL 下 CDC 口不会
+        // 以同 VID/PID 重枚举;软重启会在 1~2s 内回来。+2.6s 与 +6s 两次采样,
+        // 回归且持续在线 → 判软重启报错不弹盘符框;回归后又消失(滞留字节在
+        // 重启后的正常模式里迟到触发真 BOOTSEL)则继续按成功走。
+        if (!MOCK) {
+            const cdcBack = async () => {
+                try {
+                    const ports = await navigator.serial.getPorts();
+                    return ports.some((p) => {
+                        if (!p || typeof p.getInfo !== "function") return false;
+                        const i = p.getInfo();
+                        return i.usbVendorId === 0xCAFE && i.usbProductId === 0x4009;
+                    });
+                } catch (e) { return false; }
+            };
+            let softReboot = false;
+            if (await cdcBack()) {
+                const guardDeadline = performance.now() + 3500;
+                let stillBack = true;
+                while (performance.now() < guardDeadline) {
+                    await sleep(300);
+                    if (!(await cdcBack())) { stillBack = false; break; }
+                }
+                if (stillBack) softReboot = true;
+            }
+            if (softReboot) {
+                log("设备串口在刷写窗口内重新枚举——这是一次固件软重启(例如配置模式自动退出),并非 BOOTSEL。请直接重试", "error");
+                setFlashPhase("error", "✗ 设备重启了,但未进入 BOOTSEL");
+                bootselReady = false;
+                updateFlashUi();
+                return;
+            }
+        }
+        // round78f: 三分支写盘——①已存句柄(点击时权限已落实):轮询卷就绪直接
+        // 写,零弹窗;②首刷早弹的选择框(点击瞬间弹出,用户在框内等 RPI-RP2 出现
+        // 后点选):取回句柄写入并存档;③Mock/无 FSA:维持手动提示。
+        if (readyDir) {
+            log("正在等待 RPI-RP2 卷挂载(使用已保存的盘符访问,全程无弹窗)…");
+            const dir = await waitRp2VolumeReady(readyDir, 12000);
+            if (dir) {
+                await validateAndWriteToBootsel(dir);
+                return;
+            }
+            await clearRp2Dir();
+            log("保存的盘符在本次 BOOTSEL 中未能就绪(句柄可能已失效)。请点击「手动选择盘符写入」,下次刷写将重新自动", "warn");
+            updateFlashUi();
             setFlashPhase("bootsel-manual");
             return;
         }
-        await validateAndWriteToBootsel(dir);
+        if (earlyPicker) {
+            setFlashPhase("picking");
+            const dir = await earlyPicker;
+            if (dir) {
+                // 句柄已在选择框 resolve 时入档(btnStartFlash 处)
+                await validateAndWriteToBootsel(dir);
+                return;
+            }
+            log("已取消盘符选择。设备仍在 BOOTSEL 中,可点击「手动选择盘符写入」重试", "warn");
+            updateFlashUi();
+            setFlashPhase("bootsel-manual");
+            return;
+        }
+        if (MOCK) {
+            // round78f: Mock 无真实盘符——模拟"写入→设备消失→重连验证"闭环,
+            // 使 ?mock=1 能走通与真机相同的刷写终态。Mock 壳会自行自动重连
+            // ("自动连接模拟设备"),故不走 startReconnectWatch(其 connected
+            // 自停分支会在 verifyFlashResult 之前退出,终态卡在等待重连)。
+            log("Mock: 模拟 UF2 写入 RPI-RP2,设备接收完镜像后自动重启…");
+            setFlashPhase("writing");
+            await sleep(600);
+            bootselReady = false;
+            updateFlashUi();
+            setFlashPhase("verifying");
+            await autoHandshake();
+            await startInputPolling();
+            verifyFlashResult();
+            return;
+        }
+        log("当前浏览器不支持直接写入(需要 Chrome/Edge 的 File System Access API)。请手动打开 RPI-RP2 盘符复制固件文件", "warn");
+        setFlashPhase("bootsel-manual", "已进入 BOOTSEL——请手动复制固件文件到 RPI-RP2");
     }
 
     function stopReconnectWatch() {
@@ -7345,7 +7505,21 @@ function validateUf2ForDevice(p, devInfo) {
             setFlashPhase("idle", "存在警告,请确认后勾选强制刷写");
             return;
         }
-        runFlashSequence();
+        // round78f: 趁点击激活期(浏览器只允许激活后 ~5s 内弹文件框)落实盘符
+        // 访问——已存句柄做权限确认;首次使用立即弹选择框(不 await,与刷写命令
+        // 并行,选择框里等 RPI-RP2 挂载出现后点选,与旧版 UX 一致)。BOOTSEL
+        // 出现之后再弹任何框都会因激活过期抛 NotAllowedError,这是 round78e
+        // 之后"面板不再弹盘符框"的根因。
+        const readyDir = await prepareRp2DirAtClick();
+        let earlyPicker = null;
+        if (!readyDir && !MOCK && window.showDirectoryPicker) {
+            // 选定即入档(验证前):即使 35s 验证窗先报错、用户之后才在选择框里
+            // 点完盘符,句柄也已捕获,下次刷写即全自动
+            earlyPicker = window.showDirectoryPicker({ mode: "readwrite" })
+                .then((d) => { if (d) storeRp2Dir(d); return d; })
+                .catch(() => null);
+        }
+        runFlashSequence(readyDir, earlyPicker);
     });
 
     $("flashConfirmCancel").addEventListener("click", hideFlashModal);
@@ -7360,7 +7534,9 @@ function validateUf2ForDevice(p, devInfo) {
         if (!window.showDirectoryPicker) { log("浏览器不支持 File System Access API", "error"); return; }
         try {
             const dir = await window.showDirectoryPicker({ mode: "readwrite" });
-            await validateAndWriteToBootsel(dir);
+            const ok = await validateAndWriteToBootsel(dir);
+            // round78f: 手动选中的盘符(经卷校验)同样入档,下次刷写全自动
+            if (ok) await storeRp2Dir(dir);
         } catch (e) {
             if (e.name === "AbortError") log("已取消选择盘符。可再次点击「手动选择盘符写入」", "warn");
             else log("打开盘符选择器失败: " + e.message, "error");
