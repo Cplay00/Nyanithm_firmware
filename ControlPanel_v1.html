@@ -5276,27 +5276,32 @@ function validateUf2ForDevice(p, devInfo) {
         inputLoopRunning = true;
         while (connected && inputPolling) {
             try {
-                if (serialBusy || configMode) { await nextTick(); continue; }
-                await withSerialLock(async () => {
-                    if (!connected || !inputPolling || configMode) return;
-                    flushReadBuffer();
-                    const t0 = performance.now();
-                    await writeBytes(new Uint8Array([CMD.GET_INPUT]));
-                    const data = await waitForBytes(33, 300);
-                    const dt = performance.now() - t0;
-                    lastPollTime = Math.round(dt);
-                    // USB 全速 CDC 往返 >=1ms;亚毫秒 dt 说明消费的是陈旧缓冲数据
-                    if (dt >= 1.0) { totalPackets++; inputFrames++; }
-                    latestInputData = data;
-                    if (!inputRafScheduled) {
-                        inputRafScheduled = true;
-                        requestAnimationFrame(renderInputFrame);
-                    }
-                    updateMetrics();
-                });
+                // 事务锁让路: 其他操作 (如配置读取/保存/心跳) 正在执行时立即让步
+                if (serialBusy || configMode) {
+                    await nextTick();
+                    continue;
+                }
+                flushReadBuffer();
+                const t0 = performance.now();
+                await writeBytes(new Uint8Array([CMD.GET_INPUT]));
+                const data = await waitForBytes(33, 300);
+                const dt = performance.now() - t0;
+                lastPollTime = Math.round(dt);
+                totalPackets++;
+                inputFrames++;
+                latestInputData = data;
+                if (!inputRafScheduled) {
+                    inputRafScheduled = true;
+                    requestAnimationFrame(renderInputFrame);
+                }
+                updateMetrics();
                 await nextTick();
             } catch (e) {
-                await sleep(50);
+                if (serialBusy || configMode) {
+                    await nextTick();
+                } else {
+                    await sleep(20);
+                }
             }
         }
         inputLoopRunning = false;

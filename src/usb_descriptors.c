@@ -339,7 +339,8 @@ uint8_t const desc_fs_configuration[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
 
     // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID_KBD, 4, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report_keyboard), EPNUM_HID_KBD, CFG_TUD_HID_EP_BUFSIZE, 5),
+    // 1ms polling interval (1000Hz) for ultra-low latency keyboard reports
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_KBD, 4, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report_keyboard), EPNUM_HID_KBD, CFG_TUD_HID_EP_BUFSIZE, 1),
     TUD_HID_DESCRIPTOR(ITF_NUM_HID_LAMP, 5, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report_lamp), EPNUM_HID_LAMP, CFG_TUD_HID_EP_BUFSIZE, 5),
 
     // 1st CDC: Interface number, string index, EP notification address and size, EP data address (out, in) and size.

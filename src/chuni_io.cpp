@@ -316,7 +316,7 @@ void cdc_respond() {
         bool frameFresh = false;
         uint32_t spinStart = to_ms_since_boot(get_absolute_time());
         while (true) {
-            do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 5);
+            do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 1);
             // round47b-patch: read into temp buffer; only commit to inputState on
             // seqlock success. On timeout, keep last good inputState (no torn data).
             for (int i = 0; i < 32; i++) tmpSlider[i] = touchData32[i];
@@ -344,7 +344,7 @@ void cdc_respond() {
                 frameFresh = true;
                 break;
             }
-            if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) { air = inputState.air; break; }  // round47b-patch: timeout - sync air to last good value for telemetry consistency
+            if (to_ms_since_boot(get_absolute_time()) - spinStart >= 1) { air = inputState.air; break; }  // round47b-patch: timeout - sync air to last good value for telemetry consistency
         }
         // inputState already committed on success; on timeout it retains last good value
 
