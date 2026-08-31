@@ -30,7 +30,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NYANITHM Control Panel v1.1.1-beta1 · hw_v1</title>
+    <title>NYANITHM Control Panel v1.1.1-beta2 · hw_v1</title>
     <style>
 @font-face {
   font-family: 'Chakra Petch';
@@ -3866,11 +3866,11 @@ const BIT_DISABLE_LAMP_ARRAY = 0b00000001;
 const BIT_GAME_RAW_SLIDER = 0b00000010;
 
 // 一代 hw_v1 固件版本白名单:0xBC 探测不可用(旧固件)时的回退门禁依据。
-const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1"];
-// round77: 面板自身版本标识(显示于页头品牌区)。cmpVersion 对 "1-beta1" 这类
-// 带后缀补丁段按 0 处理(NaN||0),即 1.6.1-beta1 在版本门禁中等价 1.6.0,≥1.6.0
+const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1", "1.6.1-beta2"];
+// round77/78: 面板自身版本标识(显示于页头品牌区)。cmpVersion 对 "1-beta2" 这类
+// 带后缀补丁段按 0 处理(NaN||0),即 1.6.1-beta2 在版本门禁中等价 1.6.0,≥1.6.0
 // 的功能门禁(0xC4/0xC5/逐键阈值)全部照常通过。
-const PANEL_VERSION = "1.1.1-beta1";
+const PANEL_VERSION = "1.1.1-beta2";
 
 // ====== UF2 固件文件解析(刷写前校验) ======
 const UF2_MAGIC0 = 0x0A324655;   // "UF2\n"
@@ -4800,7 +4800,7 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    const s = "FW:1.6.1-beta1 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.1-beta1;hw_v1";
+                    const s = "FW:1.6.1-beta2 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.1-beta2;hw_v1";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
