@@ -5276,21 +5276,24 @@ function validateUf2ForDevice(p, devInfo) {
         inputLoopRunning = true;
         while (connected && inputPolling) {
             try {
-                if (serialBusy) { await nextTick(); continue; }
-                flushReadBuffer();
-                const t0 = performance.now();
-                await writeBytes(new Uint8Array([CMD.GET_INPUT]));
-                const data = await waitForBytes(33, 300);
-                const dt = performance.now() - t0;
-                lastPollTime = Math.round(dt);
-                // USB 全速 CDC 往返 >=1ms;亚毫秒 dt 说明消费的是陈旧缓冲数据
-                if (dt >= 1.0) { totalPackets++; inputFrames++; }
-                latestInputData = data;
-                if (!inputRafScheduled) {
-                    inputRafScheduled = true;
-                    requestAnimationFrame(renderInputFrame);
-                }
-                updateMetrics();
+                if (serialBusy || configMode) { await nextTick(); continue; }
+                await withSerialLock(async () => {
+                    if (!connected || !inputPolling || configMode) return;
+                    flushReadBuffer();
+                    const t0 = performance.now();
+                    await writeBytes(new Uint8Array([CMD.GET_INPUT]));
+                    const data = await waitForBytes(33, 300);
+                    const dt = performance.now() - t0;
+                    lastPollTime = Math.round(dt);
+                    // USB 全速 CDC 往返 >=1ms;亚毫秒 dt 说明消费的是陈旧缓冲数据
+                    if (dt >= 1.0) { totalPackets++; inputFrames++; }
+                    latestInputData = data;
+                    if (!inputRafScheduled) {
+                        inputRafScheduled = true;
+                        requestAnimationFrame(renderInputFrame);
+                    }
+                    updateMetrics();
+                });
                 await nextTick();
             } catch (e) {
                 await sleep(50);
@@ -5620,6 +5623,10 @@ function validateUf2ForDevice(p, devInfo) {
     async function enterConfigMode() {
         if (configMode) return true;
         try {
+            // 如果普通模式尚未获取 devInfo，在进入配置模式前主动补齐一次
+            if (!devInfo) {
+                try { await queryDevInfo(); } catch (e) { /* 忽略补全失败，继续常规流程 */ }
+            }
             flushReadBuffer();
             inputPolling = false;
             resetInputBtn();
@@ -5644,7 +5651,8 @@ function validateUf2ForDevice(p, devInfo) {
             } else {
                 log("本轮会话未捕获 0xBC 探测帧(旧固件或输出滞留),回退到固件版本白名单门禁", "warn");
                 if (devInfo && devInfo.fw) {
-                    if (!KNOWN_V1_FW.includes(devInfo.fw)) {
+                    const isKnownV1 = KNOWN_V1_FW.includes(devInfo.fw) || cmpVersion(devInfo.fw, "1.5.0") >= 0;
+                    if (!isKnownV1) {
                         await gateRejectDevice(`固件版本 ${devInfo.fw} 不在一代 hw_v1 白名单 [${KNOWN_V1_FW.join(", ")}] 内。二代设备与其他变体的配置功能不同,已拦截。`);
                         return false;
                     }
@@ -6180,7 +6188,7 @@ function validateUf2ForDevice(p, devInfo) {
             modal.removeEventListener("animationend", onEnd);
         };
         const onEnd = (e) => { if (e.target === modal) hide(); };
-        modal.addEventListener("animationend", onEnd);
+        modal.addEventListener("animationend", onEnd, { once: true });
         setTimeout(() => { if (modal._hideTok === tok) hide(); }, 400);
     }
     // round71: 配套打开助手——清旧 closing 态并作废旧 hide 代际,统一入场。
@@ -6259,12 +6267,14 @@ function validateUf2ForDevice(p, devInfo) {
     // Phase1 静置采 idleMax+直方图, Phase2 划键采 touchMin,建议全局 th_touch=p85(idleMax)+2,
     // 异常键逐键抬升。差异仅在 UI:每帧刷新倒计时/进度环/阶段文案,可中止。
     async function runCalibrationSequence() {
+        if (calRunning) return;
+        calRunning = true;
+        calAbort = false;
+        if ($("calWizardStart")) $("calWizardStart").disabled = true;
         // 需在配置模式读到的配置基础上写回: 若未进过配置模式, 用当前表单值
         if (!lastReadConfig) {
             log("提示: 尚未读取设备配置,将基于表单当前值给出建议(保存前请先读配置)", "warn");
         }
-        calRunning = true;
-        calAbort = false;
         // 校准依赖 GET_INPUT 帧流; 若输入测试没在跑, 先自动开启(并同步按钮状态)。
         // round70: 统一入口(自动开压力会话——校准的 Phase 1/2 需要真实压力采样)
         if (!inputPolling) await startInputPolling();
@@ -6396,6 +6406,7 @@ function validateUf2ForDevice(p, devInfo) {
             calCloseWizard();
         } finally {
             calRunning = false;
+            if ($("calWizardStart")) $("calWizardStart").disabled = false;
             await setRawReport(false);
         }
     }
