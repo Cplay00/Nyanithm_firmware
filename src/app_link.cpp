@@ -221,12 +221,18 @@ void handleCommand() {
                 if (address == 0x37 || (address >= 0x40 && address <= 0x44)) {
                     uint8_t cfg[128];
                     if (read_cy8cmbr3116_config(address, cfg)) {
-                        uint8_t* ptr = cfg;
-                        for (int i = 0; i < (int)sizeof(cfg); i++) {
-                            putchar(*ptr);
-                            ptr++;
+                        // round82 实机修正: 128B 一次性写入后单次 flush 只把第一个
+                        // EP 包(64B)送出, 真机实测仅 86B 到达主机后停滞(CFG_READ
+                        // 未暴露是因为它尾部还有 printf 文本顺带泵出)。必须循环
+                        // 泵 tud_task + tud_cdc_write_flush 直到 TX 环排空。
+                        uint32_t total = 0;
+                        while (total < sizeof(cfg)) {
+                            tud_task();
+                            tud_cdc_write_flush();
+                            total += tud_cdc_write(cfg + total, (uint32_t)(sizeof(cfg) - total));
                         }
-                        stdio_flush();
+                        tud_task();
+                        tud_cdc_write_flush();
                     } else {
                         printf("3116 read fail\n");
                     }
