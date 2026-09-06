@@ -16,6 +16,8 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg);
 
 void verify_cy8cmbr3116_burn(uint8_t addr, uint8_t* cfg);
 
+bool read_cy8cmbr3116_config(uint8_t addr, uint8_t* cfg);
+
 bool detect3116(uint8_t addr);
 
 #endif

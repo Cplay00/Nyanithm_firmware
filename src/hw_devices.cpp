@@ -475,6 +475,7 @@ void updateTouch_v2() {
     static uint8_t confirmReq[2][16] = {0};
     static uint8_t verifiedCount[2][16] = {0};
     static uint32_t lastTouchedMsV2[2][16] = {0};
+    static bool fastOkV2[2][16] = {0};  // round80: strong flick first-cycle output flag
     uint32_t nowVer = to_ms_since_boot(get_absolute_time());
     // round64: per-lane MBR thresholds. base_k defaults to 80 (=round50
     // MBR3116_VERIFY_TH); amplitude tiers are relative offsets off it, so
@@ -483,6 +484,12 @@ void updateTouch_v2() {
         static const uint16_t MBR_TIER_OFFSET_MEDIUM = 40;
         static const uint16_t MBR_TIER_OFFSET_STRONG = 120;
         static const uint16_t MBR_TIER_OFFSET_SKIP = 220;
+        // round80: strong flick fast path. User empirical data: a full-contact
+        // press saturates the DIFFERENCE_COUNT scale (>=255, SKIP tier at 300
+        // exists), while 4mm hover reads ~128. 200 = firm-contact territory,
+        // ~1.6x the 4mm-hover signal; noise pulses (round47b)
+        // top out an order of magnitude lower. See fastOkV2 use below.
+        static const uint16_t MBR_FLICK_FAST_TH = 200;
         uint16_t verifyBaseK[2][16];
         for (uint8_t m = 0; m < 2; m++) {
             for (uint8_t e = 0; e < 16; e++) {
@@ -521,13 +528,36 @@ void updateTouch_v2() {
                         } else {
                             uint16_t diff = diffCounts[m][e];
                             uint16_t baseK = verifyBaseK[m][e];
+                            // round80: hover-rejection gate (mbrTouchGate, 0=off).
+                            // The chip NVM threshold (0x0C=128) lets BUTTON_STAT
+                            // assert ~4mm above the panel and the round50 verify
+                            // baseline (80) is even looser, so hover passed
+                            // straight through. Raising only the software ON-gate
+                            // pushes the trigger point close to physical contact;
+                            // applies to touch-ON only (release/sticky untouched).
+                            uint16_t rejectTh = baseK;
+                            if (ControllerConfig.mbrTouchGate > rejectTh) rejectTh = ControllerConfig.mbrTouchGate;
                             bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                                      (e < 15 && (prevStretched[m] & (1 << (e + 1))));
-                            if (diff < baseK) {
+                            if (diff < rejectTh) {
                                 raw[m] &= ~(1 << e);
                                 verifiedCount[m][e] = 0;
                                 confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                                fastOkV2[m][e] = false;
                                 if (g_verifyFail[m * 16 + e] < 255) g_verifyFail[m * 16 + e]++;
+                            } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
+                                       diff >= MBR_FLICK_FAST_TH) {
+                                // round80: strong flick fast path -- first-cycle
+                                // output restores the old firmware's zero-latency
+                                // behavior for isolated flick taps. The isolated
+                                // +1 penalty is waived via fastOkV2 in the confirm
+                                // loop, still guarded by the 40ms release-bounce
+                                // window there. Gate interplay: with mbrTouchGate
+                                // >= 200 the reject check above lifts the effective
+                                // fast threshold to the gate value (expected).
+                                verifiedCount[m][e] = 2;
+                                confirmReq[m][e] = 1;
+                                fastOkV2[m][e] = true;
                             } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
                                        (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_SKIP) || neighborWasActive)) {
                                 verifiedCount[m][e] = 2;
@@ -545,6 +575,7 @@ void updateTouch_v2() {
                         if (lastTouchedMsV2[m][e] == 0 || (nowVer - lastTouchedMsV2[m][e]) > 50) {
                             verifiedCount[m][e] = 0;
                             confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                            fastOkV2[m][e] = false;
                         }
                     }
                 }
@@ -582,7 +613,14 @@ void updateTouch_v2() {
                     // round50fix: spatial penalty - isolated electrode needs +1 confirm cycle
                     bool hasNeighbor = ((e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                         (e < 15 && (prevStretched[m] & (1 << (e + 1)))));
-                    if (!hasNeighbor) reqCycles += 1;
+                    // round80: waive the isolated +1 for strong flick signals
+                    // (fastOkV2, set only when diff >= MBR_FLICK_FAST_TH on a
+                    // first-sighting verify) unless we are within 40ms of the
+                    // last confirmed touch -- a residual-signal re-enhancement
+                    // right after release must not double-fire as a new tap.
+                    bool fastExempt = fastOkV2[m][e] &&
+                        (lastConfirmed[m][e] == 0 || (now - lastConfirmed[m][e]) >= 40);
+                    if (!hasNeighbor && !fastExempt) reqCycles += 1;
                     if (touchCount[m][e] >= reqCycles) {
                         lastConfirmed[m][e] = now;
                         stretched[m] |= (1 << e);
@@ -703,6 +741,7 @@ void updateTouch_v1() {
    static const uint8_t  CONFIRM_CYCLES = 2;  // round36: 3->2, software verification handles noise filtering
     static uint8_t confirmReq[3][12] = {0};     // round45: amplitude-tier confirmation cycles (1=fast, 2=normal, 3=strict)
    static uint8_t verifiedCount[3][12] = {0};     // round50: shared MPR121/MBR3116 verification
+   static bool fastOk[3][12] = {0};  // round80: strong flick first-cycle output flag (shared MPR/MBR)
    uint32_t nowVer = to_ms_since_boot(get_absolute_time());  // round45r: sticky dip verification preservation
    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
         uint16_t raw[3] = {t0, t1, t2};
@@ -712,6 +751,14 @@ void updateTouch_v1() {
         // verify thresholds never collapse to 0.
         uint8_t sw_th_k[3][12];
         uint8_t verify_th_k[3][12];
+        // round80: strong flick fast path base. User empirical data: MPR diff
+        // is contact-area proportional (finger 30-50, palm ~130) and never
+        // reaches the 255 cap natively. 50 raw (=100 on the x2 report scale)
+        // covers firm finger/palm taps while keeping >=3.5x margin over the
+        // worst observed idle-noise pulses (diff>=14, round47b). max() with
+        // sw+4 (the confirmReq=1 tier boundary) preserves per-key tightened
+        // thresholds -- the fast path never bypasses a user-raised gate.
+        static const uint8_t MPR_FLICK_FAST_BASE = 50;
         for (uint8_t m = 0; m < 3; m++) {
             for (uint8_t e = 0; e < 12; e++) {
                 uint8_t base = electrodeBaseTouchTh(m, e);
@@ -746,6 +793,7 @@ void updateTouch_v1() {
                                     raw[m] &= ~(1 << e);
                                     verifiedCount[m][e] = 0;
                                     confirmReq[m][e] = CONFIRM_CYCLES;
+                                    fastOk[m][e] = false;
                                     if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;
                                 } else {
                                     // round47b-patch: intentionally no strong-signal fast-path
@@ -764,6 +812,7 @@ void updateTouch_v1() {
                                raw[m] &= ~(1 << e);
                                verifiedCount[m][e] = 0;
                                confirmReq[m][e] = CONFIRM_CYCLES;
+                               fastOk[m][e] = false;
                                if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;  // round46: telemetry
                            } else {
                                 // round45o: skip second verification for very strong signals (saves 1 cycle ~2ms for flick notes)
@@ -771,7 +820,20 @@ void updateTouch_v1() {
                                 // in previous cycle, skip 2nd verification (slide, not noise)
                                 bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e-1)))) ||
                                                           (e < 11 && (prevStretched[m] & (1 << (e+1))));
-                                 if (diff >= (int16_t)(sw_th_k[m][e] + 6) || neighborWasActive) {
+                                // round80: strong flick fast path -- first-cycle output
+                                // for isolated firm taps (see MPR_FLICK_FAST_BASE). The
+                                // isolated +1 penalty is waived via fastOk in the confirm
+                                // loop, still guarded by the 40ms release-bounce window.
+                                // The sw+6/neighbor slide path below stays NON-exempt:
+                                // it fires on weak slide signals where the penalty is
+                                // the only noise filter.
+                                uint8_t fastTh = MPR_FLICK_FAST_BASE;
+                                if (sw_th_k[m][e] + 4 > fastTh) fastTh = sw_th_k[m][e] + 4;
+                                if (diff >= (int16_t)fastTh) {
+                                    verifiedCount[m][e] = 2;
+                                    confirmReq[m][e] = 1;
+                                    fastOk[m][e] = true;
+                                } else if (diff >= (int16_t)(sw_th_k[m][e] + 6) || neighborWasActive) {
                                     verifiedCount[m][e] = 2;  // skip second I2C verification cycle
                                     confirmReq[m][e] = 1;     // fastest confirmation
                                 } else {
@@ -794,6 +856,7 @@ void updateTouch_v1() {
                      if (lastTouchedMs[m][e] == 0 || (nowVer - lastTouchedMs[m][e]) > 50) {
                        verifiedCount[m][e] = 0;
                        confirmReq[m][e] = CONFIRM_CYCLES;
+                       fastOk[m][e] = false;
                    }
                    // else: keep verifiedCount, instant re-trigger when touch returns
                }
@@ -817,6 +880,12 @@ void updateTouch_v1() {
         static const uint16_t MBR_TIER_OFFSET_MEDIUM = 40;
         static const uint16_t MBR_TIER_OFFSET_STRONG = 120;
         static const uint16_t MBR_TIER_OFFSET_SKIP = 220;
+        // round80: strong flick fast path. User empirical data: a full-contact
+        // press saturates the DIFFERENCE_COUNT scale (>=255, SKIP tier at 300
+        // exists), while 4mm hover reads ~128. 200 = firm-contact territory,
+        // ~1.6x the 4mm-hover signal; noise pulses (round47b)
+        // top out an order of magnitude lower. See fastOk use below.
+        static const uint16_t MBR_FLICK_FAST_TH = 200;
         uint16_t verifyBaseK[3][16];
         for (uint8_t m = 0; m < 3; m++) {
             for (uint8_t e = 0; e < 16; e++) {
@@ -855,15 +924,38 @@ void updateTouch_v1() {
                         } else {
                             uint16_t diff = diffCounts[m][e];
                             uint16_t baseK = verifyBaseK[m][e];
+                            // round80: hover-rejection gate (mbrTouchGate, 0=off).
+                            // The chip NVM threshold (0x0C=128) lets BUTTON_STAT
+                            // assert ~4mm above the panel and the round50 verify
+                            // baseline (80) is even looser, so hover passed
+                            // straight through. Raising only the software ON-gate
+                            // pushes the trigger point close to physical contact;
+                            // applies to touch-ON only (release/sticky untouched).
+                            uint16_t rejectTh = baseK;
+                            if (ControllerConfig.mbrTouchGate > rejectTh) rejectTh = ControllerConfig.mbrTouchGate;
                             // round45u: slide transition acceleration
                             bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                                      (e + 1 < maxElec[m] && (prevStretched[m] & (1 << (e + 1))));
-                            if (diff < baseK) {
+                            if (diff < rejectTh) {
                                 // False touch - signal insufficient
                                 raw[m] &= ~(1 << e);
                                 verifiedCount[m][e] = 0;
                                 confirmReq[m][e] = CONFIRM_CYCLES;
+                                fastOk[m][e] = false;
                                 if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;
+                            } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
+                                       diff >= MBR_FLICK_FAST_TH) {
+                                // round80: strong flick fast path -- first-cycle
+                                // output restores the old firmware's zero-latency
+                                // behavior for isolated flick taps. The isolated
+                                // +1 penalty is waived via fastOk in the confirm
+                                // loop, still guarded by the 40ms release-bounce
+                                // window there. Gate interplay: with mbrTouchGate
+                                // >= 200 the reject check above lifts the effective
+                                // fast threshold to the gate value (expected).
+                                verifiedCount[m][e] = 2;
+                                confirmReq[m][e] = 1;
+                                fastOk[m][e] = true;
                             } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
                                        (diff >= (uint16_t)(baseK + MBR_TIER_OFFSET_SKIP) || neighborWasActive)) {
                                 // Very strong signal or slide - skip 2nd verification
@@ -884,6 +976,7 @@ void updateTouch_v1() {
                         if (lastTouchedMs[m][e] == 0 || (nowVer - lastTouchedMs[m][e]) > 50) {
                             verifiedCount[m][e] = 0;
                             confirmReq[m][e] = CONFIRM_CYCLES;
+                            fastOk[m][e] = false;
                         }
                     }
                 }
@@ -941,7 +1034,14 @@ void updateTouch_v1() {
                 // high-idle-noise electrodes (M2E0 cell17: diff>=14 -> confirmReq=1 -> instant
                 // output) passed through. Now isolated electrodes always need >=2 cycles.
                 // Cost: isolated strong flick tap +1 cycle (~2.7ms) - acceptable.
-                if (!hasNeighbor) reqCycles += 1;
+                // round80: waive for strong flick signals (fastOk, set only when
+                // diff >= MBR_FLICK_FAST_TH / MPR fast threshold on a first-sighting
+                // verify -- orders of magnitude above the round47b noise spectrum)
+                // unless within 40ms of the last confirmed touch: a residual-signal
+                // re-enhancement right after release must not double-fire as a new tap.
+                bool fastExempt = fastOk[m][e] &&
+                    (lastConfirmed[m][e] == 0 || (now - lastConfirmed[m][e]) >= 40);
+                if (!hasNeighbor && !fastExempt) reqCycles += 1;
                 if (touchCount[m][e] >= reqCycles) {
                     lastConfirmed[m][e] = now;
                     stretched[m] |= (1 << e);

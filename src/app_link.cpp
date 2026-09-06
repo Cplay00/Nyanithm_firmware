@@ -208,6 +208,32 @@ void handleCommand() {
                     printf("load3116: address 0x%02X not allowed. burn aborted.\n", address);
                 }
             }
+        } else if (cmd == CMD_READ3116CONFIG) {
+            // round80: read back the chip's current 128-byte config block for
+            // the panel "从芯片读取" button. Payload: [addr], whitelist same
+            // as 0xBA. Success -> 128B binary (raw 0x00-0x7F, the 0x7E/0x7F
+            // CRC bytes are reported as stored, NOT recomputed -- the panel
+            // only recomputes on apply). Failure -> text line, so the host
+            // can distinguish by response length / printability.
+            uint8_t addrBuf[1];
+            if (readCdcPayload(addrBuf, 1, 500)) {
+                uint8_t address = addrBuf[0];
+                if (address == 0x37 || (address >= 0x40 && address <= 0x44)) {
+                    uint8_t cfg[128];
+                    if (read_cy8cmbr3116_config(address, cfg)) {
+                        uint8_t* ptr = cfg;
+                        for (int i = 0; i < (int)sizeof(cfg); i++) {
+                            putchar(*ptr);
+                            ptr++;
+                        }
+                        stdio_flush();
+                    } else {
+                        printf("3116 read fail\n");
+                    }
+                } else {
+                    printf("read3116: address 0x%02X not allowed.\n", address);
+                }
+            }
         } else if (cmd == CMD_DETECT) {
             // round52: read-only hardware identity probe so the host control
             // panel can gate on real hardware instead of config-file values

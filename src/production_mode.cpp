@@ -68,6 +68,26 @@ void verify_cy8cmbr3116_burn(uint8_t addr, uint8_t* cfg) {
     printf("verify skipped (chip busy)\n");
 }
 
+// round80: read back the chip's current 128-byte config block (0x00-0x7F)
+// for the panel 0xC6 "read from chip" path. Chunked 4x32B reads with an
+// explicit register-pointer write per chunk -- the write-with-stop then
+// 32B-read transaction shape is the one already proven on-device by
+// verify_cy8cmbr3116_burn (round75), and a single 128B burst is untested
+// on this chip family. USB + watchdog are pumped between chunks because
+// this runs on Core0 inside config-mode handleCommand (updateInputState
+// is not feeding the dog there).
+// Returns false on any I2C failure; the caller answers with a text line.
+bool read_cy8cmbr3116_config(uint8_t addr, uint8_t* cfg) {
+    for (uint8_t chunk = 0; chunk < 4; chunk++) {
+        tud_task();
+        watchdog_update();
+        uint8_t reg = chunk * 32;
+        if (i2c_write(0, addr, &reg, 1, true) != 1) return false;
+        if (i2c_read(0, addr, cfg + chunk * 32, 32, false) != 32) return false;
+    }
+    return true;
+}
+
 void program3116() {
     while (1) {
         tud_task();  // round51: Core0 owns the USB stack in production mode

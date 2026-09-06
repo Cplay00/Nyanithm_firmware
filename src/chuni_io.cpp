@@ -354,25 +354,39 @@ void cdc_respond() {
         // pressed lanes report linear-normalized pressure (0-255 scale), released
         // lanes 0. Both off keeps the 0/128 frame byte-identical to 1.5.x.
         // round73: 追加 frameFresh 门控(见上)。
+        // round80: MPR121 pressure is contact-area proportional (user-measured:
+        // finger 30-50, palm ~130) and never reaches 255 natively -- report x2
+        // (clamp 255) in BOTH panel real-pressure and game raw modes so the
+        // reported scale stays linear up to the game cap. The old game-mode x4
+        // saturated even medium touches and destroyed the area linearity.
+        // MBR3116 DIFFERENCE_COUNT is natively 0-255 -- untouched. Scaling
+        // happens only at this reporting layer; pressureSnap / 0xC2 debug
+        // still carry raw values.
         if (rawModeActive() && frameFresh) {
+            bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) ||
+                          ControllerConfig.hwVer >= 3;  // same rule as sanitizeConfig
             if (rawReportMode) {
                 // panel mode: full 0-255 pressure, untouched keys report idle values
                 for (int i = 0; i < 32; i++) {
-                    inputState.slider[i] = tmpPressure[i];
+                    uint16_t v = tmpPressure[i];
+                    if (!useMbr) {
+                        v <<= 1;
+                        if (v > 255) v = 255;
+                    }
+                    inputState.slider[i] = (uint8_t)v;
                 }
             } else {
-                // game mode: linear-normalized 0-255 pressure. MPR121 native
-                // diff scale is narrow (th_touch 1-63), MBR3116 DIFFERENCE_COUNT
-                // is natively 0-255 - map MPR *4 (clamp 255) so both report a
-                // comparable full-scale. Round69: binary-compatible non-zero =
-                // pressed, but with continuous magnitude for the DLL.
+                // game mode: linear-normalized 0-255 pressure. Round69:
+                // binary-compatible non-zero = pressed, with continuous
+                // magnitude for the DLL.
                 for (int i = 0; i < 32; i++) {
                     uint8_t pressed = tmpSlider[i] ? 1 : 0;
-                    uint8_t p = tmpPressure[i];
-                    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
-                        uint16_t v = (uint16_t)p * 4;
-                        p = (v > 255) ? 255 : (uint8_t)v;
+                    uint16_t v = tmpPressure[i];
+                    if (!useMbr) {
+                        v <<= 1;
+                        if (v > 255) v = 255;
                     }
+                    uint8_t p = (uint8_t)v;
                     inputState.slider[i] = pressed ? (p > 0 ? p : 1) : 0;
                 }
             }
