@@ -3603,26 +3603,49 @@ input[type="range"]:disabled {
                         <div class="section-subtitle">MBR3116 触摸配置（0xBA 寄存器表）<span class="collapse-arrow">▾</span></div>
                         <div class="config-collapse-wrapper">
                             <div class="config-collapse-inner">
+                                <!-- round82: 友好调节层 -- 阈值/消抖滑块化, 预设一键改写,
+                                     完整寄存器表降级为高级折叠区 -->
                                 <div class="field-grid">
                                     <div class="field-item">
                                         <label class="field-label">目标芯片 (I2C 地址)</label>
                                         <select class="sel-input" id="mbrChip" disabled></select>
                                         <span class="field-hint" id="mbrChipHint">按硬件探测结果列出</span>
                                     </div>
-                                    <div class="field-item">
-                                        <label class="field-label">触摸阈值 THRESHOLD</label>
-                                        <input type="number" class="num-input" id="mbrThreshold" min="1" max="255" value="128" disabled>
-                                        <span class="field-hint">寄存器 0x0C，应用到 16 个传感器；基准 128，建议 96–160</span>
-                                        <span class="field-hint warn" id="mbrThresholdWarn" style="display:none"></span>
-                                    </div>
                                 </div>
-                                <div class="field-grid">
-                                    <div class="field-item">
-                                        <label class="field-label">消抖挡位 SENSOR_DEBOUNCE</label>
-                                        <input type="number" class="num-input" id="mbrDebounce" min="0" max="15" value="1" disabled>
-                                        <span class="field-hint">寄存器 0x1C 低 4 位有效，推荐 1–3</span>
+                                <div class="slider-row">
+                                    <div class="slider-top">
+                                        <div class="slider-label-group">
+                                            <span class="slider-label">触摸阈值 THRESHOLD</span>
+                                            <span class="slider-label-en">0x0C (基准 128)</span>
+                                        </div>
+                                        <output class="slider-value" id="mbrThresholdv"></output>
                                     </div>
+                                    <div class="slider-track">
+                                        <input type="range" id="mbrThreshold" min="96" max="220" step="1" value="128" disabled>
+                                    </div>
+                                    <span class="field-hint">寄存器 0x0C，应用到全部使能传感器；烧录 NVM 后生效。悬空误触发调大、漏触调小；可与配置页「悬空抑制」滑块叠加（后者即时生效、无需烧录）。导入外部表时可超出滑块量程，以表值为准。</span>
+                                    <span class="field-hint warn" id="mbrThresholdWarn" style="display:none"></span>
                                 </div>
+                                <div class="slider-row">
+                                    <div class="slider-top">
+                                        <div class="slider-label-group">
+                                            <span class="slider-label">消抖挡位 SENSOR_DEBOUNCE</span>
+                                            <span class="slider-label-en">0x1C 低 4 位</span>
+                                        </div>
+                                        <output class="slider-value" id="mbrDebouncev"></output>
+                                    </div>
+                                    <div class="slider-track">
+                                        <input type="range" id="mbrDebounce" min="0" max="15" step="1" value="1" disabled>
+                                    </div>
+                                    <span class="field-hint">推荐 1–3；越大越抗抖但响应变慢。</span>
+                                </div>
+                                <div class="btn-grid" style="margin-top:8px;">
+                                    <button id="btnMbrPresetStd" class="btn" disabled>标准预设</button>
+                                    <button id="btnMbrPresetAntiHover" class="btn" disabled>抗悬空预设</button>
+                                    <button id="btnMbrPresetSensitive" class="btn" disabled>高灵敏预设</button>
+                                    <button id="btnMbrReadChip" class="btn" disabled>从芯片读取</button>
+                                </div>
+                                <span class="field-hint">预设只改写当前表的 0x0C / 0x1C（其余字节不动），改完仍需点「应用于手台」烧录 NVM；「从芯片读取」回读芯片当前 128 字节配置（先看再改，需固件 ≥ 1.6.2-beta1）。</span>
                                 <details class="adv-details">
                                     <summary>高级：完整寄存器表 (128 字节)</summary>
                                     <textarea class="txt-input hex-table" id="mbrHexTable" rows="8" spellcheck="false" disabled></textarea>
@@ -3859,7 +3882,12 @@ const CMD = {
     // 0xC5 跟 1B 0/1 设置后回 RAW=0|1\n。仅固件 1.6.0+ 可用(版本门禁,
     // 见 queryDevInfo 的 rawReportSupported; API 恒为 0x10,不作命令门禁)。
     GET_RAW_STATUS: 0xC4,
-    SET_RAW_REPORT: 0xC5
+    SET_RAW_REPORT: 0xC5,
+    // round80/82: 读回 3116 芯片当前 128B 配置块(仅配置模式)。铁律: 主机必须
+    // 分两次 write -- 先 [0xC6], 再 [addr](与 CFG_SET 双写铁律同源)。白名单同
+    // 0xBA; 成功回 128B 二进制(0x7E/0x7F CRC 原值), 失败回文本行。需固件
+    // >= 1.6.2-beta1。
+    READ3116CONFIG: 0xC6
 };
 
 const CFG_MAGIC = 0x88;
@@ -4536,7 +4564,7 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }
 
-    const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, rgMbrGate: 3, pkThTouch: 2, pkThRelease: 2 };
+    const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, rgMbrGate: 3, mbrThreshold: 3, mbrDebounce: 2, pkThTouch: 2, pkThRelease: 2 };
     // round72: ledLimit/ledSpeed 是灯光面板的迷你直显滑条。此前先被通用循环
     // odometer 化、又被下方文本直写摧毁,_odometer 残留指向孤立节点(僵尸表),
     // 未来任何 setSlider 打到它们都会静默失更新——现在从建表环节直接排除。
@@ -4610,6 +4638,9 @@ function validateUf2ForDevice(p, devInfo) {
             this.cfgSetPending = null;  // round63f: CFG_SET 载入流跨 write 累积
             this.mbrPending = null;  // round75: 0xBA 载荷跨 write 累积(面板改双写)
             this.mbrPendingTimer = null;  // round75 审查: 载入流断流超时, 仿固件 readCdcPayload
+            this.mbrCfg = {};  // round82: 各芯片最近烧录的 128B 表(0xC6 回读数据源)
+            this.read3116Pending = null;  // round82: 0xC6 载荷 [addr] 跨 write 累积
+            this.read3116Timer = null;  // round82: 载荷断流超时
             this.flashingPending = false;  // round76b: 0xBB 确认字节跨 write(面板改双写)
             this.flashingTimer = null;  // round76b: 仿固件 5s 确认窗,超时 denied
             this.tofCount = MOCK_GEN2 ? 3 : 4;  // gen2:ToF 数异常,应被门禁拦截
@@ -4711,9 +4742,34 @@ function validateUf2ForDevice(p, devInfo) {
                     this.mbrPending.push(bytes[i++]);
                 }
                 if (this.mbrPending.length === 129) {
+                    // round82: 记录各芯片最近烧录的表, 供 0xC6 回读(仿固件 NVM)
+                    const a = this.mbrPending[0];
+                    this.mbrCfg[a] = new Uint8Array(this.mbrPending.slice(1));
                     this.mbrComplete();
                 }
                 return;  // 载入流未凑满 129 也直接返回, 剩余字节留到下一次 write
+            }
+            // round82: 0xC6 读回载荷 [addr] 跨 write 累积(面板双写), 与
+            // cfgSetPending/mbrPending 同模式
+            if (this.read3116Pending !== null) {
+                while (i < bytes.length && this.read3116Pending.length < 1) {
+                    this.read3116Pending.push(bytes[i++]);
+                }
+                if (this.read3116Pending.length === 1) {
+                    const a = this.read3116Pending[0];
+                    this.read3116Pending = null;
+                    if (this.read3116Timer) { clearTimeout(this.read3116Timer); this.read3116Timer = null; }
+                    const allowed = (a === 0x37) || (a >= 0x40 && a <= 0x44);
+                    const key = "0x" + a.toString(16);
+                    if (!allowed) {
+                        this.sendText("read3116: address not allowed.", 10);
+                    } else {
+                        const t = this.mbrCfg[a] || MBR_TABLES[key];
+                        if (t) this.send(Array.from(t), 20);
+                        else this.sendText("3116 read fail", 10);
+                    }
+                }
+                return;
             }
             // round63f: 若正处于 CFG_SET 载入流中, 本次 write 的全部字节都是
             // 配置负载续段(面板分块发送), 不可能是新的命令字节, 直接累积。
@@ -4836,6 +4892,13 @@ function validateUf2ForDevice(p, devInfo) {
                     const s = "FW:1.6.2-beta1 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.2-beta1;hw_v1";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
+                }
+                else if (cmd === CMD.READ3116CONFIG) {
+                    // round82: 0xC6 命令字节首发; 载荷 [addr] 由顶部
+                    // read3116Pending 跨 write 消费。1s 断流超时仿固件语义。
+                    this.read3116Pending = [];
+                    if (this.read3116Timer) clearTimeout(this.read3116Timer);
+                    this.read3116Timer = setTimeout(() => { this.read3116Pending = null; }, 1000);
                 }
                 else { this.sendText("unknown command", 10); }
             }
@@ -6641,9 +6704,10 @@ function validateUf2ForDevice(p, devInfo) {
 
     function syncMbrFields() {
         if (!mbrTable) return;
-        $("mbrThreshold").value = mbrTable[0x0C];
-        // 0x1C 仅低 4 位有效,高 4 位为保留位不展示
-        $("mbrDebounce").value = mbrTable[0x1C] & 0x0F;
+        // round82: 阈值/消抖滑块化 -- setSlider 同步数显 odometer 与滑轨填充;
+        // 值超出滑块量程(导入外部表)时 setSlider 自动扩展 min/max。
+        setSlider($("mbrThreshold"), mbrTable[0x0C], { quiet: true });
+        setSlider($("mbrDebounce"), mbrTable[0x1C] & 0x0F, { quiet: true });
         checkMbrThresholdHint();
         renderMbrHex();
     }
@@ -6670,17 +6734,75 @@ function validateUf2ForDevice(p, devInfo) {
     $("btnMbrTemplate").addEventListener("click", () => loadMbrTemplate());
     $("mbrChip").addEventListener("change", () => loadMbrTemplate());
 
+    // round82: 滑块写回内存表。THRESHOLD 0x0C..0x1B 仅写 SENSOR_EN 使能位
+    // (模板对禁用传感器保留 0x7F, 不再整段覆盖); 0x1C 低 4 位 GLOBAL_DEBOUNCE。
+    function mbrWriteThreshold(th) {
+        const en = (mbrTable[0x00] | (mbrTable[0x01] << 8)) & 0xFFFF;  // SENSOR_EN 0x00/0x01
+        for (let i = 0; i < 16; i++) {
+            if (en & (1 << i)) mbrTable[0x0C + i] = th;
+        }
+    }
     ["mbrThreshold", "mbrDebounce"].forEach(id => {
         $(id).addEventListener("change", () => {
             if (!mbrTable) return;
             const th = Math.max(1, Math.min(255, parseInt($("mbrThreshold").value) || 1));
             const db = Math.max(0, Math.min(15, parseInt($("mbrDebounce").value) || 0));
-            for (let i = 0; i < 16; i++) mbrTable[0x0C + i] = th;  // THRESHOLD 0x0C..0x1B
+            mbrWriteThreshold(th);
             mbrTable[0x1C] = (mbrTable[0x1C] & 0xF0) | db;          // 低 4 位 GLOBAL_DEBOUNCE
             checkMbrThresholdHint();
             renderMbrHex();
         });
     });
+
+    // round82: 友好预设 -- 只改 0x0C/0x1C(TRM/官方社区确证语义的两个寄存器;
+    // HYS/LBR/NNT/NT 位定义未获官方文档确证, 按纪律不进预设), 其余字节不动,
+    // 应用时统一重算 CRC。TRM/官方建议来源: Infineon 社区 moderator
+    // (2025-12)「threshold=80% 信号, HYS/NNT/NT=40%, LBR 勿过高」。
+    function mbrApplyPreset(kind) {
+        if (!mbrTable) { log("寄存器表为空", "warn"); return; }
+        if (!MBR_CRC_OK) { log("CRC 自检未通过,预设已禁用", "error"); return; }
+        const cur = { th: mbrTable[0x0C], db: mbrTable[0x1C] & 0x0F };
+        if (kind === "std") {
+            loadMbrTemplate();
+            log("已应用标准预设(=固件内置模板)");
+        } else if (kind === "antiHover") {
+            mbrWriteThreshold(176);            // 基准 128 上调, 官方建议量程 160-180
+            mbrTable[0x1C] = (mbrTable[0x1C] & 0xF0) | 2;  // 消抖 2, 硬门槛更干净
+            syncMbrFields();
+            log(`已应用抗悬空预设: THRESHOLD ${cur.th}→176, DEBOUNCE ${cur.db}→2 (烧录 NVM 后生效)`);
+        } else if (kind === "sensitive") {
+            mbrWriteThreshold(96);
+            mbrTable[0x1C] = (mbrTable[0x1C] & 0xF0) | 1;
+            syncMbrFields();
+            log(`已应用高灵敏预设: THRESHOLD ${cur.th}→96, DEBOUNCE ${cur.db}→1 (烧录 NVM 后生效)`);
+        }
+    }
+    $("btnMbrPresetStd").addEventListener("click", () => mbrApplyPreset("std"));
+    $("btnMbrPresetAntiHover").addEventListener("click", () => mbrApplyPreset("antiHover"));
+    $("btnMbrPresetSensitive").addEventListener("click", () => mbrApplyPreset("sensitive"));
+
+    // round82: 从芯片读取(0xC6, 配置模式)。双写铁律: [0xC6] 与 [addr] 分两次
+    // write(与 CFG_SET 同源); 成功回 128B 二进制(CRC 原值), 失败回文本行,
+    // 按长度/可打印性区分。需固件 >= 1.6.2-beta1(mbrGateFwSupport)。
+    $("btnMbrReadChip").addEventListener("click", () => withSerialLock(async () => {
+        if (!configMode) { log("请先进入配置模式", "warn"); return; }
+        if (!mbrGateFwSupport) { log("从芯片读取需固件 >= 1.6.2-beta1", "warn"); return; }
+        if (!MBR_CRC_OK) { log("CRC 自检未通过,表编辑已禁用", "error"); return; }
+        const addr = mbrChipAddr();
+        flushReadBuffer();
+        await writeBytes(new Uint8Array([CMD.READ3116CONFIG]));
+        await writeBytes(new Uint8Array([addr]));
+        try {
+            const data = await waitForBytes(128, 2000);
+            mbrTable = new Uint8Array(data.slice(0, 128));
+            syncMbrFields();
+            log(`已从芯片 0x${addr.toString(16).toUpperCase()} 读回 128 字节配置(表尾 CRC 为芯片原值, 应用时重算)`);
+        } catch (e) {
+            let extra = "";
+            try { extra = await waitForLine(500); } catch (e2) { /* 无文本行 */ }
+            log(`从芯片读取失败${extra ? ": " + extra : " (超时, 芯片忙或固件过旧)"}`, "error");
+        }
+    }));
 
     $("mbrHexTable").addEventListener("change", () => {
         const txt = $("mbrHexTable").value;
@@ -7772,9 +7894,12 @@ function validateUf2ForDevice(p, devInfo) {
         // round81: 悬空抑制滑块需固件 >= 1.6.2-beta1(旧固件该字节为 reserved)。
         $("rgMbrGate").disabled = !inCfg || !mbrGateFwSupport;
 
-        const mbrIds = ["mbrChip", "mbrThreshold", "mbrDebounce", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply"];
+        const mbrIds = ["mbrChip", "mbrThreshold", "mbrDebounce", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply",
+            "btnMbrPresetStd", "btnMbrPresetAntiHover", "btnMbrPresetSensitive"];
         const mbrEnabled = inCfg && MBR_CRC_OK;
         mbrIds.forEach(id => $(id).disabled = !mbrEnabled);
+        // round82: 从芯片读取(0xC6)额外需要固件 >= 1.6.2-beta1。
+        $("btnMbrReadChip").disabled = !mbrEnabled || !mbrGateFwSupport;
 
         // 0xB2 仅普通模式处理(配置模式会变 "unknown command" 文本污染响应流)
         const ledIds = ["ledOff", "ledWhite", "ledRed", "ledGreen", "ledBlue", "ledChase", "ledRainbow", "ledStop", "ledCustom", "ledColor", "ledLimit"];
