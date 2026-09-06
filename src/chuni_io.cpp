@@ -163,20 +163,22 @@ volatile bool in_config_mode = false;
 // round68: game-raw baseline from cfg2 bit1 (persisted, default off). The
 // active pressure report mode is rawModeActive():
 //   cfg2 bit1=1  -> game-raw mode (GET_INPUT: pressed=max(1,pressure), released=0)
-//   0xC5 0x01    -> panel mode (GET_INPUT: all lanes report raw pressure)
+//   0xC5 0x01    -> panel mode (GET_INPUT: all lanes report simulated pressure)
+//   0xC5 0x02    -> panel mode, raw flavor (GET_INPUT: all lanes report the
+//                   unscaled physical reading; MBR lanes are identical to 0x01)
 //   0xC5 0x00    -> back to the cfg2 bit1 baseline
 // Binary mode (both off) keeps GET_INPUT byte-identical to 1.5.x.
-// gameRawEnabled itself is defined in hw_devices.cpp (round66 rawReportMode pattern).
+// gameRawEnabled itself is defined in hw_devices.cpp (round66 0xC5-session pattern).
 // round73: 基线改为每次命令逐值重算,不再一次性锁存——Core1 在 main()->initUSBDevice()
 // 即启动并开始跑 cdc_respond(),早于 boot_mode 的 readConfig();原实现的首次锁存读到的
 // 是全零 ControllerConfig,cfg2 bit1 在所有冷启动下永不生效(P1)。逐次求值顺带让
-// 保存后的 cfg2 改动无需重启即可反映到基线;0xC5 会话(rawReportMode)仍独立于该基线。
+// 保存后的 cfg2 改动无需重启即可反映到基线;0xC5 会话(rawReportLevel)仍独立于该基线。
 void updateGameRawBaseline() {
     gameRawEnabled = !!(ControllerConfig.cfg2 & CFG2_BIT_GAME_RAW_SLIDER);
 }
 
 bool rawModeActive() {
-    return rawReportMode || gameRawEnabled;
+    return rawReportLevel != 0 || gameRawEnabled;
 }
 
 // CDC command responder running on Core1. Replaces the CDC portion of maindev_loop
@@ -349,8 +351,8 @@ void cdc_respond() {
         // inputState already committed on success; on timeout it retains last good value
 
         // round66/68/69: raw pressure substitution - tmpPressure was copied in
-        // the same seqlock scope as touchData32. Panel mode (rawReportMode):
-        // all lanes report raw pressure. Game mode (cfg2 bit1 baseline):
+        // the same seqlock scope as touchData32. Panel mode (rawReportLevel):
+        // all lanes report pressure. Game mode (cfg2 bit1 baseline):
         // pressed lanes report linear-normalized pressure (0-255 scale), released
         // lanes 0. Both off keeps the 0/128 frame byte-identical to 1.5.x.
         // round73: 追加 frameFresh 门控(见上)。
@@ -362,14 +364,19 @@ void cdc_respond() {
         // MBR3116 DIFFERENCE_COUNT is natively 0-255 -- untouched. Scaling
         // happens only at this reporting layer; pressureSnap / 0xC2 debug
         // still carry raw values.
+        // round84: 0xC5 grew a level 2 = raw flavor: pressureSnap is reported
+        // unscaled (no MPR x2) so the panel can show the physical sensor
+        // reading; level 1 keeps the round80 simulated-report semantics.
         if (rawModeActive() && frameFresh) {
             bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) ||
                           ControllerConfig.hwVer >= 3;  // same rule as sanitizeConfig
-            if (rawReportMode) {
-                // panel mode: full 0-255 pressure, untouched keys report idle values
+            if (rawReportLevel) {
+                // panel mode: level 1 = simulated (x2 clamp, round80), level 2
+                // = raw (unscaled). Untouched keys report idle values either way.
+                bool simScaled = (rawReportLevel == 1);
                 for (int i = 0; i < 32; i++) {
                     uint16_t v = tmpPressure[i];
-                    if (!useMbr) {
+                    if (!useMbr && simScaled) {
                         v <<= 1;
                         if (v > 255) v = 255;
                     }
@@ -616,17 +623,25 @@ void cdc_respond() {
     if (cmd == CMD_GET_RAW_STATUS) {
         // round66: query the raw pressure report switch. Text line (style of 0xB8)
         // so the panel's waitForLine can read it. round68: reports the ACTIVE mode
-        // (panel session OR cfg2 bit1 game baseline), not just rawReportMode.
-        const char* resp = rawModeActive() ? "RAW=1\n" : "RAW=0\n";
-        tud_cdc_write((const uint8_t*)resp, strlen(resp));
+        // (panel session OR cfg2 bit1 game baseline), not just the session level.
+        // round84: the session level itself when one is active (RAW=1/2), else
+        // the baseline (RAW=0). Level 1/2 both count as active.
+        char resp[8];
+        uint8_t lvl = rawReportLevel ? rawReportLevel : (gameRawEnabled ? 1 : 0);
+        resp[0] = 'R'; resp[1] = 'A'; resp[2] = 'W'; resp[3] = '=';
+        resp[4] = (char)('0' + lvl); resp[5] = '\n'; resp[6] = 0;
+        tud_cdc_write((const uint8_t*)resp, 6);
         tud_cdc_write_flush();
-        g_tele.cdcTxBytes += strlen(resp);
+        g_tele.cdcTxBytes += 6;
     }
     if (cmd == CMD_SET_RAW_REPORT) {
-        // round66: set the raw pressure report switch. Host sends 1 byte 0/1.
+        // round66: set the raw pressure report switch. Host sends 1 byte.
         // round68: 0x00 reverts to the cfg2 bit1 game-raw baseline (not a hard
         // binary mode) so a panel session on a game-raw-enabled device does not
         // permanently flip the device back to binary.
+        // round84: payload is a level: 0=off, 1=simulated report (x2), 2=raw
+        // report (unscaled). Unknown values keep the current state (a legacy
+        // host that only ever sends 0/1 is unaffected).
         uint8_t v = 0;
         // round78: subtraction compare (wrap-safe); was a 49.7-day rollover hazard.
         uint32_t rawStart = to_ms_since_boot(get_absolute_time());
@@ -635,14 +650,16 @@ void cdc_respond() {
             sleep_us(100);
         }
         if (tud_cdc_read(&v, 1) == 1) {
-            // Only 0/1 accepted; anything else keeps the current state.
-            if (v == 0) rawReportMode = false;
-            else if (v == 1) rawReportMode = true;
+            if (v == 0) rawReportLevel = 0;
+            else if (v == 1 || v == 2) rawReportLevel = v;
         }
-        const char* resp = rawModeActive() ? "RAW=1\n" : "RAW=0\n";
-        tud_cdc_write((const uint8_t*)resp, strlen(resp));
+        char resp[8];
+        uint8_t lvl = rawReportLevel ? rawReportLevel : (gameRawEnabled ? 1 : 0);
+        resp[0] = 'R'; resp[1] = 'A'; resp[2] = 'W'; resp[3] = '=';
+        resp[4] = (char)('0' + lvl); resp[5] = '\n'; resp[6] = 0;
+        tud_cdc_write((const uint8_t*)resp, 6);
         tud_cdc_write_flush();
-        g_tele.cdcTxBytes += strlen(resp);
+        g_tele.cdcTxBytes += 6;
     }
     if (cmd == CMD_SET_LED) {
         uint8_t leds[96];
@@ -700,7 +717,8 @@ void cdc_respond() {
         // round66: pressure reporting is a session/panel feature - turn it off
         // before handing the CDC channel to Core0's config-mode command handler
         // (GET_INPUT is paused there; stale raw state must not leak back).
-        rawReportMode = false;
+        // round84: session state is now the rawReportLevel (0/1/2).
+        rawReportLevel = 0;
         hid_working = false;
         in_config_mode = true;  // Core1 stops reading CDC; Core0 handleCommand takes over
         // round51: Core0 becomes the sole tud_task() driver in config mode

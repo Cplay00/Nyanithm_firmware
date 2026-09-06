@@ -17,7 +17,7 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.2-beta1"
+#define NYANITHM_FW_VERSION "1.6.3-beta1"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -37,7 +37,7 @@ const uint8_t CFG2_BIT_DISABLE_LAMP_ARRAY = 0b00000001;  // set = OFF. Clear = W
 // round80: MPR 映射从 ×4 改为 ×2 -- 用户实测 MPR diff 与接触面积成比例
 // (手指 30-50, 手掌 ~130), 原生到不了 255; ×2 报送保持线性直到游戏内上限
 // (clamp 255), ×4 会把中等触摸也打满、丢失面积比例信息。面板实时报送
-// (rawReportMode) 同步 ×2 尺度; MBR 原生 0-255 不变。
+// (0xC5 level=1, round84 起会话为三级 0/1/2) 同步 ×2 尺度; MBR 原生 0-255 不变。
 const uint8_t CFG2_BIT_GAME_RAW_SLIDER = 0b00000010;
 // cfg3: additive input latency, 0-15 ms (MBR3116-style tuning knob, 0 = off).
 const uint8_t INPUT_LATENCY_MAX_MS = 15;
@@ -75,6 +75,11 @@ struct controller_config {
     // v1 (hw1/hw2) 与 v2 (hw3/hw4) 双主控布局同样生效。
     // 注意: slide 过渡信号同样必须先过此门 (reject 在邻格快路径之前);
     // gate>=200 时强信号快路径的有效阈值也被抬到 gate 值, 属预期行为。
+    // round84 修订: (a) 游戏车道 k±1 上一周期有已确认触摸时, 本格 gate 预检
+    // 下放为 verifyBaseK+40 (slide 连续性豁免; 悬空带首格永无已确认邻居,
+    // 无法自我锚定, 防护不被穿透); (b) 悬空根治主闸门应上芯片侧
+    // FINGER_THRESHOLD (面板「悬空截止校准」联动写入, 合法区间 31-200),
+    // 本门降级为噪声兜底 (建议 ~130), max 语义下单提其一无效。
     uint8_t mbrTouchGate;      //
     uint8_t reserved[36];      //
     uint8_t xorSum;            // 前127字节异或和, 用于校验

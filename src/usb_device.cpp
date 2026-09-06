@@ -68,8 +68,9 @@ void multicore_entry() {
         // round66: raw pressure report is a host-session feature - auto-clear
         // when the CDC host disconnects so it never survives into the next
         // session (e.g. game DLL start over a fresh port).
-        if (rawReportMode && !tud_cdc_n_connected(0)) {
-            rawReportMode = false;
+        // round84: session state is now the rawReportLevel (0/1/2).
+        if (rawReportLevel != 0 && !tud_cdc_n_connected(0)) {
+            rawReportLevel = 0;
         }
         cdc_respond();
         hid_task_chuni_input();

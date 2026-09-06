@@ -381,11 +381,14 @@ uint8_t  g_verifyFail[36] = {0};          // per-electrode I2C verification reje
 uint32_t g_loopMinUs = 0xFFFFFFFF, g_loopMaxUs = 0, g_loopSumUs = 0, g_loopCount = 0;
 
 // round66: real-time pressure snapshot (0-255 clamped diff per slider lane).
-// Core0 fills this every 5ms while rawReportMode is on; Core1 substitutes it
-// into the GET_INPUT 33B frame. Written inside the touchStateGen seqlock
-// section so Core1 gets one coherent state. Zero I2C cost while off.
+// Core0 fills this every 5ms while a pressure report session is on; Core1
+// substitutes it into the GET_INPUT 33B frame. Written inside the
+// touchStateGen seqlock section so Core1 gets one coherent state.
+// Zero I2C cost while off.
+// round84: rawReportMode (bool) became rawReportLevel (0xC5 session level):
+// 0=off, 1=simulated (round80 report semantics), 2=raw unscaled.
 uint8_t pressureSnap[32] = {0};
-volatile bool rawReportMode = false;  // set by Core1 (0xC5), auto-cleared on CDC disconnect
+volatile uint8_t rawReportLevel = 0;  // set by Core1 (0xC5), auto-cleared on CDC disconnect
 volatile bool gameRawEnabled = false;  // round68: cfg2 bit1 baseline (experimental)
 static uint32_t pressureSnapLastMs = 0;
 static const uint32_t PRESSURE_SNAP_INTERVAL_MS = 5;
@@ -443,10 +446,11 @@ static bool mbrReadPressureSnap() {
 }
 
 // round66: called from updateInputState() inside the seqlock writer section.
-// Throttled to every PRESSURE_SNAP_INTERVAL_MS; no-op while rawReportMode off.
-// round68: also on while cfg2 bit1 game-raw baseline is set.
+// Throttled to every PRESSURE_SNAP_INTERVAL_MS; no-op while no pressure
+// report session is active. round68: also on while cfg2 bit1 game-raw
+// baseline is set.
 static void updatePressureSnap() {
-    if (!rawReportMode && !gameRawEnabled) return;
+    if (rawReportLevel == 0 && !gameRawEnabled) return;
     uint32_t nowMs = to_ms_since_boot(get_absolute_time());
     if (nowMs - pressureSnapLastMs < PRESSURE_SNAP_INTERVAL_MS) return;
     pressureSnapLastMs = nowMs;
@@ -470,6 +474,12 @@ void updateTouch_v2() {
 
     hwTouch[0] = t0; hwTouch[1] = t1; hwTouch[2] = 0;  // round50: pre-verification snapshot
 
+    // round84: per-GAME-LANE stretched snapshot of the previous cycle. The
+    // gate-anchoring check (laneNeighborConfirmed) is lane-space, so the
+    // stretched bits from both chips are projected through laneTable once
+    // per cycle -- cross-chip boundaries (e.g. lane 15/16) anchor naturally.
+    static bool prevLaneStretched[32] = {0};
+
     static uint16_t prevStretched[2] = {0, 0};  // round50: slide-aware spatial filtering
     static const uint8_t CONFIRM_CYCLES_V2 = 2;
     static uint8_t confirmReq[2][16] = {0};
@@ -490,6 +500,11 @@ void updateTouch_v2() {
         // ~1.6x the 4mm-hover signal; noise pulses (round47b)
         // top out an order of magnitude lower. See fastOkV2 use below.
         static const uint16_t MBR_FLICK_FAST_TH = 200;
+        // round84: gate value granted to a slide-edge lane whose GAME-LANE
+        // neighbor confirmed last cycle (see laneNeighborConfirmed below).
+        // = MBR_TIER_OFFSET_MEDIUM, so the relaxed gate coincides with the
+        // existing medium-amplitude tier boundary.
+        static const uint16_t MBR_NEIGHBOR_GATE_MARGIN = 40;
         uint16_t verifyBaseK[2][16];
         for (uint8_t m = 0; m < 2; m++) {
             for (uint8_t e = 0; e < 16; e++) {
@@ -535,8 +550,31 @@ void updateTouch_v2() {
                             // straight through. Raising only the software ON-gate
                             // pushes the trigger point close to physical contact;
                             // applies to touch-ON only (release/sticky untouched).
+                            // round84: confirmed-neighbor anchoring. A slide's
+                            // trailing/leading edge sweeps weak signal into a
+                            // lane next to one that JUST confirmed -- spatial
+                            // continuity the hover band cannot fake (the first
+                            // lane of a hover never has a confirmed neighbor).
+                            // Anchor is the GAME LANE (k +/- 1 via laneTable),
+                            // never "any electrode on the same chip": 3116
+                            // electrodes are physically shuffled (v2 puts tc1/2
+                            // and tc15/16 on one chip), a same-chip rule would
+                            // let a hover on one side slip through while the
+                            // other side is held. Cap: the relaxed gate stays a
+                            // floor below the chip threshold+hysteresis, so the
+                            // chip-level hover protection is never penetrated.
                             uint16_t rejectTh = baseK;
                             if (ControllerConfig.mbrTouchGate > rejectTh) rejectTh = ControllerConfig.mbrTouchGate;
+                            int16_t lane = laneTable[m][e];
+                            bool laneNeighborConfirmed = false;
+                            if (lane >= 0) {
+                                laneNeighborConfirmed =
+                                    (lane > 0 && prevLaneStretched[lane - 1]) ||
+                                    (lane < 31 && prevLaneStretched[lane + 1]);
+                            }
+                            if (laneNeighborConfirmed && rejectTh > baseK + MBR_NEIGHBOR_GATE_MARGIN) {
+                                rejectTh = baseK + MBR_NEIGHBOR_GATE_MARGIN;
+                            }
                             bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                                      (e < 15 && (prevStretched[m] & (1 << (e + 1))));
                             if (diff < rejectTh) {
@@ -652,6 +690,14 @@ void updateTouch_v2() {
     }
     prevStretched[0] = t0; prevStretched[1] = t1;
 
+    // round84: project this cycle's stretched bits into lane space for next
+    // cycle's laneNeighborConfirmed gate anchoring.
+    for (uint8_t lane = 0; lane < 32; lane++) {
+        uint8_t lm = V2_LANE_M[lane], le = V2_LANE_E[lane];
+        uint16_t bits = (lm == 0) ? t0 : t1;
+        prevLaneStretched[lane] = (bits >> le) & 1;
+    }
+
     touchData32[0] = GET_BIT(t1, 4) ? 128 : 0;
     touchData32[1] = GET_BIT(t1, 0) ? 128 : 0;
 
@@ -728,6 +774,13 @@ void updateTouch_v1() {
 
     // round45p: save pre-verification hardware touch snapshot for CMD_DEBUG_CHAIN
     hwTouch[0] = t0; hwTouch[1] = t1; hwTouch[2] = t2;
+
+    // round84: per-GAME-LANE stretched snapshot of the previous cycle (MBR
+    // branch only -- the MPR branch keeps its behavior untouched this round).
+    // Projected after the shared stretch stage from the STRETCHED bits
+    // (incl. sticky-held lanes); cross-chip lane borders (e.g. 15/16) anchor
+    // naturally through lane space.
+    static bool prevLaneStretched[32] = {0};
 
     // round45u: previous cycle's stretched output for slide-aware spatial filtering.
     // Used to detect slide transitions: if neighbor was active (including sticky-maintained),
@@ -886,6 +939,9 @@ void updateTouch_v1() {
         // ~1.6x the 4mm-hover signal; noise pulses (round47b)
         // top out an order of magnitude lower. See fastOk use below.
         static const uint16_t MBR_FLICK_FAST_TH = 200;
+        // round84: gate value granted to a slide-edge lane whose GAME-LANE
+        // neighbor confirmed last cycle (mirror of the v2 layout change).
+        static const uint16_t MBR_NEIGHBOR_GATE_MARGIN = 40;
         uint16_t verifyBaseK[3][16];
         for (uint8_t m = 0; m < 3; m++) {
             for (uint8_t e = 0; e < 16; e++) {
@@ -931,8 +987,23 @@ void updateTouch_v1() {
                             // straight through. Raising only the software ON-gate
                             // pushes the trigger point close to physical contact;
                             // applies to touch-ON only (release/sticky untouched).
+                            // round84: confirmed-neighbor anchoring (v2 mirror --
+                            // see the full rationale there). Anchor is the GAME
+                            // LANE (k +/- 1 via laneTable), never "any electrode
+                            // on the same chip"; v1 mixes electrode orders across
+                            // chips A/B/C, so the same shuffle hazard applies.
                             uint16_t rejectTh = baseK;
                             if (ControllerConfig.mbrTouchGate > rejectTh) rejectTh = ControllerConfig.mbrTouchGate;
+                            int16_t lane = laneTable[m][e];
+                            bool laneNeighborConfirmed = false;
+                            if (lane >= 0) {
+                                laneNeighborConfirmed =
+                                    (lane > 0 && prevLaneStretched[lane - 1]) ||
+                                    (lane < 31 && prevLaneStretched[lane + 1]);
+                            }
+                            if (laneNeighborConfirmed && rejectTh > baseK + MBR_NEIGHBOR_GATE_MARGIN) {
+                                rejectTh = baseK + MBR_NEIGHBOR_GATE_MARGIN;
+                            }
                             // round45u: slide transition acceleration
                             bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e - 1)))) ||
                                                      (e + 1 < maxElec[m] && (prevStretched[m] & (1 << (e + 1))));
@@ -1077,6 +1148,19 @@ void updateTouch_v1() {
     prevStretched[0] = t0;
     prevStretched[1] = t1;
     prevStretched[2] = t2;
+
+    // round84: project this cycle's stretched bits into lane space for next
+    // cycle's laneNeighborConfirmed gate anchoring (MBR only -- the MPR branch
+    // is untouched this round). Uses the STRETCHED bits (incl. sticky-held
+    // lanes), matching the v2 projection exactly: anchor semantics must stay
+    // identical across layouts.
+    if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
+        for (uint8_t lane = 0; lane < 32; lane++) {
+            uint8_t lm = V1_LANE_M[lane], le = V1_LANE_E[lane];
+            uint16_t bits = (lm == 0) ? t0 : ((lm == 1) ? t1 : t2);
+            prevLaneStretched[lane] = (bits >> le) & 1;
+        }
+    }
 
     touchData32[0] = GET_BIT(t1, 11) ? 128 : 0;
     touchData32[1] = GET_BIT(t1, 0) ? 128 : 0;

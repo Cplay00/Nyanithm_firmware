@@ -62,11 +62,15 @@ extern uint8_t  g_verifyFail[36];  // per-electrode I2C verification rejections 
 extern uint32_t g_loopMinUs, g_loopMaxUs, g_loopSumUs, g_loopCount;  // Core0 cycle timing
 
 // round66: real-time per-lane pressure snapshot (Core0 writer, Core1 reader).
-// rawReportMode is set by Core1 (0xC5) and auto-cleared on CDC disconnect;
+// rawReportLevel is set by Core1 (0xC5) and auto-cleared on CDC disconnect;
 // gameRawEnabled is the round68 cfg2 bit1 baseline (experimental, persists).
 // Core0 fills pressureSnap while either is on.
+// round84: 0xC5 payload is now a level, not a bool: 0=off, 1=simulated report
+// (round80 semantics: MPR lanes x2, clamp 255; MBR native 0-255), 2=raw
+// report (pressureSnap unscaled -- the sensor's physical reading). Values
+// other than 0/1/2 keep the current state (old-panel compatible).
 extern uint8_t pressureSnap[32];
-extern volatile bool rawReportMode;
+extern volatile uint8_t rawReportLevel;
 extern volatile bool gameRawEnabled;
 
 #endif
