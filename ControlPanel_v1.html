@@ -3428,15 +3428,15 @@ input[type="range"]:disabled {
                             </label>
                         </div>
                         <div class="config-row">
-                            <label class="config-label">硬件版本 hwVer（尺寸 / 布局 / ToF 数）</label>
+                            <label class="config-label">硬件版本 hwVer（代际 / 尺寸 / ToF 数）</label>
                             <div class="segmented" id="hwSegmented">
                                 <div class="segmented-indicator" id="hwIndicator"></div>
-                                <button class="segmented-btn active" data-hw="1">27寸 三主控</button>
-                                <button class="segmented-btn" data-hw="2">32寸 三主控</button>
-                                <button class="segmented-btn" data-hw="3">27寸 双主控</button>
-                                <button class="segmented-btn" data-hw="4">32寸 双主控</button>
+                                <button class="segmented-btn active" data-hw="1">v1 · 27寸</button>
+                                <button class="segmented-btn" data-hw="2">v1 · 32寸</button>
+                                <button class="segmented-btn" data-hw="3">v2 · 27寸</button>
+                                <button class="segmented-btn" data-hw="4">v2 · 32寸</button>
                             </div>
-                            <span class="field-hint">三主控 (v1 布局) = 三片 0x40-0x42 或 MPR121 ×3；双主控 (v2 布局) = 两片 0x43/0x44（仅 3116）。v1 支持 MPR121 与 MBR3116 两种触摸主控。</span>
+                            <span class="field-hint">v1 = 一代机·三主控布局（0x40-0x42 或 MPR121 ×3，支持两种触摸主控）；v2 = 二代机·双主控布局（0x43/0x44，仅 3116）。按钮中的 v1/v2 是布局代际，27/32 寸是机身尺寸。</span>
                         </div>
                     </div>
 
@@ -3494,6 +3494,19 @@ input[type="range"]:disabled {
                                     <input type="range" id="rgThRelease" min="1" max="63" step="1" value="4" disabled>
                                 </div>
                                 <span class="field-hint" id="thReleaseWarn" style="display:none"></span>
+                            </div>
+                            <div class="slider-row">
+                                <div class="slider-top">
+                                    <div class="slider-label-group">
+                                        <span class="slider-label">悬空抑制</span>
+                                        <span class="slider-label-en">mbrTouchGate (3116)</span>
+                                    </div>
+                                    <output class="slider-value" id="rgMbrGatev"></output>
+                                </div>
+                                <div class="slider-track">
+                                    <input type="range" id="rgMbrGate" min="0" max="255" step="1" value="0" disabled>
+                                </div>
+                                <span class="field-hint">仅 3116 生效。0 = 关闭（旧行为）。手指悬空在板上方就误触发时调高此值压制悬空，建议从 200-220 起调并与折返手感联动测试；保存并重启后生效。gate ≥ 200 时强信号快路径的有效阈值也随之抬高（取两者较大值），属预期。需固件 ≥ 1.6.2-beta1。</span>
                             </div>
                             <div class="slider-row">
                                 <div class="slider-top">
@@ -3574,6 +3587,10 @@ input[type="range"]:disabled {
                                     <div class="field-item"><label class="field-label">ToF3 偏移</label><input type="number" class="num-input" id="off3" disabled></div>
                                     <div class="field-item" id="off4Wrap" style="display:none;"><label class="field-label">ToF4 偏移</label><input type="number" class="num-input" id="off4" disabled></div>
                                 </div>
+                                <!-- round81: ToF 偏移调节方法注释。方向依据固件
+                                     hw_devices.cpp meas=raw+offset + Kalman v<0=手抬高
+                                     (测距变小=手抬高): 偏移加在测距值上, 调大=手需抬更高 -->
+                                <span class="field-hint">ToF 偏移设定方法（单位 mm，可正可负，保存并重启后生效）：偏移直接加在测距值上。调大 = 手需抬得更高才触发原档位（判定整体上移）；调小 = 手放低一点即可触发（判定整体下移）。触发位置比预期偏低（手未到位就触发）→ 调大；偏高（抬到位也不触发）→ 调小。逐个 ToF 独立调节，先全部保持 0 观察哪一路偏差再改。</span>
                                 <div class="field-grid">
                                     <div class="field-item"><label class="field-label">配置版本 cfgVer</label><input type="text" class="txt-input" id="cfgVerVal" value="0x02" disabled></div>
                                     <div class="field-item"><label class="field-label">校验 xorSum</label><input type="text" class="txt-input" id="xorVal" value="-" disabled></div>
@@ -3854,6 +3871,9 @@ const CFG_SIZE = 128;
 const CFG_OFF_TH_TOUCH_KEY = 26;
 const CFG_OFF_TH_RELEASE_KEY = 58;
 const CFG_NUM_KEYS = 32;
+// round80: MBR3116 悬空抑制门(controller_config.mbrTouchGate, 0=旧行为)。
+// 需固件 >= 1.6.2-beta1(旧固件该字节为 reserved, sanitize 不清零但也不生效)。
+const CFG_OFF_MBR_TOUCH_GATE = 90;
 
 const BIT_FORCE16 = 0b00000001;
 const BIT_MBR3116 = 0b00000010;
@@ -3866,11 +3886,11 @@ const BIT_DISABLE_LAMP_ARRAY = 0b00000001;
 const BIT_GAME_RAW_SLIDER = 0b00000010;
 
 // 一代 hw_v1 固件版本白名单:0xBC 探测不可用(旧固件)时的回退门禁依据。
-const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1", "1.6.1-beta2"];
+const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1", "1.6.1-beta2", "1.6.2-beta1"];
 // round77/78: 面板自身版本标识(显示于页头品牌区)。cmpVersion 对 "1-beta2" 这类
 // 带后缀补丁段按 0 处理(NaN||0),即 1.6.1-beta2 在版本门禁中等价 1.6.0,≥1.6.0
 // 的功能门禁(0xC4/0xC5/逐键阈值)全部照常通过。
-const PANEL_VERSION = "1.1.1-beta2";
+const PANEL_VERSION = "1.1.1-beta3";
 
 // ====== UF2 固件文件解析(刷写前校验) ======
 const UF2_MAGIC0 = 0x0A324655;   // "UF2\n"
@@ -4010,6 +4030,17 @@ function hwVerFromProbe(p) {
     if (p.mbrMask & 0b110000) return is32 ? 4 : 3;
     if (p.mbrMask & 0b001110) return is32 ? 2 : 1;
     return null;
+}
+
+// round81: hwVer → 「代际·尺寸」全称(固件权威映射: hw1=27寸三主控/v1 布局,
+// hw2=32寸三主控/v1 布局, hw3=27寸双主控/v2 布局, hw4=32寸双主控/v2 布局)。
+// 「API / 硬件」信息框用全称消歧——裸 "v2" 是 hwVer 数值, 曾被用户误读为
+// "二代机"(32寸一代机 = hw2, 显示应为 v1·32寸)。
+function hwVerLabel(v) {
+    if (!(v >= 1 && v <= 4)) return "-";
+    const size = (v === 2 || v === 4) ? "32寸" : "27寸";
+    const gen = (v === 3 || v === 4) ? "v2" : "v1";
+    return `${gen}·${size}`;
 }
 
 // ====== UF2 解析 ======
@@ -4505,7 +4536,7 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }
 
-    const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, pkThTouch: 2, pkThRelease: 2 };
+    const sliderDigits = { rgAirMin: 3, rgAirMax: 3, rgThTouch: 2, rgThRelease: 2, rgBright: 3, rgDt: 1, rgDr: 1, rgHeight: 2, rgLatency: 2, rgMbrGate: 3, pkThTouch: 2, pkThRelease: 2 };
     // round72: ledLimit/ledSpeed 是灯光面板的迷你直显滑条。此前先被通用循环
     // odometer 化、又被下方文本直写摧毁,_odometer 残留指向孤立节点(僵尸表),
     // 未来任何 setSlider 打到它们都会静默失更新——现在从建表环节直接排除。
@@ -4800,7 +4831,9 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    const s = "FW:1.6.1-beta2 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.1-beta2;hw_v1";
+                    // round81: Mock 版本串随固件 1.6.2-beta1 同步(悬空抑制滑块
+                    // 门禁在 Mock 下走 1.6.2-beta1+ 分支)。
+                    const s = "FW:1.6.2-beta1 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.2-beta1;hw_v1";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -4817,8 +4850,11 @@ function validateUf2ForDevice(p, devInfo) {
                 // rawReport=true(校准会话): 静止 idle + 坏键偏置 + 轮转"按下"每 1.5s 一键,
                 // 使校准 Phase1(静置) 采到真实 idleMax、Phase2(划键) 采到每键 touchMin。
                 // round69: cfg2 bit1(游戏压力映射)开启且无会话开关时,模拟固件 game 分支
-                // (按下报映射值 MPR×4 clamp 255 / 释放 0)。
+                // (按下报映射值 / 释放 0)。
+                // round80: 固件报送层对 MPR ×2 (clamp 255)——Mock 作为设备模拟器
+                // 同步该语义: game 映射 ×4→×2; rawReport 会话对 MPR 输出 ×2。
                 const gameRawOn = !this.rawReport && ((this.cfg[5] & BIT_GAME_RAW_SLIDER) !== 0);
+                const simMbr = ((this.cfg[3] & BIT_MBR3116) !== 0) || this.cfg[2] >= 3;
                 let idleBias = 0;
                 if (i === 4) idleBias = 14;   // 坏键 A(高空闲)
                 else if (i === 16) idleBias = 6;  // 坏键 B(中等)
@@ -4827,12 +4863,15 @@ function validateUf2ForDevice(p, devInfo) {
                 // rawReport=false(普通轮询演示): 高斯扫模拟划键,叠加坏键偏置;
                 // rawReport=true(校准会话): 纯静止 idle(用户手应离开), 两阶段都真实。
                 if (gameRawOn) {
-                    // 游戏映射模式: 按下=映射值(×4 clamp 255), 释放=0
+                    // 游戏映射模式: 按下=映射值(×2 clamp 255, round80), 释放=0
                     const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
-                    v = (bump > 0.3) ? Math.min(255, Math.round(v * 4)) : 0;
+                    v = (bump > 0.3) ? Math.min(255, Math.round(v * 2)) : 0;
                 } else if (!this.rawReport) {
                     const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
                     v += bump * 44;
+                } else if (!simMbr) {
+                    // round80: 面板实时压力会话, MPR 固件报送 ×2
+                    v = Math.min(255, v * 2);
                 }
                 f[i] = Math.round(Math.min(255, v));
             }
@@ -5106,14 +5145,19 @@ function validateUf2ForDevice(p, devInfo) {
             const vm = info.match(/VAR:([A-Za-z_0-9]+)/);
             const sm = info.match(/NYANFW1;([^;\s]+);([^;\s]+)/);
             devInfo = { fw: m[1], api: parseInt(m[2], 16), hwVer: parseInt(m[3], 10), var: vm ? vm[1] : null, sig: sm ? { version: sm[1], variant: sm[2] } : null, raw: info };
-            log(`设备信息: 固件 ${devInfo.fw}${devInfo.var ? " (" + devInfo.var + ")" : ""} / API 0x${devInfo.api.toString(16)} / 硬件 v${devInfo.hwVer}`);
+            log(`设备信息: 固件 ${devInfo.fw}${devInfo.var ? " (" + devInfo.var + ")" : ""} / API 0x${devInfo.api.toString(16)} / 硬件 v${devInfo.hwVer} (${hwVerLabel(devInfo.hwVer)})`);
             $("infoFw").textContent = devInfo.fw + (devInfo.var ? " · " + devInfo.var : "");
-            $("infoApi").textContent = "0x" + devInfo.api.toString(16) + " / v" + devInfo.hwVer;
+            // round81: 裸 "v2"(hwVer 数值)曾被视为"二代机"误导——32寸一代机=hw2,
+            // 显示为「v1·32寸」全称; 原始数值保留在日志与详情弹窗。
+            $("infoApi").textContent = "0x" + devInfo.api.toString(16) + " / " + hwVerLabel(devInfo.hwVer);
             $("infoVar").textContent = devInfo.var || "(旧固件)";
             // round66/70: 压力上报会话门禁以固件版本为准(1.6.0+ 才有 0xC4/0xC5
             // pressureSnap 管线)。API 是硬件/协议标识(一代=0x10),不能当新命令
             // 门禁:旧面板曾用 api>=0x11 导致真机(API 0x10)永远不发 0xC5。
             rawReportSupported = !!(devInfo.fw && cmpVersion(devInfo.fw, "1.6.0") >= 0);
+            // round80/81: 悬空抑制滑块(mbrTouchGate)门禁, 需固件 1.6.2-beta1+
+            // (旧固件该字节是 reserved, 写入不生效)。
+            mbrGateFwSupport = !!(devInfo.fw && cmpVersion(devInfo.fw, "1.6.2-beta1") >= 0);
             // round64: v1.6 逐键阈值门禁。0xBD 版本 >=1.6.0 才允许编辑逐键;
             // 旧固件保留 reserved 全 0, UI 显示全部"继承"并禁用。
             // round68: ckGameRaw 同门禁(实验开关需 1.6.0 固件)。旧固件清勾选
@@ -5380,6 +5424,7 @@ function validateUf2ForDevice(p, devInfo) {
     // 开/关; 固件在 CDC 断连/进配置/重启时自动回 0, 无需面板兜底。
     let rawReportOn = false;
     let rawReportSupported = false;  // 固件 1.6.0+ 或 Mock 时置真
+    let mbrGateFwSupport = false;  // round81: 悬空抑制滑块门禁, 固件 1.6.2-beta1+
     async function setRawReport(on) {
         if (!rawReportSupported) return false;
         if (!connected) return false;
@@ -5525,6 +5570,10 @@ function validateUf2ForDevice(p, devInfo) {
         rawLightLimit = { byte: buf[24], pct: brightPct };
         buf[25] = parseInt($("rgHeight").value) || 0;
 
+        // round80/81: MBR3116 悬空抑制门(0=旧行为)。固件 sanitize 对 uint8
+        // 全域放行, 面板只做 0-255 钳位; 需固件 >= 1.6.2-beta1。
+        buf[CFG_OFF_MBR_TOUCH_GATE] = Math.max(0, Math.min(255, parseInt($("rgMbrGate").value) || 0));
+
         // round64: 逐键阈值(0 = 继承,仅在 fw>=1.6.0 允许编辑)。底包保真:
         // 未编辑的键保持 lastReadConfig 原字节,编辑过的按 perKey 状态写回。
         if (perKeyFwSupport) {
@@ -5588,6 +5637,8 @@ function validateUf2ForDevice(p, devInfo) {
         }
         smoothSliderTo($("rgBright"), Math.round(buf[24] * 100 / 255));
         setSlider($("rgHeight"), buf[25] || 10, { quiet: true });
+        // round80/81: 悬空抑制读回(0=关闭)。
+        setSlider($("rgMbrGate"), buf[CFG_OFF_MBR_TOUCH_GATE] || 0, { quiet: true });
         // round64: 逐键阈值读回(0 = 继承)。仅 fw>=1.6.0 时这些偏移才可能非 0;
         // 旧固件读到的 reserved 全 0, 逐键 UI 显示"全部继承"。
         // round67: 校准回填后(calPendingBackfill)进入配置模式的这次 unpack 不能
@@ -6294,6 +6345,11 @@ function validateUf2ForDevice(p, devInfo) {
 
         // 收集即弃: inputLoop 每帧把最新帧放 latestInputData, 这里直接读共享变量
         const probeInputFn = () => latestInputData;
+        // round80: 固件对 MPR 实时压力 ×2 报送(clamp 255)。阈值建议必须落在
+        // 原生阈值尺度(th_touch 1-63 / 逐键同), 否则建议值整体翻倍且被 63
+        // 钳顶。MPR 采样时减半折算回原生尺度; MBR 原生 0-255 不折算。
+        const calUseMbr = perKeyIsMbr();
+        const calScale = calUseMbr ? 1 : 0.5;
 
         let aborted = false;
         try {
@@ -6313,7 +6369,7 @@ function validateUf2ForDevice(p, devInfo) {
                 const f = probeInputFn();
                 if (!f) continue;
                 for (let i = 0; i < CFG_NUM_KEYS; i++) {
-                    const v = f[i];
+                    const v = Math.min(255, Math.round(f[i] * calScale));
                     if (v > samples.idleMax[i]) samples.idleMax[i] = v;
                     samples.idleHist[i][v]++;
                 }
@@ -6330,14 +6386,15 @@ function validateUf2ForDevice(p, devInfo) {
                     await nextTick();
                     const remain = Math.max(0, Math.ceil(ph2 - (performance.now() - phase2Start) / 1000));
                     calRenderRing(remain, (performance.now() - phase2Start) / 1000 / ph2);
-                    const f = probeInputFn();
-                    if (!f) continue;
-                    for (let i = 0; i < CFG_NUM_KEYS; i++) {
-                        if (f[i] < touchMin[i]) touchMin[i] = f[i];
-                        if (f[i] > 0) touchHit[i]++;
-                    }
+                const f = probeInputFn();
+                if (!f) continue;
+                for (let i = 0; i < CFG_NUM_KEYS; i++) {
+                    const v = Math.min(255, Math.round(f[i] * calScale));
+                    if (v < touchMin[i]) touchMin[i] = v;
+                    if (v > 0) touchHit[i]++;
                 }
-                if (!aborted) log(`Phase 2 完成: touchMin = [${touchMin.join(",")}] 命中 = [${touchHit.join(",")}]`);
+            }
+            if (!aborted) log(`Phase 2 完成: touchMin = [${touchMin.join(",")}] 命中 = [${touchHit.join(",")}]`);
             }
 
             if (aborted) {
@@ -6403,6 +6460,11 @@ function validateUf2ForDevice(p, devInfo) {
                     : "<div style='margin-top:8px'>所有键建议继承全局阈值</div>",
                 "<div style='margin-top:10px' class='cal-report-note'>点击「确认并开始修改」将自动进入配置模式并填入上述建议值，保存并重启后生效。</div>",
             ];
+            // round80: MPR 实时压力为固件 ×2 报送尺度, 报告里的 idleMax/touchMin
+            // 已折算回原生阈值尺度——提示用户两处数字不同属预期。
+            if (!calUseMbr) {
+                lines.splice(2, 0, "<div style='margin-top:6px' class='cal-report-note'>注: INPUT TEST 实时压力显示为固件 ×2 报送尺度，本报告数值已折算回原生阈值尺度。</div>");
+            }
             $("calReportBody").innerHTML = lines.join("");
             calShowScreen("calScreenResult");
             log("--- 一键校准完成: 请查看报告并确认 ---");
@@ -7707,6 +7769,8 @@ function validateUf2ForDevice(p, devInfo) {
         // round68: ckGameRaw 在配置模式可用, 但需 1.6.0 固件(旧固件 sanitize
         // 会丢弃该位)+ fw 门禁在 0xBD 处理同步(旧固件置灰并清勾选)。
         $("ckGameRaw").disabled = !inCfg || !perKeyFwSupport;
+        // round81: 悬空抑制滑块需固件 >= 1.6.2-beta1(旧固件该字节为 reserved)。
+        $("rgMbrGate").disabled = !inCfg || !mbrGateFwSupport;
 
         const mbrIds = ["mbrChip", "mbrThreshold", "mbrDebounce", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply"];
         const mbrEnabled = inCfg && MBR_CRC_OK;
