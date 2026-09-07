@@ -3027,27 +3027,34 @@ input[type="range"]:disabled {
 }
 
 /* ================================================================
-   输入测试字体显示效果优化:
-   当背景亮度≤35%时,字体颜色为白色;＞35%时,字体为黑色。
+   输入测试高对比度字体显示优化:
+   以高对比度为准, 追求高对比辨识。
+   - 亮度为 0 时仍然为纯白, 降低灰度与透明度 (文字与序号均接近纯白实体)
+   - 亮度 ≥ 45% 时默认为实体纯黑色 (#000000, 100% 不透明)
+   - 中间过渡区间动态追求高对比辨识 (白色或黑色, 白字配微细暗影防泛白失真)
    涵盖按键数字、::before 通道序号与 AIR 通道文字。
-   非配置模式(not .th-mode)下生效,保证配置模式下阈值参数高亮不被覆盖。
+   非配置模式(not .th-mode)下生效, 保证配置模式下阈值参数高亮不被覆盖。
    ================================================================ */
 .div_touch_channel:not(.th-mode).tc-text-light,
 .div_air.tc-text-light {
     color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 .div_touch_channel:not(.th-mode).tc-text-light::before,
 .div_air.tc-text-light::after {
-    color: rgba(255, 255, 255, 0.85) !important;
+    color: rgba(255, 255, 255, 0.96) !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
 .div_touch_channel:not(.th-mode).tc-text-dark,
 .div_air.tc-text-dark {
     color: #000000 !important;
+    text-shadow: none;
 }
 .div_touch_channel:not(.th-mode).tc-text-dark::before,
 .div_air.tc-text-dark::after {
-    color: rgba(0, 0, 0, 0.85) !important;
+    color: #000000 !important;
+    text-shadow: none;
 }
 
 
@@ -5667,10 +5674,19 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     // ================================================================
-    // 输入测试字体亮度与颜色自适应优化
-    // 规则: 背景亮度 ≤ 35% 时, 字体为白色; ＞ 35% 时, 字体为黑色
+    // 输入测试高对比度字体显示优化
+    // 规则:
+    // - 以高对比度为准,追求高对比辨识
+    // - 亮度为 0 时仍然为纯白色,并降低一定的灰度和透明度 (序号与文字实体纯白)
+    // - 亮度 ≥ 45% 时默认为纯黑色 (#000000, 100% 不透明)
+    // - 其他亮度区间动态高对比辨识 (结合人眼与 WCAG 对比度指标最优化)
+    // - 背景高亮与容器透明度解耦 (改用 backgroundColor 插值),防止子文本被 parent opacity 降权发灰
     // ================================================================
-    let themeLuminanceCache = { yBg: 0.102, yAccent: 0.843 };
+    let themeLuminanceCache = {
+        bgR: 26, bgG: 26, bgB: 26,
+        accentR: 255, accentG: 224, accentB: 64,
+        yBg: 0.102, yAccent: 0.843
+    };
 
     function parseCssColor(str) {
         if (!str) return null;
@@ -5703,6 +5719,16 @@ function validateUf2ForDevice(p, devInfo) {
         return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
     }
 
+    // 高对比度文本颜色判定:
+    // 1. 亮度为 0: 恒为白字 (false = not dark)
+    // 2. 亮度 ≥ 45%: 默认为纯黑色 (true = dark text)
+    // 3. 中间区间 (0% < Y < 45%): 动态高对比辨识 (Y < 0.35 时白字对比度高, >= 0.35 黑字)
+    function isDarkTextForLuminance(y) {
+        if (y <= 0.0001) return false;
+        if (y >= 0.45) return true;
+        return y >= 0.35;
+    }
+
     function updateThemeLuminanceCache() {
         try {
             const rootStyle = window.getComputedStyle(document.documentElement);
@@ -5731,17 +5757,30 @@ function validateUf2ForDevice(p, devInfo) {
                 accentParsed = isLight ? { r: 13, g: 68, b: 212 } : { r: 255, g: 224, b: 64 };
             }
 
+            themeLuminanceCache.bgR = bgParsed.r;
+            themeLuminanceCache.bgG = bgParsed.g;
+            themeLuminanceCache.bgB = bgParsed.b;
+            themeLuminanceCache.accentR = accentParsed.r;
+            themeLuminanceCache.accentG = accentParsed.g;
+            themeLuminanceCache.accentB = accentParsed.b;
+
             themeLuminanceCache.yBg = calcPerceivedLuminance(bgParsed.r, bgParsed.g, bgParsed.b);
             themeLuminanceCache.yAccent = calcPerceivedLuminance(accentParsed.r, accentParsed.g, accentParsed.b);
         } catch (e) {
             const isLight = document.documentElement.getAttribute("data-theme") === "light";
+            themeLuminanceCache.bgR = isLight ? 245 : 26;
+            themeLuminanceCache.bgG = isLight ? 245 : 26;
+            themeLuminanceCache.bgB = isLight ? 246 : 26;
+            themeLuminanceCache.accentR = isLight ? 13 : 255;
+            themeLuminanceCache.accentG = isLight ? 68 : 224;
+            themeLuminanceCache.accentB = isLight ? 212 : 64;
             themeLuminanceCache.yBg = isLight ? 0.961 : 0.102;
             themeLuminanceCache.yAccent = isLight ? 0.267 : 0.843;
         }
     }
 
     function syncAllTouchTextColors() {
-        const isDarkText = themeLuminanceCache.yBg > 0.35;
+        const isDarkText = isDarkTextForLuminance(themeLuminanceCache.yBg);
         for (let i = 1; i <= 32; i++) {
             const tc = tcs[i];
             if (tc && !tc.classList.contains("active")) {
@@ -5765,29 +5804,28 @@ function validateUf2ForDevice(p, devInfo) {
         // sensorMax 恒 255;「模拟结果」(level 1)沿用 round80 报送语义(MPR ×2 后 0-255)。
         const rawSession = rawReportOn && rawReportLevelCur === 2;
         const sensorMax = (perKeyIsMbr() || rawSession) ? 255 : 63;
-        const yBg = themeLuminanceCache.yBg;
-        const yAccent = themeLuminanceCache.yAccent;
+        const { bgR, bgG, bgB, accentR, accentG, accentB, yBg, yAccent } = themeLuminanceCache;
 
         for (let i = 1; i <= 32; i++) {
             const tc = tcs[i];
             if (!tc) continue;
             const v = data[i - 1];
             let on = false;
-            let op = "";
+            let alpha = 0.0;
             if (rawSession) {
-                // round86: 「原始结果」模式 —— 呈现传感器底层物理读数 (含未触碰时的 idle 底噪)
+                // round85: 「原始结果」模式 —— 真实呈现芯片物理层物理量,
+                // 无论是否达到判定线, 只要有读数就忠实显示数值与按压渐变!
+                on = v > 0;
                 if (perKeyIsMbr()) {
-                    // MBR3116: 依照原始触摸值 0-255 线性变化
-                    const noiseFloor = 130;
-                    on = v > noiseFloor;
+                    // MBR3116: 原生 0-255
                     if (on) {
-                        op = Math.min(1.0, Math.max(0.0, v / 255.0)).toFixed(2);
+                        alpha = Math.min(1.0, Math.max(0.0, v / 255.0));
                     }
                 } else {
                     // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度
                     on = v > 4;
                     if (on) {
-                        op = Math.min(1.0, Math.max(0.20, v / 100.0)).toFixed(2);
+                        alpha = Math.min(1.0, Math.max(0.20, v / 100.0));
                     }
                 }
                 tc.innerText = "" + v;
@@ -5799,12 +5837,12 @@ function validateUf2ForDevice(p, devInfo) {
                 if (on) {
                     if (perKeyIsMbr()) {
                         // MBR3116: 标准 128 二值判定满亮 1.00; 真实压力映射依照 0-255 线性变化
-                        if (v === 128) op = "1.00";
-                        else op = Math.min(1.0, Math.max(0.0, v / 255.0)).toFixed(2);
+                        if (v === 128) alpha = 1.0;
+                        else alpha = Math.min(1.0, Math.max(0.0, v / 255.0));
                     } else {
                         // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度 (标准128直接满亮)
-                        if (v === 128) op = "1.00";
-                        else op = Math.min(1.0, Math.max(0.20, v / 100.0)).toFixed(2);
+                        if (v === 128) alpha = 1.0;
+                        else alpha = Math.min(1.0, Math.max(0.20, v / 100.0));
                     }
                     tc.innerText = "" + v;
                 } else {
@@ -5812,16 +5850,29 @@ function validateUf2ForDevice(p, devInfo) {
                 }
             }
             tc.classList.toggle("active", on);
-            // round86d: 修复开始测试时按键背景板透明的问题: 未激活态必须清除 style.opacity,
-            // 恢复 CSS 默认完全不透明背景板; 仅在激活高亮态按压力度映射 style.opacity
-            tc.style.opacity = on ? op : "";
 
-            // 字体亮度自适应: 背景亮度 ≤ 35% 为白字, > 35% 为黑字
-            const curAlpha = on ? (op ? parseFloat(op) : 1.0) : 0.0;
-            const curY = (1.0 - curAlpha) * yBg + curAlpha * yAccent;
-            const isDarkText = curY > 0.35;
-            tc.classList.toggle("tc-text-dark", isDarkText);
-            tc.classList.toggle("tc-text-light", !isDarkText);
+            // 背景亮度压感解耦机制:
+            // 严禁用 tc.style.opacity 降低容器透明度 (会导致子文字与序号被 parent opacity 降权沦为灰色死区)
+            // 容器透明度保持 1 (不透明), 通过 backgroundColor 线性插值呈现真实的按压渐变色彩
+            if (on) {
+                const curR = Math.round((1.0 - alpha) * bgR + alpha * accentR);
+                const curG = Math.round((1.0 - alpha) * bgG + alpha * accentG);
+                const curB = Math.round((1.0 - alpha) * bgB + alpha * accentB);
+                tc.style.backgroundColor = `rgb(${curR}, ${curG}, ${curB})`;
+                tc.style.opacity = "";
+
+                // 计算当前混合后真实背景的感知亮度
+                const curY = calcPerceivedLuminance(curR, curG, curB);
+                const isDarkText = isDarkTextForLuminance(curY);
+                tc.classList.toggle("tc-text-dark", isDarkText);
+                tc.classList.toggle("tc-text-light", !isDarkText);
+            } else {
+                tc.style.backgroundColor = "";
+                tc.style.opacity = "";
+                // 未触碰状态: 严格遵循 L=0 纯白色, 低灰度低透明
+                tc.classList.remove("tc-text-dark");
+                tc.classList.add("tc-text-light");
+            }
 
             // round67/69: 压力模式(会话开关或游戏映射)下叠加当前生效阈值提示
             if (rawReportOn || perKeyGameRaw) {
@@ -5836,7 +5887,7 @@ function validateUf2ForDevice(p, devInfo) {
                 const aOn = (data[32] & (1 << i)) !== 0;
                 a.classList.toggle("active", aOn);
                 const curY = aOn ? yAccent : yBg;
-                const isDarkText = curY > 0.35;
+                const isDarkText = aOn ? isDarkTextForLuminance(curY) : false; // 未激活严格遵循 L=0 白字
                 a.classList.toggle("tc-text-dark", isDarkText);
                 a.classList.toggle("tc-text-light", !isDarkText);
             }
@@ -5844,23 +5895,24 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     function clearInputDisplay() {
-        const isDarkText = themeLuminanceCache.yBg > 0.35;
         for (let i = 1; i <= 32; i++) {
             const tc = tcs[i];
             if (tc) {
                 tc.innerText = "";
                 tc.classList.remove("active");
+                tc.style.backgroundColor = "";
                 tc.style.opacity = "";
-                tc.classList.toggle("tc-text-dark", isDarkText);
-                tc.classList.toggle("tc-text-light", !isDarkText);
+                // 未触碰状态: 纯白色低灰度低透明
+                tc.classList.remove("tc-text-dark");
+                tc.classList.add("tc-text-light");
             }
         }
         for (let i = 1; i <= 6; i++) {
             const a = airs[i];
             if (a) {
                 a.classList.remove("active");
-                a.classList.toggle("tc-text-dark", isDarkText);
-                a.classList.toggle("tc-text-light", !isDarkText);
+                a.classList.remove("tc-text-dark");
+                a.classList.add("tc-text-light");
             }
         }
     }
