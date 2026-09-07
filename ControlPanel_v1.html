@@ -5659,11 +5659,16 @@ function validateUf2ForDevice(p, devInfo) {
                 if (perKeyIsMbr()) {
                     const noiseFloor = 130;
                     on = v > noiseFloor;
-                    op = on ? Math.min(1, (v - noiseFloor) / (255 - noiseFloor)).toFixed(2) : "0.35";
+                    if (on) {
+                        op = Math.min(1, (v - noiseFloor) / (255 - noiseFloor));
+                        op = (0.35 + op * 0.65).toFixed(2);
+                    }
                 } else {
                     // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度
                     on = v > 4;
-                    op = Math.min(1.0, Math.max(0.0, v / 100.0)).toFixed(2);
+                    if (on) {
+                        op = Math.min(1.0, Math.max(0.20, v / 100.0)).toFixed(2);
+                    }
                 }
                 tc.innerText = "" + v;
             } else {
@@ -5674,11 +5679,11 @@ function validateUf2ForDevice(p, devInfo) {
                 if (on) {
                     if (perKeyIsMbr()) {
                         if (v === 128) op = "1.00";
-                        else op = Math.min(1, v / 255).toFixed(2);
-                        op = (0.35 + parseFloat(op) * 0.65).toFixed(2);
+                        else op = (0.35 + Math.min(1, v / 255) * 0.65).toFixed(2);
                     } else {
-                        // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度
-                        op = Math.min(1.0, v / 100.0).toFixed(2);
+                        // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度 (标准128直接满亮)
+                        if (v === 128) op = "1.00";
+                        else op = Math.min(1.0, Math.max(0.20, v / 100.0)).toFixed(2);
                     }
                     tc.innerText = "" + v;
                 } else {
@@ -5686,7 +5691,9 @@ function validateUf2ForDevice(p, devInfo) {
                 }
             }
             tc.classList.toggle("active", on);
-            tc.style.opacity = op;
+            // round86d: 修复开始测试时按键背景板透明的问题: 未激活态必须清除 style.opacity,
+            // 恢复 CSS 默认完全不透明背景板; 仅在激活高亮态按压力度映射 style.opacity
+            tc.style.opacity = on ? op : "";
             // round67/69: 压力模式(会话开关或游戏映射)下叠加当前生效阈值提示
             if (rawReportOn || perKeyGameRaw) {
                 const th = perKeyTouch[i - 1] || parseInt($("rgThTouch").value) || 6;
@@ -5812,6 +5819,7 @@ function validateUf2ForDevice(p, devInfo) {
             log("已暂停输入轮询");
             // round70b: 停止测试即关会话开关(0xC5 0);cfg2 bit1 持久基线不受影响
             if (rawReportOn) setRawReport(false);
+            clearInputDisplay();
         } else {
             if (!connected) { alert("需要先连接手台"); return; }
             if (configMode) { alert("配置模式下 HID 输入已暂停,请先退出配置模式"); return; }
