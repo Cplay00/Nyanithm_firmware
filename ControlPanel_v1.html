@@ -3026,6 +3026,31 @@ input[type="range"]:disabled {
     font-weight: var(--fw-semibold, 600);
 }
 
+/* ================================================================
+   输入测试字体显示效果优化:
+   当背景亮度≤35%时,字体颜色为白色;＞35%时,字体为黑色。
+   涵盖按键数字、::before 通道序号与 AIR 通道文字。
+   非配置模式(not .th-mode)下生效,保证配置模式下阈值参数高亮不被覆盖。
+   ================================================================ */
+.div_touch_channel:not(.th-mode).tc-text-light,
+.div_air.tc-text-light {
+    color: #ffffff !important;
+}
+.div_touch_channel:not(.th-mode).tc-text-light::before,
+.div_air.tc-text-light::after {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.div_touch_channel:not(.th-mode).tc-text-dark,
+.div_air.tc-text-dark {
+    color: #000000 !important;
+}
+.div_touch_channel:not(.th-mode).tc-text-dark::before,
+.div_air.tc-text-dark::after {
+    color: rgba(0, 0, 0, 0.85) !important;
+}
+
+
     </style>
     <script>
             (function earlyThemeLoad() {
@@ -5641,6 +5666,98 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }
 
+    // ================================================================
+    // 输入测试字体亮度与颜色自适应优化
+    // 规则: 背景亮度 ≤ 35% 时, 字体为白色; ＞ 35% 时, 字体为黑色
+    // ================================================================
+    let themeLuminanceCache = { yBg: 0.102, yAccent: 0.843 };
+
+    function parseCssColor(str) {
+        if (!str) return null;
+        str = str.trim();
+        if (str.startsWith("#")) {
+            let hex = str.slice(1);
+            if (hex.length === 3) {
+                hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+            }
+            if (hex.length >= 6) {
+                return {
+                    r: parseInt(hex.slice(0, 2), 16),
+                    g: parseInt(hex.slice(2, 4), 16),
+                    b: parseInt(hex.slice(4, 6), 16)
+                };
+            }
+        }
+        const m = str.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+        if (m) {
+            return {
+                r: parseInt(m[1], 10),
+                g: parseInt(m[2], 10),
+                b: parseInt(m[3], 10)
+            };
+        }
+        return null;
+    }
+
+    function calcPerceivedLuminance(r, g, b) {
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+    }
+
+    function updateThemeLuminanceCache() {
+        try {
+            const rootStyle = window.getComputedStyle(document.documentElement);
+            const isLight = document.documentElement.getAttribute("data-theme") === "light";
+            
+            // 尝试从 CSS 变量或元素采样背景色与高亮色
+            let bgParsed = null;
+            const tcSample = tcs[1] || document.querySelector(".div_touch_channel");
+            if (tcSample) {
+                const computedBg = window.getComputedStyle(tcSample).backgroundColor;
+                bgParsed = parseCssColor(computedBg);
+            }
+            if (!bgParsed) {
+                const surfaceVar = rootStyle.getPropertyValue("--c-surface-2") || rootStyle.getPropertyValue("--c-surface-1");
+                bgParsed = parseCssColor(surfaceVar);
+            }
+            
+            const accentVar = rootStyle.getPropertyValue("--c-accent");
+            let accentParsed = parseCssColor(accentVar);
+
+            // 兜底值保障
+            if (!bgParsed) {
+                bgParsed = isLight ? { r: 245, g: 245, b: 246 } : { r: 26, g: 26, b: 26 };
+            }
+            if (!accentParsed) {
+                accentParsed = isLight ? { r: 13, g: 68, b: 212 } : { r: 255, g: 224, b: 64 };
+            }
+
+            themeLuminanceCache.yBg = calcPerceivedLuminance(bgParsed.r, bgParsed.g, bgParsed.b);
+            themeLuminanceCache.yAccent = calcPerceivedLuminance(accentParsed.r, accentParsed.g, accentParsed.b);
+        } catch (e) {
+            const isLight = document.documentElement.getAttribute("data-theme") === "light";
+            themeLuminanceCache.yBg = isLight ? 0.961 : 0.102;
+            themeLuminanceCache.yAccent = isLight ? 0.267 : 0.843;
+        }
+    }
+
+    function syncAllTouchTextColors() {
+        const isDarkText = themeLuminanceCache.yBg > 0.35;
+        for (let i = 1; i <= 32; i++) {
+            const tc = tcs[i];
+            if (tc && !tc.classList.contains("active")) {
+                tc.classList.toggle("tc-text-dark", isDarkText);
+                tc.classList.toggle("tc-text-light", !isDarkText);
+            }
+        }
+        for (let i = 1; i <= 6; i++) {
+            const a = airs[i];
+            if (a && !a.classList.contains("active")) {
+                a.classList.toggle("tc-text-dark", isDarkText);
+                a.classList.toggle("tc-text-light", !isDarkText);
+            }
+        }
+    }
+
     function renderInput(data) {
         // round71: MPR121 原生压力 0-63, 按 (0,63] 线性映射才不会满按只有一半亮度;
         // MBR3116 原生 0-255。未开真实压力会话时固件输出恒定 128 判定帧,直接给最高亮度。
@@ -5648,6 +5765,9 @@ function validateUf2ForDevice(p, devInfo) {
         // sensorMax 恒 255;「模拟结果」(level 1)沿用 round80 报送语义(MPR ×2 后 0-255)。
         const rawSession = rawReportOn && rawReportLevelCur === 2;
         const sensorMax = (perKeyIsMbr() || rawSession) ? 255 : 63;
+        const yBg = themeLuminanceCache.yBg;
+        const yAccent = themeLuminanceCache.yAccent;
+
         for (let i = 1; i <= 32; i++) {
             const tc = tcs[i];
             if (!tc) continue;
@@ -5695,6 +5815,14 @@ function validateUf2ForDevice(p, devInfo) {
             // round86d: 修复开始测试时按键背景板透明的问题: 未激活态必须清除 style.opacity,
             // 恢复 CSS 默认完全不透明背景板; 仅在激活高亮态按压力度映射 style.opacity
             tc.style.opacity = on ? op : "";
+
+            // 字体亮度自适应: 背景亮度 ≤ 35% 为白字, > 35% 为黑字
+            const curAlpha = on ? (op ? parseFloat(op) : 1.0) : 0.0;
+            const curY = (1.0 - curAlpha) * yBg + curAlpha * yAccent;
+            const isDarkText = curY > 0.35;
+            tc.classList.toggle("tc-text-dark", isDarkText);
+            tc.classList.toggle("tc-text-light", !isDarkText);
+
             // round67/69: 压力模式(会话开关或游戏映射)下叠加当前生效阈值提示
             if (rawReportOn || perKeyGameRaw) {
                 const th = perKeyTouch[i - 1] || parseInt($("rgThTouch").value) || 6;
@@ -5704,14 +5832,36 @@ function validateUf2ForDevice(p, devInfo) {
         }
         for (let i = 0; i < 6; i++) {
             const a = airs[i + 1];
-            if (a) a.classList.toggle("active", (data[32] & (1 << i)) !== 0);
+            if (a) {
+                const aOn = (data[32] & (1 << i)) !== 0;
+                a.classList.toggle("active", aOn);
+                const curY = aOn ? yAccent : yBg;
+                const isDarkText = curY > 0.35;
+                a.classList.toggle("tc-text-dark", isDarkText);
+                a.classList.toggle("tc-text-light", !isDarkText);
+            }
         }
     }
 
     function clearInputDisplay() {
+        const isDarkText = themeLuminanceCache.yBg > 0.35;
         for (let i = 1; i <= 32; i++) {
             const tc = tcs[i];
-            if (tc) { tc.innerText = ""; tc.classList.remove("active"); tc.style.opacity = ""; }
+            if (tc) {
+                tc.innerText = "";
+                tc.classList.remove("active");
+                tc.style.opacity = "";
+                tc.classList.toggle("tc-text-dark", isDarkText);
+                tc.classList.toggle("tc-text-light", !isDarkText);
+            }
+        }
+        for (let i = 1; i <= 6; i++) {
+            const a = airs[i];
+            if (a) {
+                a.classList.remove("active");
+                a.classList.toggle("tc-text-dark", isDarkText);
+                a.classList.toggle("tc-text-light", !isDarkText);
+            }
         }
     }
 
@@ -8722,6 +8872,13 @@ function validateUf2ForDevice(p, devInfo) {
     // round71 终审: THEME TOGGLE 是独立顶层 IIFE, 看不到本作用域的 syncLedDefaultColor;
     // 经 window 桥接(视觉审查发现的 ReferenceError 被空 catch 吞掉导致联动失效)。
     window.__syncLedDefaultColor = syncLedDefaultColor;
+    // 输入测试字体亮度与主题联动桥接
+    window.__updateThemeLuminance = () => {
+        updateThemeLuminanceCache();
+        syncAllTouchTextColors();
+    };
+    updateThemeLuminanceCache();
+    syncAllTouchTextColors();
     setHwVer(1, true);
     updateTofVisibility();
     updateTouchUi();
@@ -8795,6 +8952,8 @@ function validateUf2ForDevice(p, devInfo) {
     // 初始默认色会 stale 一拍——应用主题后补一次对齐(send=false 仅刷取色器/预览)。
     try { if (typeof window.__syncLedDefaultColor === "function") window.__syncLedDefaultColor(false); }
     catch (e) { /* 桥接未就绪时忽略,首次切换主题后自愈 */ }
+    try { if (typeof window.__updateThemeLuminance === "function") window.__updateThemeLuminance(); }
+    catch (e) { /* 桥接未就绪时忽略 */ }
 
     let isTransitioning = false;
     toggle.addEventListener('click', () => {
@@ -8808,6 +8967,13 @@ function validateUf2ForDevice(p, devInfo) {
         document.body.classList.add('theme-transition');
         document.documentElement.setAttribute('data-theme', newTheme);
         localStorage.setItem('theme', newTheme);
+
+        // 主题切换后立即同步输入测试字体亮度颜色映射
+        try {
+            if (typeof window.__updateThemeLuminance === "function") {
+                window.__updateThemeLuminance();
+            }
+        } catch (e) {}
 
         // round71: 主题切换后 Light Test 默认准备色跟随新主题 accent;
         // 已连接且未在输入轮询/动画中时补发一次,让灯条即时跟随。
