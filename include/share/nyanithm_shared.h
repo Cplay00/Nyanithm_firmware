@@ -133,8 +133,9 @@ typedef enum {
     CMD_FLASH_DIAG = 0xCD,      // round78c: 刷写结局诊断,回 [0xCD][code][rc][gap u32 LE];仅事后查询
     // round88: MBR3116 单传感器调试数据读取(仅配置模式受理)。需固件 >= 1.6.5。
     // 主机必须分两次 write -- 先 [0xC7], 再 2B 载荷 [addr][sensor](与 CFG_SET /
-    // 0xC6 双写铁律同源, 单次合并写会被 stdio/TinyUSB 路径吞读载荷)。白名单同
-    // 0xBA(0x37/0x40-0x44), sensor 合法区间 0-15(TRM SENSOR_ID 0x82)。
+    // 0xC6 双写铁律同源, 单次合并写会被 stdio/TinyUSB 路径吞读载荷)。地址白名单
+    // 0x40-0x44(0x37 工装地址不受理, 固件驱动对象无此构造地址), sensor 合法
+    // 区间 0-15(TRM SENSOR_ID 0x82)。
     // 固件写 SENSOR_ID -> 泵等待一个扫描周期(~30ms) -> 突发读调试区
     // 0xDB..0xE7 共 13 字节 -> SYNC1(0xDB)==SYNC2(0xE7) 且 DEBUG_SENSOR_ID
     // (0xDC)==sensor 校验通过后回 11 字节二进制(全小端):
