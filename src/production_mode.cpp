@@ -10,6 +10,7 @@
 #include <cy8cmbr3116_cfg.h>
 
 #include <hardware/watchdog.h>
+#include <pico/stdlib.h>
 #include <production_mode.h>
 #include <stdio.h>
 #include <tusb.h>
@@ -27,20 +28,75 @@ bool detect3116(uint8_t addr) {
 }
 
 void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
+    // round88 烧录序列修正(逐条对标 TRM):
+    // - TRM §1.5.80 CTRL_CMD: 设备在启动和命令完成时把该寄存器清零, 主机只能
+    //   在其值为 0 时写入; 非零时写入行为未定义。旧代码连写两次 0x02 属违例,
+    //   改为单次写入 + 轮询 0x86 归零判完成(官方语义, 取代盲等)。
+    // - TRM §1.5.81/§1.5.82: 完成后读 0x88 bit0 判 ERR(0=成功); 出错再读
+    //   0x89 取错误码(0x00 成功 / 0xFD Flash 写失败 / 0xFE 配置 CRC 不符 /
+    //   0xFF 命令无效)。出错绝不发 0xFF 软复位, 避免芯片带着坏配置复位。
+    // - Datasheet 时序参数: NVM 写入命令执行最长 ~220ms, 轮询上限 500ms 覆盖;
+    //   期间泵 tud_task + watchdog(本函数在配置模式 Core0 调用, 看门狗无人喂)。
+    // - 软复位(0xFF)后芯片需重新启动(读 Flash/CRC/校准基线), I2C 短暂 NAK;
+    //   轮询探测恢复后再返回, 后续 verify 读回不再撞首击 NAK。
     for (uint8_t i = 0; i < 128; i++) {
         uint8_t buf[2] = { i, cfg[i] };
         i2c_write(0, addr, buf, 2, true);
     }
-    uint8_t buf[2] = { CTRL_CMD_ADDRESS, 0x02 };  // 给CTRL_CMD发送命令，检查CRC并保存，地址0x86，写入2
+    uint8_t reg = CTRL_CMD_ADDRESS;
+    uint8_t cur = 0;
+    if (i2c_write(0, addr, &reg, 1, true) == 1) {
+        i2c_read(0, addr, &cur, 1, true);
+    }
+    if (cur != 0) {
+        // 前一命令未完成, 此刻写 0x86 行为未定义(TRM §1.5.80) -- 放弃本次烧录
+        printf("CTRL_CMD busy (0x%02X), burn aborted.\n", cur);
+        return;
+    }
+    uint8_t buf[2] = { CTRL_CMD_ADDRESS, 0x02 };  // 校验 CRC 并保存配置到 NVM
     i2c_write(0, addr, buf, 2, true);
-    sleep_ms(10);
-
-    buf[1] = 0x02;  // 应用设置
+    bool done = false;
+    for (int i = 0; i < 50 && !done; i++) {  // 50 x 10ms = 500ms 上限
+        tud_task();
+        watchdog_update();
+        sleep_ms(10);
+        reg = CTRL_CMD_ADDRESS;
+        if (i2c_write(0, addr, &reg, 1, true) == 1 &&
+            i2c_read(0, addr, &cur, 1, true) == 1 && cur == 0) {
+            done = true;
+        }
+    }
+    if (!done) {
+        printf("CTRL_CMD timeout, burn aborted.\n");
+        return;
+    }
+    uint8_t status = 0;
+    reg = 0x88;  // CTRL_CMD_STATUS: bit0 ERR
+    if (i2c_write(0, addr, &reg, 1, true) == 1 &&
+        i2c_read(0, addr, &status, 1, true) == 1 && (status & 0x01)) {
+        uint8_t err = 0;
+        reg = 0x89;  // CTRL_CMD_ERR
+        i2c_write(0, addr, &reg, 1, true);
+        i2c_read(0, addr, &err, 1, true);
+        printf("burn error: status=0x%02X err=0x%02X%s%s\n", status, err,
+               err == 0xFD ? " (flash write failed)" : "",
+               err == 0xFE ? " (config CRC mismatch)" : "");
+        return;  // 出错不发软复位
+    }
+    buf[1] = 0xFF;  // 软复位, 新配置生效
     i2c_write(0, addr, buf, 2, true);
-
-    buf[1] = 0xff;  // 软复位
-    i2c_write(0, addr, buf, 2, true);
-    sleep_ms(10);
+    // 复位后启动延时: 轮询探测 I2C 恢复(最长 200ms), 期间泵 USB/看门狗
+    for (int i = 0; i < 20; i++) {
+        tud_task();
+        watchdog_update();
+        sleep_ms(10);
+        reg = I2C_ADDR_ADDRESS;
+        uint8_t a = 0;
+        if (i2c_write(0, addr, &reg, 1, true) == 1 &&
+            i2c_read(0, addr, &a, 1, true) == 1 && a == addr) {
+            break;
+        }
+    }
 }
 
 // round75: post-burn read-back for the panel 0xBA path. After the soft

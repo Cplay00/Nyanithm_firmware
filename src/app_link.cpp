@@ -22,6 +22,10 @@
 #include <stdio.h>
 #include <tusb.h>
 
+// round88: 0xC7 调试区突发读的寄存器窗口(TRM §1.5.121-1.5.128):
+// SYNC_COUNTER1(0xDB) .. SYNC_COUNTER2(0xE7), 中段含 16-bit 小端字段。
+#define MBR_DEBUG_SYNC1 0xDB
+
 bool hid_working = true;
 
 extern bool useMuxScan;  // from hw_devices.cpp
@@ -315,6 +319,69 @@ void handleCommand() {
             // 计时器(lastCmdMs 已在 getchar() 后更新),不回显任何字节,避免
             // 污染面板的文本/字节响应流。旧固件收到 0xC3 会回 "unknown
             // command",面板侧需容忍(见面板心跳注释)。
+        } else if (cmd == CMD_MBR3116_DEBUG) {
+            // round88: MBR3116 单传感器调试读数(0xC7)。双写铁律: [0xC7] 与
+            // 2B 载荷 [addr][sensor] 分两次到达(readCdcPayload 泵语义同 0xBA)。
+            // 流程对齐 TRM §1.5.79 SENSOR_ID: 写 SENSOR_ID(0x82)=sensor, 等
+            // 芯片完成一个扫描周期把该传感器数据锁入调试区, 再突发读
+            // 0xDB..0xE7(13B) 并校验 SYNC1(0xDB)==SYNC2(0xE7) 且
+            // DEBUG_SENSOR_ID(0xDC)==sensor, 防止读到撕裂/陈旧帧。
+            uint8_t pay[2];
+            if (readCdcPayload(pay, (int)sizeof(pay), 500)) {
+                uint8_t address = pay[0];
+                uint8_t sensor = pay[1];
+                if ((address >= 0x40 && address <= 0x44) && sensor <= 15) {
+                    // 驱动对象按构造地址映射: 0x40/0x41/0x42 = v1 布局主控,
+                    // 0x43/0x44 = v2 布局双主控(注意 v1 板上 0x43/0x44 与
+                    // 0x40-0x42 是同一物理芯片的不同 NVM 地址方案, 0xBC 探测
+                    // 决定实际在位者, 错址时 I2C NAK -> 回文本行, 安全)。
+                    CY8CMBR3116* chip = (address == 0x41) ? &MBR3116B
+                        : (address == 0x42) ? &MBR3116C
+                        : (address == 0x43) ? &MBR3116D : &MBR3116E;
+                    if (address == 0x40) chip = &MBR3116A;
+                    uint8_t sid[1] = { sensor };
+                    if (chip->set_SENSOR_ID(sid) != 0) {
+                        printf("3116 debug fail\n");
+                        continue;
+                    }
+                    // 一个扫描周期(REFRESH_INTERVAL 最小 20ms)后调试区才反映
+                    // 该传感器; 泵 tud_task + watchdog 等待, 不用阻塞 sleep。
+                    uint32_t t0 = to_ms_since_boot(get_absolute_time());
+                    while (to_ms_since_boot(get_absolute_time()) - t0 < 40) {
+                        tud_task();
+                        watchdog_update();
+                        sleep_ms(1);
+                    }
+                    uint8_t dbg[13];
+                    if (chip->requestDataFromAddress(MBR_DEBUG_SYNC1, sizeof(dbg), dbg) == 0 &&
+                        dbg[0] == dbg[12] && dbg[1] == sensor) {
+                        uint8_t out[11];
+                        out[0] = CMD_MBR3116_DEBUG;
+                        out[1] = address;
+                        out[2] = sensor;
+                        out[3] = dbg[0];                       // SYNC_COUNTER
+                        out[4] = dbg[2];                       // DEBUG_CP
+                        out[5] = dbg[3];                       // DIFFERENCE_COUNT LSB
+                        out[6] = dbg[4];                       // DIFFERENCE_COUNT MSB
+                        out[7] = dbg[5];                       // BASELINE LSB
+                        out[8] = dbg[6];                       // BASELINE MSB
+                        out[9] = dbg[7];                       // RAW_COUNT LSB
+                        out[10] = dbg[8];                      // RAW_COUNT MSB
+                        uint32_t total = 0;
+                        while (total < sizeof(out)) {
+                            tud_task();
+                            tud_cdc_write_flush();
+                            total += tud_cdc_write(out + total, (uint32_t)(sizeof(out) - total));
+                        }
+                        tud_task();
+                        tud_cdc_write_flush();
+                    } else {
+                        printf("3116 debug fail\n");
+                    }
+                } else {
+                    printf("mbrdebug: address 0x%02X / sensor %u not allowed.\n", address, sensor);
+                }
+            }
         } else if (cmd == 0xCE) {
             // round46g: dump config-mode command log: [1B len][len bytes oldest->newest]
             uint16_t n = (cfgCmdLogTotal < 256) ? cfgCmdLogTotal : 256;

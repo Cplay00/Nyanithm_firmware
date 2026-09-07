@@ -28,6 +28,10 @@ extern MPR121 mpr2;
 extern CY8CMBR3116 MBR3116A;
 extern CY8CMBR3116 MBR3116B;
 extern CY8CMBR3116 MBR3116C;
+// round88: v2 布局(hw3/hw4)双主控 0x43/0x44(此前仅 hw_devices.cpp 内部可见,
+// 0xC7 调试通道按白名单地址取对象需要 extern)。
+extern CY8CMBR3116 MBR3116D;
+extern CY8CMBR3116 MBR3116E;
 
 extern PCA954X mux0;
 

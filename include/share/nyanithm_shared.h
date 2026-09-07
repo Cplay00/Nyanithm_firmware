@@ -17,7 +17,7 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.4-beta1"
+#define NYANITHM_FW_VERSION "1.6.5"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -131,6 +131,20 @@ typedef enum {
                                 // "3116 read fail\n"。仅配置模式受理, 需固件
                                 // >= 1.6.2-beta1。
     CMD_FLASH_DIAG = 0xCD,      // round78c: 刷写结局诊断,回 [0xCD][code][rc][gap u32 LE];仅事后查询
+    // round88: MBR3116 单传感器调试数据读取(仅配置模式受理)。需固件 >= 1.6.5。
+    // 主机必须分两次 write -- 先 [0xC7], 再 2B 载荷 [addr][sensor](与 CFG_SET /
+    // 0xC6 双写铁律同源, 单次合并写会被 stdio/TinyUSB 路径吞读载荷)。白名单同
+    // 0xBA(0x37/0x40-0x44), sensor 合法区间 0-15(TRM SENSOR_ID 0x82)。
+    // 固件写 SENSOR_ID -> 泵等待一个扫描周期(~30ms) -> 突发读调试区
+    // 0xDB..0xE7 共 13 字节 -> SYNC1(0xDB)==SYNC2(0xE7) 且 DEBUG_SENSOR_ID
+    // (0xDC)==sensor 校验通过后回 11 字节二进制(全小端):
+    //   [0]=0xC7 回显 [1]=addr [2]=sensor [3]=SYNC_COUNTER
+    //   [4]=DEBUG_CP(pF 原值) [5..6]=DIFFERENCE_COUNT [7..8]=BASELINE
+    //   [9..10]=RAW_COUNT (0xE4 AVG_RAW_COUNT 不回传, 面板如需可后续扩展)
+    // 校验失败或 I2C 错误回文本行 "3116 debug fail\n"(按首字节 0xC7 与长度区分)。
+    // 用途: 悬空/触摸定标(diff 与悬空高度单调相关, 实测 2mm≈255 饱和,
+    // 10mm≈0), 配合面板寄存器悬浮窗实时读数区使用。
+    CMD_MBR3116_DEBUG = 0xC7,
 } NyanithmCmd;
 
 #endif
