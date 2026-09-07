@@ -5018,21 +5018,22 @@ function validateUf2ForDevice(p, devInfo) {
                 else if (i === 16) idleBias = 6;  // 坏键 B(中等)
                 const base = 6 + 2 * (0.5 + 0.5 * Math.sin(t * 2.1 + i * 1.7));
                 let v = base + idleBias + 3 * (0.5 + 0.5 * Math.sin(t * 3 + i));
-                // rawReport=false(普通轮询演示): 高斯扫模拟划键,叠加坏键偏置;
-                // rawReport=true(校准会话): 纯静止 idle(用户手应离开), 两阶段都真实。
-                if (gameRawOn) {
-                    // 游戏映射模式: 按下=映射值(×2 clamp 255, round80), 释放=0
+                // round86: level 2=原始物理层直报(含 idle 噪底);
+                // level 1(模拟结果) 或 level 0(常规游戏): 呈现设备在游戏中的实际输入结果!
+                // 未触发判定恒为 0; 触发时若开启真实压力(gameRawOn)输出动态压力, 否则输出 128 标准判定。
+                if (this.rawReport === 2) {
+                    f[i] = Math.round(Math.min(255, v));
+                } else {
                     const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
-                    v = (bump > 0.3) ? Math.min(255, Math.round(v * 2)) : 0;
-                } else if (this.rawReport === 0) {
-                    const bump = Math.exp(-Math.pow(((t * 6) % 32) - i, 2) / 6);
-                    v += bump * 44;
-                } else if (!simMbr && this.rawReport === 1) {
-                    // round80/85: 面板会话 level 1(模拟), MPR 固件报送 ×2;
-                    // level 2(原始)直报未缩放值, MPR/MBR 两档 MBR 均等价。
-                    v = Math.min(255, v * 2);
+                    const pressed = (bump > 0.35);
+                    if (!pressed) {
+                        f[i] = 0;
+                    } else if (gameRawOn) {
+                        f[i] = Math.min(255, Math.round(v * 2));
+                    } else {
+                        f[i] = 128;
+                    }
                 }
-                f[i] = Math.round(Math.min(255, v));
             }
             f[32] = (Math.sin(t * 1.7) > 0 ? 0b001100 : 0) | (Math.sin(t * 0.9) > 0.6 ? 0b110000 : 0);
             return f;
@@ -5086,6 +5087,23 @@ function validateUf2ForDevice(p, devInfo) {
             });
             if (portArg) {
                 port = portArg;
+            } else if (manual) {
+                // round86 #10: 强制手动选择设备(长按触发)。
+                // 绝不受 lastPort 干扰, 无条件调用 requestPort 弹出系统设备选择列表!
+                try {
+                    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: NYAN_VID, usbProductId: NYAN_PID }] });
+                } catch (e1) {
+                    if (e1.name === "NotFoundError" || e1.name === "AbortError" || (e1.message && e1.message.includes("No port selected"))) {
+                        log("已取消串口选择", "info");
+                        return false;
+                    }
+                    try {
+                        port = await navigator.serial.requestPort({});
+                    } catch (e2) {
+                        log("已取消串口选择", "info");
+                        return false;
+                    }
+                }
             } else {
                 let lastPort = null;
                 if (nyList.length > 0) {
@@ -5093,30 +5111,31 @@ function validateUf2ForDevice(p, devInfo) {
                     lastPort = (lastIdx >= 0 && lastIdx < nyList.length) ? nyList[lastIdx] : null;
                     if (nyList.length === 1) lastPort = nyList[0];
                 }
-                // round86 审查修复(P3): 记忆的端口可能已拔出(重枚举后失效) --
-                // open() 失败时清掉记忆并回退到常规选口路径, 不要求用户知道长按手势。
-                // early-open 成功时标记 alreadyOpen, 统一 open 处跳过(二次 open 抛
-                // InvalidStateError)。
                 let alreadyOpen = false;
-                if (!manual && lastPort) {
+                if (lastPort) {
                     try {
                         await lastPort.open({ baudRate: 115200, bufferSize: 8192 });
                         port = lastPort;
                         alreadyOpen = true;
                     } catch (eOpen) {
                         localStorage.removeItem("nyanithm.lastPortIdx");
-                        log("上次连接的设备未能打开(可能已更换/重枚举),请选择串口...", "warn");
+                        log("上次连接的设备未能直接打开(可能已更换/重枚举), 正在打开选择列表...", "warn");
                         lastPort = null;
                     }
                 }
                 if (!port) {
-                    if (!lastPort) {
+                    try {
+                        port = await navigator.serial.requestPort({ filters: [{ usbVendorId: NYAN_VID, usbProductId: NYAN_PID }] });
+                    } catch (e1) {
+                        if (e1.name === "NotFoundError" || e1.name === "AbortError" || (e1.message && e1.message.includes("No port selected"))) {
+                            log("已取消串口选择", "info");
+                            return false;
+                        }
                         try {
-                            port = await navigator.serial.requestPort({ filters: [{ usbVendorId: NYAN_VID, usbProductId: NYAN_PID }] });
-                        } catch (e1) {
-                            if (manual) throw e1;  // 手动选择被取消:不打扰,直接返回
-                            log("未自动匹配到设备,请手动选择串口...", "warn");
                             port = await navigator.serial.requestPort({});
+                        } catch (e2) {
+                            log("已取消串口选择", "info");
+                            return false;
                         }
                     }
                 }
@@ -5633,16 +5652,30 @@ function validateUf2ForDevice(p, devInfo) {
             const tc = tcs[i];
             if (!tc) continue;
             const v = data[i - 1];
-            const on = v > 0;
-            tc.classList.toggle("active", on);
+            let on = false;
             let op = "";
-            if (on) {
-                if (!rawReportOn && !perKeyGameRaw && v === 128) op = "1.00";
-                else op = Math.min(1, v / sensorMax) .toFixed(2);
-                op = (0.35 + parseFloat(op) * 0.65).toFixed(2);
+            if (rawSession) {
+                // round86: 「原始结果」模式 —— 呈现传感器底层物理读数 (含未触碰时的 idle 底噪)
+                const noiseFloor = perKeyIsMbr() ? 130 : 6;
+                on = v > noiseFloor;
+                op = on ? Math.min(1, (v - noiseFloor) / (sensorMax - noiseFloor)).toFixed(2) : "0.35";
+                tc.innerText = "" + v;
+            } else {
+                // round86: 「模拟结果」模式 —— 以设备在游戏中的真实结果的模拟!
+                // 未触发判定 (v === 0) 恒为未激活, 文字清空;
+                // 触发判定 (v > 0) 激活高亮, 呈现游戏中的实际输入结果 (128 标准判定或真实压力映射)
+                on = v > 0;
+                if (on) {
+                    if (v === 128) op = "1.00";
+                    else op = Math.min(1, v / 255).toFixed(2);
+                    op = (0.35 + parseFloat(op) * 0.65).toFixed(2);
+                    tc.innerText = "" + v;
+                } else {
+                    tc.innerText = "";
+                }
             }
+            tc.classList.toggle("active", on);
             tc.style.opacity = op;
-            tc.innerText = "" + v;
             // round67/69: 压力模式(会话开关或游戏映射)下叠加当前生效阈值提示
             if (rawReportOn || perKeyGameRaw) {
                 const th = perKeyTouch[i - 1] || parseInt($("rgThTouch").value) || 6;
@@ -5789,8 +5822,8 @@ function validateUf2ForDevice(p, devInfo) {
         const raw = inputRawMode === 2;
         btn.textContent = raw ? "原始结果" : "模拟结果";
         btn.title = raw
-            ? "当前显示设备报送的原始压力值(传感器物理读数)。点击切换为模拟结果。"
-            : "当前显示固件最终报送值(MPR 经 ×2 报送管线; MBR 与原始值相同)。点击切换为原始结果。";
+            ? "当前显示传感器物理层读数(含未触碰时的底噪)。点击切换为模拟结果。"
+            : "当前显示以设备在游戏中的真实结果的模拟(未触发判定为 0, 触发呈现游戏实际输入)。点击切换为原始结果。";
         btn.classList.toggle("btn-primary", !raw);   // 模拟档高亮提示当前非默认
         btn.classList.toggle("btn-ghost", raw);      // 原始档(默认)低调展示
     }
@@ -6737,14 +6770,12 @@ function validateUf2ForDevice(p, devInfo) {
 
         // 收集即弃: inputLoop 每帧把最新帧放 latestInputData, 这里直接读共享变量
         const probeInputFn = () => latestInputData;
-        // round80: 固件对 MPR 实时压力 ×2 报送(clamp 255)。阈值建议必须落在
-        // 原生阈值尺度(th_touch 1-63 / 逐键同), 否则建议值整体翻倍且被 63
-        // 钳顶。MPR 采样时减半折算回原生尺度; MBR 原生 0-255 不折算。
-        // round86 审查修复(P2): 尺度/区间按「校准路由」而非表单勾选 --
-        // 路由走 MPR 校准时(即使表单勾了 3116)必须按 MPR ×2 报送折算与
-        // MPR 逐键区间, 否则建议值整体翻倍且钳位在错误域。
+        // round86: 校准采样统一走 level 2 (原始物理读数, 未缩放原生尺度),
+        // 这样 MPR (0-63) 和 MBR (0-255) 均直接采样原生物理读数, 避免折算失真,
+        // calScale 统一为 1.
         const calUseMbr = calRouteMbr;
-        const calScale = calUseMbr ? 1 : 0.5;
+        const calScale = 1;
+        const calPrevMode = inputRawMode;
 
         let aborted = false;
         try {
@@ -6754,7 +6785,7 @@ function validateUf2ForDevice(p, devInfo) {
             $("calRunHint").textContent = "第一轮：请静置，不要触碰触摸板";
 
             log("--- 一键校准 Phase 1: 请离开滑条 20s ---");
-            await setRawReport(true);
+            await setRawReportMode(2);
             const phase1Start = performance.now();
             while ((performance.now() - phase1Start) / 1000 < ph1) {
                 if (calAbort) { aborted = true; break; }
@@ -6856,11 +6887,6 @@ function validateUf2ForDevice(p, devInfo) {
                     : "<div style='margin-top:8px'>所有键建议继承全局阈值</div>",
                 "<div style='margin-top:10px' class='cal-report-note'>点击「确认并开始修改」将自动进入配置模式并填入上述建议值，保存并重启后生效。</div>",
             ];
-            // round80: MPR 实时压力为固件 ×2 报送尺度, 报告里的 idleMax/touchMin
-            // 已折算回原生阈值尺度——提示用户两处数字不同属预期。
-            if (!calUseMbr) {
-                lines.splice(2, 0, "<div style='margin-top:6px' class='cal-report-note'>注: INPUT TEST 实时压力显示为固件 ×2 报送尺度，本报告数值已折算回原生阈值尺度。</div>");
-            }
             $("calReportBody").innerHTML = lines.join("");
             calShowScreen("calScreenResult");
             log("--- 一键校准完成: 请查看报告并确认 ---");
@@ -6870,7 +6896,8 @@ function validateUf2ForDevice(p, devInfo) {
         } finally {
             calRunning = false;
             if ($("calWizardStart")) $("calWizardStart").disabled = false;
-            await setRawReport(false);
+            // round86: 校准退出恢复用户原本的报送模式偏好
+            await setRawReportMode(calPrevMode);
         }
     }
 
@@ -8403,39 +8430,60 @@ function validateUf2ForDevice(p, devInfo) {
     // ================================================================
     // 连接 / 断开
     // ================================================================
-    // round86 #10: 连接串口单击/长按分流。单击=自动回连上次设备(含已授权
-    // 单设备直连);长按 ≥600ms=强制弹系统串口选择列表手动挑选。
-    // 实现: pointerdown 启动 600ms 定时器,到点置 manualPicker 并震动反馈;
-    // pointerup/leave 在 600ms 内到达则按单击处理。已连接时任何按压=断开。
+    // round86 #10: 连接串口单击/长按分流。
+    // 单击 = 自动回连上次设备(含已授权单设备直连);
+    // 长按 ≥500ms = 直接在长按触发的瞬间弹出系统设备选择列表, 无需松手。
     (() => {
         const btn = $("connectBtn");
-        let pressTimer = null, longFired = false;
-        const LONG_MS = 600;
-        btn.addEventListener("pointerdown", () => {
-            if (connected) return;  // 已连接: click 统一走断开
-            longFired = false;
-            pressTimer = setTimeout(() => { longFired = true; pressTimer = null; }, LONG_MS);
+        let pressTimer = null, longHandled = false;
+        const LONG_MS = 500;
+
+        btn.addEventListener("contextmenu", (e) => {
+            // 防止触屏长按触发右键上下文菜单截胡
+            e.preventDefault();
         });
-        // round86 审查修复(P3): longFired 在按压结束(含超时后移出/松开)时复位,
-        // 防止长按后移出按钮再松手, longFired 残留到下一次无关单击误弹选口列表。
+
+        btn.addEventListener("pointerdown", (e) => {
+            if (connected) return;  // 已连接: click 统一走断开
+            if (e.button !== undefined && e.button !== 0) return; // 仅限主按键/触屏单指
+            longHandled = false;
+            pressTimer = setTimeout(async () => {
+                pressTimer = null;
+                longHandled = true;  // 标记本次交互已由长按接管
+                btn.classList.remove("pressing");
+                log("检测到长按手势, 正在打开设备选择器...", "info");
+                const ok = await openPort(null, false, { manualPicker: true });
+                if (ok) {
+                    log("已连接手动选择的设备");
+                    setStatus("串口已连接", "");
+                    await autoHandshake();
+                    await normalModeProbe();
+                    await startInputPolling();
+                }
+            }, LONG_MS);
+            btn.classList.add("pressing");
+        });
+
         const cancelPress = () => {
             if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+            btn.classList.remove("pressing");
         };
         btn.addEventListener("pointerup", cancelPress);
         btn.addEventListener("pointerleave", cancelPress);
-        btn.addEventListener("pointercancel", () => { cancelPress(); longFired = false; });
+        btn.addEventListener("pointercancel", cancelPress);
+
         btn.addEventListener("click", async () => {
-            const manual = longFired;
-            longFired = false;  // 一次性消费,无论是否连接
+            if (longHandled) {
+                // 长按已在定时器中触发选口并处理, 松手产生的 click 必须忽略
+                longHandled = false;
+                return;
+            }
             if (connected) { await closePort(); return; }
-            const ok = await openPort(null, false, { manualPicker: manual });
+            const ok = await openPort(null, false, { manualPicker: false });
             if (ok) {
-                if (manual) log("已连接手动选择的设备");
                 setStatus("串口已连接", "");
                 await autoHandshake();
-                // round86 #6: 连接即自动硬件探测(普通模式 0xBC),失败不阻塞
                 await normalModeProbe();
-                // round70: 统一启动入口(自动开压力会话,INPUT TEST 显示真实压力)
                 await startInputPolling();
             }
         });

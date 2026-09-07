@@ -365,37 +365,37 @@ void cdc_respond() {
         // MBR3116 DIFFERENCE_COUNT is natively 0-255 -- untouched. Scaling
         // happens only at this reporting layer; pressureSnap / 0xC2 debug
         // still carry raw values.
-        // round84: 0xC5 grew a level 2 = raw flavor: pressureSnap is reported
-        // unscaled (no MPR x2) so the panel can show the physical sensor
-        // reading; level 1 keeps the round80 simulated-report semantics.
+        // round84/86: 0xC5 level 语义:
+        // level 2 = 原始结果 (Raw Sensor): 直报传感器物理读数 (含未触碰底噪), 不受按键判定门控;
+        // level 1 = 模拟结果 (Game Simulation): 严格以设备在游戏中的实际输入结果为准!
+        //           经过设备内全部管线 (阈值/消抖/拉伸/邻居豁免) 判定为未触发的键恒为 0;
+        //           判定为触发的键: 若配置开启了真实压力映射 (gameRawEnabled) 则上报压力 p,
+        //           未开启真实压力映射则上报游戏标准二值判定 128。
         if (rawModeActive() && frameFresh) {
             bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) ||
                           ControllerConfig.hwVer >= 3;  // same rule as sanitizeConfig
-            if (rawReportLevel) {
-                // panel mode: level 1 = simulated (x2 clamp, round80), level 2
-                // = raw (unscaled). Untouched keys report idle values either way.
-                bool simScaled = (rawReportLevel == 1);
+            if (rawReportLevel == 2) {
+                // level 2: 原始结果 -- 物理层读数直出 (用于观测底噪/悬停/校准)
                 for (int i = 0; i < 32; i++) {
-                    uint16_t v = tmpPressure[i];
-                    if (!useMbr && simScaled) {
-                        v <<= 1;
-                        if (v > 255) v = 255;
-                    }
-                    inputState.slider[i] = (uint8_t)v;
+                    inputState.slider[i] = (uint8_t)tmpPressure[i];
                 }
             } else {
-                // game mode: linear-normalized 0-255 pressure. Round69:
-                // binary-compatible non-zero = pressed, with continuous
-                // magnitude for the DLL.
+                // level 1 (模拟结果) 与 level 0 (游戏模式): 真实游戏判定呈现
                 for (int i = 0; i < 32; i++) {
                     uint8_t pressed = tmpSlider[i] ? 1 : 0;
-                    uint16_t v = tmpPressure[i];
-                    if (!useMbr) {
-                        v <<= 1;
-                        if (v > 255) v = 255;
+                    if (!pressed) {
+                        inputState.slider[i] = 0;
+                    } else if (gameRawEnabled) {
+                        uint16_t v = tmpPressure[i];
+                        if (!useMbr) {
+                            v <<= 1;
+                            if (v > 255) v = 255;
+                        }
+                        uint8_t p = (uint8_t)v;
+                        inputState.slider[i] = (p > 0 ? p : 1);
+                    } else {
+                        inputState.slider[i] = 128;
                     }
-                    uint8_t p = (uint8_t)v;
-                    inputState.slider[i] = pressed ? (p > 0 ? p : 1) : 0;
                 }
             }
         }
