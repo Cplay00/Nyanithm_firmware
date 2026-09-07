@@ -10,21 +10,31 @@
 #include <cy8cmbr3116_cfg.h>
 
 #include <hardware/watchdog.h>
+#include <i2c_port.h>
 #include <pico/stdlib.h>
 #include <production_mode.h>
 #include <stdio.h>
 #include <tusb.h>
 
+// round88b: 配置区单寄存器读取统一走 i2c_write_read(原子 write+restart+read
+// 组合事务, 末尾产生 STOP -- 与 verify_cy8cmbr3116_burn/0xC6 读回/驱动数据路径
+// 同形, round75/80 真机验证过的形状)。1.6.5 首版烧录轮询手写的
+// write(nostop=true)+read(nostop=true) 组合在整个会话中从不产生 STOP,
+// 真机实测 CTRL_CMD 轮询永远读不到有效值 -> 误判 timeout -> 不发软复位,
+// 新配置停在 RAM、触摸行为错乱。注意: i2c_read 的末参是 SDK 的 nostop,
+// 不是"阻塞"语义。
+static bool mbrReadReg(uint8_t addr, uint8_t reg, uint8_t* out) {
+    return i2c_write_read(0, addr, &reg, 1, out, 1) == 1;
+}
+
 bool detect3116(uint8_t addr) {
-    // 尝试读取地址寄存器值
-    uint8_t buf[1] = { I2C_ADDR_ADDRESS };
-    i2c_write(0, addr, buf, 1, true);
-    buf[0] = 0;
-    i2c_read(0, addr, buf, 1, true);
-    if (buf[0] == addr) {
-        return true;
+    // round88b: 读形状统一为组合事务(原 write(nostop=true)+read(nostop=true)
+    // 从不产生 STOP, 与新烧录序列同一误用源)。
+    uint8_t a = 0;
+    if (!mbrReadReg(addr, I2C_ADDR_ADDRESS, &a) || a != addr) {
+        return false;
     }
-    return false;
+    return true;
 }
 
 void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
@@ -43,10 +53,10 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
         uint8_t buf[2] = { i, cfg[i] };
         i2c_write(0, addr, buf, 2, true);
     }
-    uint8_t reg = CTRL_CMD_ADDRESS;
-    uint8_t cur = 0;
-    if (i2c_write(0, addr, &reg, 1, true) == 1) {
-        i2c_read(0, addr, &cur, 1, true);
+    // round88b: 前置检查 CTRL_CMD==0(TRM §1.5.80: 非零时写入行为未定义)。
+    if (!mbrReadReg(addr, CTRL_CMD_ADDRESS, &cur)) {
+        printf("CTRL_CMD readback failed, burn aborted.\n");
+        return;
     }
     if (cur != 0) {
         // 前一命令未完成, 此刻写 0x86 行为未定义(TRM §1.5.80) -- 放弃本次烧录
@@ -60,9 +70,10 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
         tud_task();
         watchdog_update();
         sleep_ms(10);
-        reg = CTRL_CMD_ADDRESS;
-        if (i2c_write(0, addr, &reg, 1, true) == 1 &&
-            i2c_read(0, addr, &cur, 1, true) == 1 && cur == 0) {
+        // round88b: TRM §1.5.80 -- 命令完成时设备把 0x86 清零; 轮询读回为 0
+        // 即完成。读形状必须是 write(1B, 带 STOP)+read 组合事务(mbrReadReg),
+        // 读不到寄存器值与读到非零值同等视为"未完成"。
+        if (mbrReadReg(addr, CTRL_CMD_ADDRESS, &cur) && cur == 0) {
             done = true;
         }
     }
@@ -71,13 +82,13 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
         return;
     }
     uint8_t status = 0;
-    reg = 0x88;  // CTRL_CMD_STATUS: bit0 ERR
-    if (i2c_write(0, addr, &reg, 1, true) == 1 &&
-        i2c_read(0, addr, &status, 1, true) == 1 && (status & 0x01)) {
+    if (!mbrReadReg(addr, 0x88, &status)) {
+        printf("CTRL_CMD_STATUS readback failed, burn aborted.\n");
+        return;
+    }
+    if (status & 0x01) {  // TRM §1.5.81: bit0 ERR
         uint8_t err = 0;
-        reg = 0x89;  // CTRL_CMD_ERR
-        i2c_write(0, addr, &reg, 1, true);
-        i2c_read(0, addr, &err, 1, true);
+        mbrReadReg(addr, 0x89, &err);  // TRM §1.5.82: 0xFD flash / 0xFE CRC / 0xFF invalid
         printf("burn error: status=0x%02X err=0x%02X%s%s\n", status, err,
                err == 0xFD ? " (flash write failed)" : "",
                err == 0xFE ? " (config CRC mismatch)" : "");
@@ -90,10 +101,8 @@ void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
         tud_task();
         watchdog_update();
         sleep_ms(10);
-        reg = I2C_ADDR_ADDRESS;
         uint8_t a = 0;
-        if (i2c_write(0, addr, &reg, 1, true) == 1 &&
-            i2c_read(0, addr, &a, 1, true) == 1 && a == addr) {
+        if (mbrReadReg(addr, I2C_ADDR_ADDRESS, &a) && a == addr) {
             break;
         }
     }
