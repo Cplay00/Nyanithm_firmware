@@ -9081,70 +9081,15 @@ function validateUf2ForDevice(p, devInfo) {
             return;
         }
         // 等 Windows 完成挂载 RPI-RP2(断开已确认,再给枚举+卷挂载留时间)
-        await sleep(2600);
-        if (!MOCK) {
-            const cdcBack = async () => {
-                try {
-                    const ports = await navigator.serial.getPorts();
-                    return ports.some((p) => {
-                        if (!p || typeof p.getInfo !== "function") return false;
-                        const i = p.getInfo();
-                        return i.usbVendorId === 0xCAFE && i.usbProductId === 0x4009;
-                    });
-                } catch (e) { return false; }
-            };
-            let softReboot = false;
-            if (await cdcBack()) {
-                const guardDeadline = performance.now() + 3500;
-                let stillBack = true;
-                while (performance.now() < guardDeadline) {
-                    await sleep(300);
-                    if (!(await cdcBack())) { stillBack = false; break; }
-                }
-                if (stillBack) softReboot = true;
-            }
-            if (softReboot) {
-                log("设备串口在刷写窗口内重新枚举——这是一次固件软重启(例如配置模式自动退出),并非 BOOTSEL。请直接重试", "error");
-                setFlashPhase("error", "✗ 设备重启了,但未进入 BOOTSEL");
-                bootselReady = false;
-                updateFlashUi();
-                return;
-            }
-        }
-        // round78e(审查 P2 判别守卫): 窗内固件软重启(如配置模式 60s 自动退出)
-        // 同样表现为"端口消失",需与真 BOOTSEL 区分——真 BOOTSEL 下 CDC 口不会
-        // 以同 VID/PID 重枚举;软重启会在 1~2s 内回来。+2.6s 与 +6s 两次采样,
-        // 回归且持续在线 → 判软重启报错不弹盘符框;回归后又消失(滞留字节在
-        // 重启后的正常模式里迟到触发真 BOOTSEL)则继续按成功走。
-        if (!MOCK) {
-            const cdcBack = async () => {
-                try {
-                    const ports = await navigator.serial.getPorts();
-                    return ports.some((p) => {
-                        if (!p || typeof p.getInfo !== "function") return false;
-                        const i = p.getInfo();
-                        return i.usbVendorId === 0xCAFE && i.usbProductId === 0x4009;
-                    });
-                } catch (e) { return false; }
-            };
-            let softReboot = false;
-            if (await cdcBack()) {
-                const guardDeadline = performance.now() + 3500;
-                let stillBack = true;
-                while (performance.now() < guardDeadline) {
-                    await sleep(300);
-                    if (!(await cdcBack())) { stillBack = false; break; }
-                }
-                if (stillBack) softReboot = true;
-            }
-            if (softReboot) {
-                log("设备串口在刷写窗口内重新枚举——这是一次固件软重启(例如配置模式自动退出),并非 BOOTSEL。请直接重试", "error");
-                setFlashPhase("error", "✗ 设备重启了,但未进入 BOOTSEL");
-                bootselReady = false;
-                updateFlashUi();
-                return;
-            }
-        }
+        await sleep(1500);
+        // round88c: 移除旧 softReboot 检查。
+        // 旧代码使用 navigator.serial.getPorts() 检查所谓的"重新枚举软重启",
+        // 但在 Windows Chromium 下 getPorts() 会一直返回历史已授权的端口对象,
+        // 导致即使设备已彻底进入 BOOTSEL 且 RPI-RP2 盘符已就绪, 仍被误判为
+        // "设备重启了,但未进入 BOOTSEL", 粗暴掐断后续全部写盘分支。
+        // 现在设备既然断开, 就直接信任进入写盘分支(已保存句柄/早弹选择器/手动选择)。
+        bootselReady = true;
+        updateFlashUi();
         // round78f: 三分支写盘——①已存句柄(点击时权限已落实):轮询卷就绪直接
         // 写,零弹窗;②首刷早弹的选择框(点击瞬间弹出,用户在框内等 RPI-RP2 出现
         // 后点选):取回句柄写入并存档;③Mock/无 FSA:维持手动提示。
