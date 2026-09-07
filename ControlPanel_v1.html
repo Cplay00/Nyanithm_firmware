@@ -7813,6 +7813,10 @@ function validateUf2ForDevice(p, devInfo) {
 
     // round86 #12: 烧录单芯片(0xBA 双写铁律)并校验。返回 true=done。
     // 与 setupMbrApply 的单芯片烧录同协议;抽取复用供「同步烧录全部芯片」。
+    // round88b: 固件烧录尾部最坏 ~600ms 后追加 verify 诊断行(verify ok /
+    // verify mismatch / verify skipped), 若不消费会与下一片的 "programing"
+    // 行错位——真机 round88 日志级联「写入失败」的根因之一。done 后短窗
+    // 排掉该行(仅日志展示, 不影响判定), 且超时不抛错。
     async function mbrBurnOne(addr) {
         if (!configMode) { log("请先进入配置模式", "warn"); return false; }
         if (!mbrTable) { log("寄存器表为空", "error"); return false; }
@@ -7834,6 +7838,11 @@ function validateUf2ForDevice(p, devInfo) {
         const done = !!(line2 && line2.includes("done"));
         log(`芯片 ${addr} 烧录: ${line1 || "(无响应)"} / ${line2 || "(无结果)"}`, done ? "" : "error");
         if (done) {
+            // round88b: 消费固件 verify 诊断行(最坏 ~600ms), 防止流入下一片
+            try {
+                const vline = await waitForLine(900);
+                if (vline) log(`芯片 ${addr} 校验: ${vline}`, vline.includes("verify ok") ? "" : "warn");
+            } catch (e) { /* 旧固件无此行 */ }
             mbrTableCache[mbrKey(addr)] = table;  // 已烧值即缓存新基线
             mbrDirty[mbrKey(addr)] = false;
         }
@@ -8039,6 +8048,10 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }
 
+    // 芯片个体相关寄存器: 全局编辑时不跨片传播(I2C_ADDR 每片不同;
+    // SENSOR_EN 的本机使能位随布局/芯片而异; FSS_EN 音游必须恒 0,
+    // 单片改动属异常操作,传播会固化错误)。语义寄存器才全局同步。
+    const MBR_REG_PER_CHIP = new Set([0x00, 0x01, 0x02, 0x03, 0x51]);
     // 悬浮窗内数字编辑 → 写当前芯片缓存(标脏) + 可选传播到全部芯片缓存
     function mbrRegEdit(addrHex, value) {
         if (!mbrTable) return;
@@ -8047,9 +8060,9 @@ function validateUf2ForDevice(p, devInfo) {
         const key = mbrKey($("mbrChip").value);
         mbrTableCache[key] = new Uint8Array(mbrTable);
         mbrDirty[key] = true;
-        if ($("mbrRegGlobal").checked) {
-            // 全局(默认): 其他芯片在各自缓存基础上应用同一地址的值,
-            // 保留各片 SENSOR_EN/I2C_ADDR 差异
+        if ($("mbrRegGlobal").checked && !MBR_REG_PER_CHIP.has(addr)) {
+            // 全局(默认): 其他芯片在各自缓存基础上应用同一地址的值。
+            // 芯片个体相关寄存器(见 MBR_REG_PER_CHIP)不传播。
             const chips = [...$("mbrChip").options].map(o => o.value);
             chips.forEach(c => {
                 if (mbrKey(c) === key) return;
@@ -8163,10 +8176,18 @@ function validateUf2ForDevice(p, devInfo) {
         renderMbrHex();
         syncMbrFields();
         syncMbrRegInputs();
-        log(`已恢复 ${key} 固件内置模板值(未写入芯片)`);
+        // round88b: 明确告知"恢复≠写入"——NVM 里仍是上一轮烧的值, 必须再点
+        // 「写入芯片」才真正回到模板行为; 防止用户以为恢复即生效。
+        log(`已恢复 ${key} 固件内置模板值(仅编辑区——NVM 仍是芯片现值,需再点「写入芯片」才会烧回模板)`, "warn");
     });
 
-    // 悬浮窗写入: 先当前芯片, 全局模式下再逐片写其余有缓存的芯片
+    // 悬浮窗写入(round88b 重写): 全局模式 = 逐片队列(同 mbrBurnAll 形状),
+    // 每片烧录前从各自缓存取表、mbrBurnOne 内部强制 table[0x51]=addr ——
+    // 首版"全局传播直接覆写其他芯片缓存同地址"的设计在 0x51(I2C_ADDR) 上
+    // 会把当前芯片地址写进别人缓存(烧录虽被 mbrBurnOne 纠正, 但缓存/UI
+    // 校验被污染), 且对无缓存芯片静默跳过造成"看似全局实则单片"。
+    // 现行为: 只同步语义寄存器(与抗悬空预设同一写法), 烧录队列逐片独立;
+    // 当前片失败即停止(与首版一致, 避免半批烧录后状态不明)。
     $("btnMbrRegWrite").addEventListener("click", () => withSerialLock(async () => {
         if (mbrRegRisk.severe) { log("存在严重违例参数,写入被拒绝", "error"); return; }
         if (mbrRegRisk.warn && !$("mbrRegAck").checked) {
@@ -8185,14 +8206,17 @@ function validateUf2ForDevice(p, devInfo) {
         if (!ok) { log("当前芯片写入未完成,已停止(全局模式不会继续)", "error"); return; }
         if ($("mbrRegGlobal").checked) {
             const chips = [...$("mbrChip").options].map(o => o.value).filter(c => mbrKey(c) !== key && mbrTableCache[c]);
+            let fail = 0;
             for (const c of chips) {
                 $("mbrChip").value = c;
                 mbrCurChip = c;
                 mbrTable = new Uint8Array(mbrTableCache[c]);
+                let ok2 = false;
                 try {
-                    const ok2 = await mbrBurnOne(c);
-                    if (!ok2) log(`芯片 ${c} 写入失败(其余芯片继续)`, "warn");
+                    ok2 = await mbrBurnOne(c);
+                    if (!ok2) fail++;
                 } catch (e) {
+                    fail++;
                     log(`芯片 ${c} 写入异常: ${e.message}`, "error");
                 }
                 await sleep(300);
@@ -8200,7 +8224,7 @@ function validateUf2ForDevice(p, devInfo) {
             $("mbrChip").value = addr;
             mbrCurChip = addr;
             mbrTable = new Uint8Array(mbrTableCache[key]);
-            log(`全局写入完成(目标 ${chips.length + 1} 片)`);
+            log(fail ? `全局写入完成: ${chips.length + 1 - fail}/${chips.length + 1} 成功,${fail} 片失败(见日志)` : `全局写入完成: ${chips.length + 1} 片全部成功`, fail ? "warn" : "");
         }
         syncMbrRegInputs();
     }));
@@ -8806,12 +8830,33 @@ function validateUf2ForDevice(p, devInfo) {
         return names;
     }
 
+    // round88b: 盘符识别宽容化。真机反馈「找盘符与校验盘符环节失败」——
+    // RPI-RP2 的 FAT 卷不带长文件名项, Windows 经 FSA 列目录偶发只返回
+    // 8.3 短名( INFO_UF2.TXT → INFO_UF2.1XT 等截断变体)或 keys() 抛错/为空,
+    // 旧严格校验(infoName 正则 + index.htm 同时存在)随即落入"强制写入"确认,
+    // 体验为"校验盘符失败"。现改为: 列目录为空/异常时直接尝试读三个已知
+    // 标识文件名; 名单命中即认盘; 全部失败才走用户强制确认。
+    const BOOTSEL_INFO_NAMES = ["INFO_UF2.TXT", "UF2INFO.TXT", "INFO.TXT", "INDEX.HTM"];
+    async function probeBootselSignature(dir) {
+        for (const n of BOOTSEL_INFO_NAMES) {
+            try {
+                const fh = await dir.getFileHandle(n);
+                const t = await (await fh.getFile()).text();
+                if (/RP2040|RPI-RP2|UF2\s*Bootloader|Raspberry Pi RP2/i.test(t)) return { ok: true, via: n };
+            } catch (e) { /* 该名不存在/暂不可读, 试下一个 */ }
+        }
+        return { ok: false, via: null };
+    }
+
     // 校验所选目录确为 RP2040 BOOTSEL 盘并写入 UF2;全自动与手动备用路径共用。
+    // round88b: 校验宽容化(probeBootselSignature)——FSA 在 RPI-RP2 上列目录
+    // 偶发为空/短名截断, 不再依赖 entries 正则命中。
     async function validateAndWriteToBootsel(dir) {
         const volName = (dir.name || "").trim();
         log(`已选择目录「${volName || "?"}」,正在识别 RP2040 BOOTSEL 盘…`);
         const entries = await listBootselEntries(dir);
         if (entries.length) log(`目录内容: ${entries.join(", ")}`);
+        else log("目录列举为空(FAT 短名/权限限制常见, 不影响识别), 直接探测标识文件…");
         const infoName = entries.find(n => /^(info_uf2|info|uf2info)\.txt$/i.test(n)) || null;
         const hasIndex = entries.some(n => /^index\.htm(l)?$/i.test(n));
         let bootSig = false;
@@ -8820,10 +8865,16 @@ function validateUf2ForDevice(p, devInfo) {
             const t = await readBootselText(dir, infoName);
             bootSig = t !== null && /RP2040|RPI-RP2|UF2\s*Bootloader|Raspberry Pi RP2/i.test(t);
         }
-        if (bootSig) {
-            log("已确认 RP2040 BOOTSEL 盘(标识文件校验通过),开始写入…");
-        } else {
-            const go = confirm(`未能确认「${volName || "?"}」是 RP2040 BOOTSEL 盘\n(未读到 INFO.TXT / UF2INFO.TXT 的 RP2040 标识)。\n\n若这确实是 RPI-RP2 盘,点"确定"强制写入;\n选错目录可能覆盖其他磁盘的数据!点"取消"中止。`);
+        if (!bootSig) {
+            const probe = await probeBootselSignature(dir);
+            if (probe.ok) {
+                bootSig = true;
+                log(`已确认 RP2040 BOOTSEL 盘(经 ${probe.via} 标识校验),开始写入…`);
+            }
+        }
+        if (bootSig) log("已确认 RP2040 BOOTSEL 盘(标识文件校验通过),开始写入…");
+        if (!bootSig) {
+            const go = confirm(`未能确认「${volName || "?"}」是 RP2040 BOOTSEL 盘\n(未读到 INFO_UF2.TXT / UF2INFO.TXT / INFO.TXT 的 RP2040 标识)。\n\n若这确实是 RPI-RP2 盘,点"确定"强制写入;\n选错目录可能覆盖其他磁盘的数据!点"取消"中止。`);
             if (!go) {
                 log("已中止写入(用户取消强制写入确认)", "warn");
                 setFlashPhase("bootsel-manual");
@@ -8947,11 +8998,9 @@ function validateUf2ForDevice(p, devInfo) {
     async function waitRp2VolumeReady(h, ms) {
         const end = performance.now() + ms;
         while (performance.now() < end) {
-            try {
-                const fh = await h.getFileHandle("INFO_UF2.TXT");
-                const t = await (await fh.getFile()).text();
-                if (/RP2040|RPI-RP2|UF2\s*Bootloader|Raspberry Pi RP2/i.test(t)) return h;
-            } catch (e) { /* 卷未挂载/句柄暂不可解析——RP2 BOOTSEL 固定提供该文件 */ }
+            // round88b: 复用宽容化探测(标识文件直读), 不依赖目录列举
+            const probe = await probeBootselSignature(h);
+            if (probe.ok) return h;
             await sleep(300);
         }
         return null;
