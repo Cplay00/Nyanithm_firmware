@@ -5657,11 +5657,11 @@ function validateUf2ForDevice(p, devInfo) {
             if (rawSession) {
                 // round86: 「原始结果」模式 —— 呈现传感器底层物理读数 (含未触碰时的 idle 底噪)
                 if (perKeyIsMbr()) {
+                    // MBR3116: 依照原始触摸值 0-255 线性变化
                     const noiseFloor = 130;
                     on = v > noiseFloor;
                     if (on) {
-                        op = Math.min(1, (v - noiseFloor) / (255 - noiseFloor));
-                        op = (0.35 + op * 0.65).toFixed(2);
+                        op = Math.min(1.0, Math.max(0.0, v / 255.0)).toFixed(2);
                     }
                 } else {
                     // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度
@@ -5678,8 +5678,9 @@ function validateUf2ForDevice(p, devInfo) {
                 on = v > 0;
                 if (on) {
                     if (perKeyIsMbr()) {
+                        // MBR3116: 标准 128 二值判定满亮 1.00; 真实压力映射依照 0-255 线性变化
                         if (v === 128) op = "1.00";
-                        else op = (0.35 + Math.min(1, v / 255) * 0.65).toFixed(2);
+                        else op = Math.min(1.0, Math.max(0.0, v / 255.0)).toFixed(2);
                     } else {
                         // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度 (标准128直接满亮)
                         if (v === 128) op = "1.00";
