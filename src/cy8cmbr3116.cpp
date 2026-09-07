@@ -594,13 +594,13 @@ uint8_t CY8CMBR3116::get_DEBUG_AVG_RAW_COUNT0(uint16_t* resultBuffer) {
 uint8_t CY8CMBR3116::setPointer(int registerAddress) {
     uint8_t buf = registerAddress;
     int ret = i2c_write(i2c_port, DEVICE_I2C_ADDRESS, &buf, 1, false);
-    return (ret < 0) ? 1 : 0;  // 0 = success, non-zero = I2C error
+    return (ret == 1) ? 0 : 1;
 }
 
 // Method to retriev count of bytes from last pointer Postition to resultBuffer
 uint8_t CY8CMBR3116::requestData(uint8_t count, uint8_t* resultBuffer) {
     int ret = i2c_read(i2c_port, DEVICE_I2C_ADDRESS, resultBuffer, count, false);
-    return (ret < 0) ? 1 : 0;  // 0 = success, non-zero = I2C error
+    return (ret == count) ? 0 : 1;
 }
 
 // Method to write uint8_tCount of uint8_ts to a registerAddress from the data buffer
@@ -612,20 +612,13 @@ uint8_t CY8CMBR3116::writeData(uint8_t registerAddress, uint8_t count, uint8_t* 
         buf[i + 1] = data[i];
     }
     int ret = i2c_write(i2c_port, DEVICE_I2C_ADDRESS, buf, count + 1, false);
-    return (ret < 0) ? 1 : 0;  // 0 = success, non-zero = I2C error
+    return (ret == count + 1) ? 0 : 1;
 }
 
 // Method to retriev uint8_tCount of uint8_ts from an registerAddress to the resultBuffer
 uint8_t CY8CMBR3116::requestDataFromAddress(uint8_t registerAddress, uint8_t count, uint8_t* resultBuffer) {
-    // Set the pointer
-    uint8_t error;
-    error = setPointer(registerAddress);
-    if (error == 0) {
-        // return request the Data
-        error = requestData(count, resultBuffer);
-    }
-
-    return error;
+    int ret = i2c_write_stop_read(i2c_port, DEVICE_I2C_ADDRESS, registerAddress, resultBuffer, count);
+    return (ret == count) ? 0 : 1;
 }
 
 uint8_t CY8CMBR3116::applyRegister() {

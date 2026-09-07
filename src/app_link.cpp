@@ -205,9 +205,13 @@ void handleCommand() {
                 uint8_t address = cfg[0];
                 if (address == 0x37 || (address >= 0x40 && address <= 0x44)) {
                     printf("programing 3116 chip\n");
-                    program_cy8cmbr3116_custom(address, &cfg[1]);
-                    printf("done\n");
-                    verify_cy8cmbr3116_burn(address, &cfg[1]);
+                    MbrProgramResult result = program_cy8cmbr3116_custom(address, &cfg[1]);
+                    if (result.code == MBR_PROGRAM_OK) {
+                        printf("done\n");
+                    } else {
+                        printf("burn failed: code=%u offset=0x%02X status=0x%02X err=0x%02X\n",
+                               (unsigned)result.code, result.offset, result.status, result.error);
+                    }
                 } else {
                     printf("load3116: address 0x%02X not allowed. burn aborted.\n", address);
                 }

@@ -286,15 +286,17 @@ void cdc_respond() {
         // this format string AND returned live -- the control panel scans UF2
         // files for it to validate firmware version/variant before flashing.
         char info[160];
+        static const char firmwareIdentity[] =
+            "NYANFW1;" NYANITHM_FW_VERSION ";" NYANITHM_VARIANT ";BID=" NYANITHM_BUILD_ID;
         int n = snprintf(info, sizeof(info),
-            "FW:%s API:0x%02X HW:v%d Built:%s %s SDK:%d.%d.%d VAR:%s NYANFW1;" NYANITHM_FW_VERSION ";" NYANITHM_VARIANT,
+            "FW:%s API:0x%02X HW:v%d Built:%s %s SDK:%d.%d.%d VAR:%s %s",
             NYANITHM_FW_VERSION, NYANITHM_API_LEVEL,
             (int)ControllerConfig.hwVer,
             __DATE__, __TIME__,
             PICO_SDK_VERSION_MAJOR, PICO_SDK_VERSION_MINOR, PICO_SDK_VERSION_REVISION,
-            NYANITHM_VARIANT);
+            NYANITHM_VARIANT, firmwareIdentity);
         if (n < 0) n = 0;
-        if (n > 255) n = 255;
+        if (n >= (int)sizeof(info)) n = sizeof(info) - 1;
         uint8_t len = (uint8_t)n;
         tud_cdc_write(&len, 1);
         tud_cdc_write((const uint8_t*)info, len);

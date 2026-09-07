@@ -11,9 +11,10 @@
 #include <hardware/i2c.h>
 #include <i2c_config.h>
 
-int i2c_write(uint8_t port, uint8_t addr, uint8_t* src, size_t len, bool blocking);
-int i2c_read(uint8_t port, uint8_t addr, uint8_t* dst, size_t len, bool blocking);
+int i2c_write(uint8_t port, uint8_t addr, uint8_t* src, size_t len, bool nostop);
+int i2c_read(uint8_t port, uint8_t addr, uint8_t* dst, size_t len, bool nostop);
 int i2c_write_read(uint8_t port, uint8_t addr, uint8_t* wr, size_t wr_len, uint8_t* rd, size_t rd_len);
+int i2c_write_stop_read(uint8_t port, uint8_t addr, uint8_t reg, uint8_t* rd, size_t rd_len);
 
 void initI2CBus(uint8_t port, uint gpio_sda, uint gpio_scl, uint baudrate);
 

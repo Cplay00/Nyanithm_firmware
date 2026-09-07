@@ -3855,6 +3855,7 @@ input[type="range"]:disabled {
                                         </svg>
                                         同步烧录全部芯片
                                     </button>
+                                    <button id="btnMbrRestoreAll" class="btn" disabled>安全恢复 0x40–0x42 内置模板</button>
                                     <!-- round88: 寄存器详细设置悬浮窗入口(译自 TRM 寄存器数据表) -->
                                     <button id="btnMbrRegWin" class="btn" disabled>
                                         <svg viewBox="0 0 16 16" fill="none">
@@ -4462,8 +4463,8 @@ function parseUf2(buf) {
     for (let i = 0; i < img.length; i += 4096) {
         text += String.fromCharCode.apply(null, img.subarray(i, Math.min(i + 4096, img.length)));
     }
-    const sig = text.match(/NYANFW1;([^;\x00\s]+);([^;\x00\s]+)/);
-    if (sig) res.sig = { version: sig[1], variant: sig[2] };
+    const sig = text.match(/NYANFW1;([^;\x00\s]+);([^;\x00\s]+)(?:;BID=([^;\x00\s]+))?/);
+    if (sig) res.sig = { version: sig[1], variant: sig[2], buildId: sig[3] || null };
     res.fwMarker = text.includes("FW:%s API:0x");
     // 旧固件版本启发式: FW 版本宏串在 rodata 中紧邻 "FW:%s API" 格式串(隔 NUL),
     // 比"全镜像唯一 semver"更准(镜像里还有 SDK 版本 2.2.0 等干扰串)。
@@ -5016,7 +5017,8 @@ function validateUf2ForDevice(p, devInfo) {
             this.mbrDbgTimer = null;  // round88: 载荷断流超时
             this.flashingPending = false;  // round76b: 0xBB 确认字节跨 write(面板改双写)
             this.flashingTimer = null;  // round76b: 仿固件 5s 确认窗,超时 denied
-            this.tofCount = MOCK_GEN2 ? 3 : 4;  // gen2:ToF 数异常,应被门禁拦截
+            this.tofCount = MOCK_GEN2 ? 3 : 5;  // mock=1 模拟 v1·32寸三片 MBR 恢复链
+            this.mockMbrMask = MOCK_GEN2 ? 0 : 0b001110;
             this.rawReport = 0;  // round66/85: 压力上报会话 level (0/1/2)
             this.cmdLog = [];  // round63h: 与真实固件 0xCE 命令日志同构(仅顶层命令字节)
             // 无定时器收发:后台标签页的 setTimeout 节流会把 Mock 卡死,
@@ -5051,14 +5053,18 @@ function validateUf2ForDevice(p, devInfo) {
         get readable() { return { getReader: () => this.readerObj }; }
         get writable() { return { getWriter: () => this.writerObj }; }
 
-        send(bytes) {
+        send(bytes, delay = 0) {
             const chunk = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-            this.dev.rx.push(chunk);
-            const w = this.dev.waiters.shift();
-            if (w) w();
+            const deliver = () => {
+                this.dev.rx.push(chunk);
+                const w = this.dev.waiters.shift();
+                if (w) w();
+            };
+            if (delay > 0) setTimeout(deliver, delay);
+            else deliver();
         }
-        sendText(text) {
-            this.send(new TextEncoder().encode(text + "\n"));
+        sendText(text, delay = 0) {
+            this.send(new TextEncoder().encode(text + "\n"), delay);
         }
 
         // round75 审查: 仿固件 readCdcPayload 的 1s 总时限——载入流断流时丢弃
@@ -5070,10 +5076,12 @@ function validateUf2ForDevice(p, devInfo) {
         }
         mbrComplete() {
             if (this.mbrPendingTimer) { clearTimeout(this.mbrPendingTimer); this.mbrPendingTimer = null; }
+            const payload = new Uint8Array(this.mbrPending);
             this.mbrPending = null;
+            const addr = payload[0];
+            this.mbrCfg[addr] = payload.slice(1);
             this.sendText("programing 3116 chip", 10);
             this.sendText("done", 600);
-            this.sendText("verify ok", 700);
         }
         flashingClear() {
             if (this.flashingTimer) { clearTimeout(this.flashingTimer); this.flashingTimer = null; }
@@ -5234,7 +5242,7 @@ function validateUf2ForDevice(p, devInfo) {
                     this.send(Array.from(this.cmdLog.slice(-n)));
                 }
                 else if (cmd === CMD.DETECT) {
-                    this.send([CMD.DETECT, 0b111, 0b000, this.tofCount, 0b00000001, this.cfg[2]]);
+                    this.send([CMD.DETECT, MOCK_GEN2 ? 0b111 : 0, this.mockMbrMask, this.tofCount, 0b00000001, MOCK_GEN2 ? 1 : 2]);
                 }
                 else if (cmd === CMD.CFG_READ) {
                     this.send(Array.from(this.cfg), 15);
@@ -5294,8 +5302,8 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    // round88: Mock 版本串随固件 1.6.5 同步(0xBC 普通模式探测)。
-                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.1.1 VAR:hw_v1 NYANFW1;1.6.5;hw_v1";
+                    // round88: Mock 版本串随固件 1.6.5 / round88d 精确构建标识同步。
+                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5;hw_v1;BID=round88d";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -5688,9 +5696,9 @@ function validateUf2ForDevice(p, devInfo) {
         const m = info.match(/FW:(\S+)\s+API:0x([0-9A-Fa-f]+)\s+HW:v(\d+)/);
         if (m) {
             const vm = info.match(/VAR:([A-Za-z_0-9]+)/);
-            const sm = info.match(/NYANFW1;([^;\s]+);([^;\s]+)/);
-            devInfo = { fw: m[1], api: parseInt(m[2], 16), hwVer: parseInt(m[3], 10), var: vm ? vm[1] : null, sig: sm ? { version: sm[1], variant: sm[2] } : null, raw: info };
-            log(`设备信息: 固件 ${devInfo.fw}${devInfo.var ? " (" + devInfo.var + ")" : ""} / API 0x${devInfo.api.toString(16)} / 硬件 v${devInfo.hwVer} (${hwVerLabel(devInfo.hwVer)})`);
+            const sm = info.match(/NYANFW1;([^;\s]+);([^;\s]+)(?:;BID=([^;\s]+))?/);
+            devInfo = { fw: m[1], api: parseInt(m[2], 16), hwVer: parseInt(m[3], 10), var: vm ? vm[1] : null, sig: sm ? { version: sm[1], variant: sm[2], buildId: sm[3] || null } : null, buildId: sm ? (sm[3] || null) : null, raw: info };
+            log(`设备信息: 固件 ${devInfo.fw}${devInfo.var ? " (" + devInfo.var + ")" : ""}${devInfo.buildId ? " / 构建 " + devInfo.buildId : " / 旧构建(无精确标识)"} / API 0x${devInfo.api.toString(16)} / 硬件 v${devInfo.hwVer} (${hwVerLabel(devInfo.hwVer)})`);
             $("infoFw").textContent = devInfo.fw + (devInfo.var ? " · " + devInfo.var : "");
             // round81: 裸 "v2"(hwVer 数值)曾被视为"二代机"误导——32寸一代机=hw2,
             // 显示为「v1·32寸」全称; 原始数值保留在日志与详情弹窗。
@@ -7817,6 +7825,21 @@ function validateUf2ForDevice(p, devInfo) {
     // verify mismatch / verify skipped), 若不消费会与下一片的 "programing"
     // 行错位——真机 round88 日志级联「写入失败」的根因之一。done 后短窗
     // 排掉该行(仅日志展示, 不影响判定), 且超时不抛错。
+    async function mbrReadChipTable(addr, timeoutMs = 3000) {
+        flushReadBuffer();
+        await writeBytes(new Uint8Array([CMD.READ3116CONFIG]));
+        await writeBytes(new Uint8Array([parseInt(addr, 16)]));
+        const data = await waitForBytes(128, timeoutMs);
+        return new Uint8Array(data.slice(0, 128));
+    }
+
+    function mbrTablesEqual(a, b) {
+        if (!a || !b || a.length !== 128 || b.length !== 128) return false;
+        for (let i = 0; i < 128; i++) if (a[i] !== b[i]) return false;
+        return true;
+    }
+
+    // 0xBA 写入成功必须再经 0xC6 全表回读逐字节确认；只有这样才清 dirty。
     async function mbrBurnOne(addr) {
         if (!configMode) { log("请先进入配置模式", "warn"); return false; }
         if (!mbrTable) { log("寄存器表为空", "error"); return false; }
@@ -7834,20 +7857,76 @@ function validateUf2ForDevice(p, devInfo) {
         await writeBytes(new Uint8Array([CMD.LOAD3116CONFIG]));
         await writeBytes(payload);
         const line1 = await waitForLine(3000);
-        const line2 = await waitForLine(8000);
-        const done = !!(line2 && line2.includes("done"));
+        const line2 = await waitForLine(10000);
+        const done = line1.includes("programing 3116 chip") && line2.trim() === "done";
         log(`芯片 ${addr} 烧录: ${line1 || "(无响应)"} / ${line2 || "(无结果)"}`, done ? "" : "error");
-        if (done) {
-            // round88b: 消费固件 verify 诊断行(最坏 ~600ms), 防止流入下一片
-            try {
-                const vline = await waitForLine(900);
-                if (vline) log(`芯片 ${addr} 校验: ${vline}`, vline.includes("verify ok") ? "" : "warn");
-            } catch (e) { /* 旧固件无此行 */ }
-            mbrTableCache[mbrKey(addr)] = table;  // 已烧值即缓存新基线
-            mbrDirty[mbrKey(addr)] = false;
+        if (!done) return false;
+        const readback = await mbrReadChipTable(addr, 4000);
+        if (!mbrTablesEqual(readback, table)) {
+            let mismatch = -1;
+            for (let i = 0; i < 128; i++) if (readback[i] !== table[i]) { mismatch = i; break; }
+            log(`芯片 ${addr} NVM 全表校验失败: 首个差异 0x${mismatch.toString(16).toUpperCase().padStart(2, "0")}`, "error");
+            return false;
         }
-        return done;
+        log(`芯片 ${addr} NVM 全表校验通过 (128/128)`);
+        mbrTableCache[mbrKey(addr)] = readback;
+        mbrDirty[mbrKey(addr)] = false;
+        return true;
     }
+
+    async function mbrRestoreAllBuiltins() {
+        if (!configMode) { log("请先进入配置模式", "warn"); return; }
+        if (!devInfo || devInfo.buildId !== "round88d") {
+            log("安全恢复要求设备运行已验证构建 round88d；当前构建无法确认，拒绝写入 NVM", "error");
+            return;
+        }
+        const required = ["0x40", "0x41", "0x42"];
+        const detected = probeInfo && ((probeInfo.mbrMask & 0x0E) === 0x0E);
+        if (!detected) {
+            log("安全恢复要求 0xBC 实测确认 0x40/0x41/0x42 三片全部在位", "error");
+            return;
+        }
+        if (!confirm("将先备份三片芯片当前 128B 表，再逐片写入固件内置 0x40/0x41/0x42 模板。\n每片必须通过复位后 128/128 回读才继续；首个失败即停止。继续?")) return;
+        const backups = {};
+        for (const c of required) {
+            try {
+                backups[c] = await mbrReadChipTable(c, 4000);
+                log(`已备份芯片 ${c} 当前寄存器表到本次会话缓存`);
+            } catch (e) {
+                log(`备份芯片 ${c} 失败，未执行任何恢复: ${e.message}`, "error");
+                return;
+            }
+        }
+        for (let i = 0; i < required.length; i++) {
+            const c = required[i];
+            const tpl = MBR_TABLES[c];
+            if (!tpl) { log(`缺少 ${c} 精确内置模板，恢复停止`, "error"); return; }
+            mbrTable = new Uint8Array(tpl);
+            mbrTableCache[c] = mbrTable;
+            mbrDirty[c] = true;
+            const ok = await mbrBurnOne(c);
+            if (!ok) {
+                let rollbackFail = 0;
+                for (let j = i; j >= 0; j--) {
+                    const doneChip = required[j];
+                    mbrTable = new Uint8Array(backups[doneChip]);
+                    mbrTableCache[doneChip] = mbrTable;
+                    mbrDirty[doneChip] = true;
+                    if (!(await mbrBurnOne(doneChip))) rollbackFail++;
+                }
+                window.__mbrRestoreBackups = backups;
+                log(`安全恢复停止: ${c} 未通过完整校验；已回滚 ${i + 1 - rollbackFail}/${i + 1} 片。备份保留在 window.__mbrRestoreBackups。`, "error");
+                return;
+            }
+        }
+        window.__mbrRestoreBackups = backups;
+        $("mbrChip").value = "0x40";
+        mbrCurChip = "0x40";
+        mbrTable = new Uint8Array(mbrTableCache["0x40"]);
+        renderMbrHex(); syncMbrFields(); syncMbrRegInputs();
+        log("安全恢复完成: 0x40/0x41/0x42 均已写入对应内置模板并通过 128/128 NVM 回读");
+    }
+    $("btnMbrRestoreAll").addEventListener("click", () => withSerialLock(() => mbrRestoreAllBuiltins().catch(e => log("安全恢复异常: " + e.message, "error"))));
 
     // round86 #12: 同步烧录全部芯片。拒绝条件只剩"某芯片从未有缓存"(模板未
     // 读回且未编辑) -- 防止用模板覆盖芯片 NVM 实值;有编辑(脏)的芯片正是要烧
@@ -8169,10 +8248,11 @@ function validateUf2ForDevice(p, devInfo) {
     // 恢复模板值: 当前芯片回到固件内置模板(untrusted)
     $("btnMbrRegRestore").addEventListener("click", () => {
         const key = $("mbrChip").value;
-        const tpl = MBR_TABLES[key] || MBR_TABLES["0x40"];
+        const tpl = MBR_TABLES[key];
+        if (!tpl) { log(`地址 ${key} 无对应内置模板,恢复被拒绝`, "error"); return; }
         mbrTable = new Uint8Array(tpl);
         mbrCacheStore(key, mbrTable, false);
-        mbrDirty[key] = false;  // 恢复模板 = 与芯片无关的基准态, 不算编辑
+        mbrDirty[key] = true;
         renderMbrHex();
         syncMbrFields();
         syncMbrRegInputs();
@@ -8447,43 +8527,11 @@ function validateUf2ForDevice(p, devInfo) {
             if (!MBR_CRC_OK) { log("CRC 自检未通过,表应用已禁用", "error"); return; }
             if (isConfirming) {
                 resetConfirm();
-                const addr = mbrChipAddr();
+                const addr = "0x" + mbrChipAddr().toString(16).toUpperCase();
                 const size = (probeInfo && probeInfo.tofCount === 5) ? "32寸" : "27寸";
-                log(`向芯片 0x${addr.toString(16).toUpperCase()} 烧录 128 字节寄存器表(${size} 设备)...`);
-                const table = mbrTable.slice();
-                table[0x51] = addr;        // 表内 I2C 地址与目标芯片一致
-                mbrUpdateTableCrc(table);  // 重算表尾 CRC
-                // round75 审查: 载荷=addr+128B 共 129B, 命令字节单独首发;
-                // 不再维护含命令字节的 130B 大缓冲, 以免误读为整包发送。
-                const payload = new Uint8Array(1 + 128);
-                payload[0] = addr;
-                payload.set(table, 1);
-                flushReadBuffer();
-                // round75: 与 doSaveConfig 的 CFG_SET 双写同理(round63i 真机定论)。
-                // 单次 130B write 在 Web Serial/USB 驱动层被打成 [64][64][2] 三个包,
-                // 尾包撞上设备端单缓冲 OUT 端点未及时重武装而 NAK, 旧固件的无界
-                // getchar() 会永等缺尾字节并触发 2s 看门狗复位(表现为设备消失)。
-                // 先单独发 0xBA 让固件进入载荷读取, 再发 addr+128B 载入流, 逐包
-                // 重武装, 稳定续流。
-                await writeBytes(new Uint8Array([CMD.LOAD3116CONFIG]));
-                await writeBytes(payload);
-                const line1 = await waitForLine(3000);
-                log("0xBA 响应: " + line1);
-                const line2 = await waitForLine(8000);
-                log("3116 烧录结果: " + line2);
-                // round75: 新固件烧录后追加 verify 诊断行(回读 0x0C 比对, 固件侧
-                // 最坏 ~600ms 才发出); 旧固件或芯片忙时无此行, 800ms 窗口静默略过,
-                // 不影响 done 判定。
-                if (line2.includes("done")) {
-                    try {
-                        const vline = await waitForLine(800);
-                        if (vline) log("烧录校验: " + vline, vline.includes("verify ok") ? "" : "warn");
-                    } catch (e) { /* 旧固件无 verify 行 */ }
-                }
-                if (!line2.includes("done")) {
-                    await sleep(20);
-                    while (readBuffer.length > 0) log("额外输出: " + await waitForLine(300));
-                }
+                log(`向芯片 ${addr} 烧录 128 字节寄存器表(${size} 设备)...`);
+                const ok = await mbrBurnOne(addr);
+                if (!ok) log(`芯片 ${addr} 未通过 NVM 完整校验`, "error");
             } else {
                 isConfirming = true;
                 btn.classList.add('btn-confirming');
@@ -9182,9 +9230,9 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     function expectedUf2Identity() {
-        if (!uf2Parsed) return { version: null, variant: null, hasSig: false };
-        if (uf2Parsed.sig) return { version: uf2Parsed.sig.version, variant: uf2Parsed.sig.variant, hasSig: true };
-        return { version: uf2Parsed.versionHeuristic || null, variant: null, hasSig: false };
+        if (!uf2Parsed) return { version: null, variant: null, buildId: null, hasSig: false };
+        if (uf2Parsed.sig) return { version: uf2Parsed.sig.version, variant: uf2Parsed.sig.variant, buildId: uf2Parsed.sig.buildId || null, hasSig: true };
+        return { version: uf2Parsed.versionHeuristic || null, variant: null, buildId: null, hasSig: false };
     }
 
     function verifyFlashResult() {
@@ -9203,9 +9251,15 @@ function validateUf2ForDevice(p, devInfo) {
             log(`⚠ 版本不一致:设备当前 ${got},固件文件 ${exp.version}——可能刷入了错误的文件`, "warn");
         } else if (exp.hasSig && exp.variant && gotVar !== exp.variant) {
             setFlashPhase("error", `⚠ 版本一致但变体不符:设备 ${gotVar ?? "未知"},文件 ${exp.variant}`);
+        } else if (exp.buildId && devInfo.buildId !== exp.buildId) {
+            setFlashPhase("error", `⚠ 固件版本相同但构建不符:设备 ${devInfo.buildId ?? "无标识"},文件 ${exp.buildId}`);
+            log(`精确构建校验失败:设备 BID=${devInfo.buildId ?? "无"},文件 BID=${exp.buildId}`, "error");
+        } else if (exp.hasSig && exp.buildId) {
+            setFlashPhase("done", `✅ 刷写成功并精确验证:固件 ${got}${gotVar ? " (" + gotVar + ")" : ""} / ${exp.buildId}`);
+            log(`✅ 刷写成功并精确验证:设备运行 ${got}/${gotVar}/${exp.buildId},与固件文件一致`);
         } else if (exp.hasSig) {
-            setFlashPhase("done", `✅ 刷写成功并已验证:固件 ${got}${gotVar ? " (" + gotVar + ")" : ""}`);
-            log(`✅ 刷写成功并已验证:设备运行固件 ${got},与固件文件一致`);
+            setFlashPhase("done", `⚠ 已重连:固件 ${got}${gotVar ? " (" + gotVar + ")" : ""}(旧固件无构建 ID,仅验证语义版本)`);
+            log("设备/固件文件缺少精确构建 ID；只确认了版本与变体，不能证明是同一构建", "warn");
         } else {
             setFlashPhase("done", `✅ 刷写成功:固件 ${got}(旧固件无签名,无法校验变体)`);
         }
@@ -9268,6 +9322,9 @@ function validateUf2ForDevice(p, devInfo) {
             if (!ok) { setFlashPhase("error", "✗ 无法进入配置模式"); return; }
         }
         const v = validateUf2ForDevice(uf2Parsed, devInfo);
+        if (uf2Parsed.sig && uf2Parsed.sig.buildId) {
+            log(`固件精确构建标识: ${uf2Parsed.sig.buildId}`);
+        }
         renderUf2Info(uf2Parsed, v);
         // 弹窗内展示确认摘要,供最终核对(不阻塞刷写)
         const summary =
@@ -9534,7 +9591,7 @@ function validateUf2ForDevice(p, devInfo) {
         $("rgMbrGate").disabled = !inCfg || !mbrGateFwSupport;
 
         // round86 #12: 预设/悬空截止校准按钮已移除;btnMbrBurnAll 为同步烧录入口。
-        const mbrIds = ["mbrChip", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply", "btnMbrBurnAll", "btnMbrRegWin"];
+        const mbrIds = ["mbrChip", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply", "btnMbrBurnAll", "btnMbrRestoreAll", "btnMbrRegWin"];
         const mbrEnabled = inCfg && MBR_CRC_OK;
         mbrIds.forEach(id => $(id).disabled = !mbrEnabled);
         // round82: 从芯片读取(0xC6)额外需要固件 >= 1.6.2-beta1。

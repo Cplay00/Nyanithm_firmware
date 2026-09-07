@@ -20,32 +20,28 @@ static spin_lock_t *i2c_locks[2] = { nullptr, nullptr };
 uint I2C_SDA[2] = { 0, 4 };
 uint I2C_SCL[2] = { 1, 5 };
 
-int i2c_write(uint8_t port, uint8_t addr, uint8_t* src, size_t len, bool blocking) {
+int i2c_write(uint8_t port, uint8_t addr, uint8_t* src, size_t len, bool nostop) {
 #if HWI2C
+    if (port >= 2) return PICO_ERROR_INVALID_ARG;
     spin_lock_t *lk = i2c_locks[port];
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
-    int ret = PICO_ERROR_GENERIC;
-    if (port == 0)
-        ret = i2c_write_blocking_until(i2c0, addr, src, len, blocking, make_timeout_time_us(5000));
-    else if (port == 1)
-        ret = i2c_write_blocking_until(i2c1, addr, src, len, blocking, make_timeout_time_us(5000));
+    i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
+    int ret = i2c_write_blocking_until(i2c, addr, src, len, nostop, make_timeout_time_us(5000));
     if (lk) spin_unlock(lk, save);
     return ret;
 #else
     return PICO_ERROR_GENERIC;
 #endif
 }
-int i2c_read(uint8_t port, uint8_t addr, uint8_t* dst, size_t len, bool blocking) {
+int i2c_read(uint8_t port, uint8_t addr, uint8_t* dst, size_t len, bool nostop) {
 #if HWI2C
+    if (port >= 2) return PICO_ERROR_INVALID_ARG;
     spin_lock_t *lk = i2c_locks[port];
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
-    int ret = PICO_ERROR_GENERIC;
-    if (port == 0)
-        ret = i2c_read_blocking_until(i2c0, addr, dst, len, blocking, make_timeout_time_us(5000));
-    else if (port == 1)
-        ret = i2c_read_blocking_until(i2c1, addr, dst, len, blocking, make_timeout_time_us(5000));
+    i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
+    int ret = i2c_read_blocking_until(i2c, addr, dst, len, nostop, make_timeout_time_us(5000));
     if (lk) spin_unlock(lk, save);
     return ret;
 #else
@@ -59,13 +55,39 @@ int i2c_read(uint8_t port, uint8_t addr, uint8_t* dst, size_t len, bool blocking
 // and false touch detections.
 int i2c_write_read(uint8_t port, uint8_t addr, uint8_t* wr, size_t wr_len, uint8_t* rd, size_t rd_len) {
 #if HWI2C
+    if (port >= 2) return PICO_ERROR_INVALID_ARG;
     spin_lock_t *lk = i2c_locks[port];
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
     i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
     int ret = i2c_write_blocking_until(i2c, addr, wr, wr_len, true, make_timeout_time_us(5000));
-    if (ret >= 0) {
+    if (ret == (int)wr_len) {
         ret = i2c_read_blocking_until(i2c, addr, rd, rd_len, false, make_timeout_time_us(5000));
+    } else if (ret >= 0) {
+        ret = PICO_ERROR_GENERIC;
+    }
+    if (lk) spin_unlock(lk, save);
+    return ret;
+#else
+    return PICO_ERROR_GENERIC;
+#endif
+}
+
+// CY8CMBR3xxx requires the data-pointer write to end with STOP before the
+// following read. Hold the software lock across both native SDK calls so no
+// other core can replace the pointer between those two bus transactions.
+int i2c_write_stop_read(uint8_t port, uint8_t addr, uint8_t reg, uint8_t* rd, size_t rd_len) {
+#if HWI2C
+    if (port >= 2) return PICO_ERROR_INVALID_ARG;
+    spin_lock_t *lk = i2c_locks[port];
+    uint32_t save = 0;
+    if (lk) save = spin_lock_blocking(lk);
+    i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
+    int ret = i2c_write_blocking_until(i2c, addr, &reg, 1, false, make_timeout_time_us(5000));
+    if (ret == 1) {
+        ret = i2c_read_blocking_until(i2c, addr, rd, rd_len, false, make_timeout_time_us(5000));
+    } else if (ret >= 0) {
+        ret = PICO_ERROR_GENERIC;
     }
     if (lk) spin_unlock(lk, save);
     return ret;

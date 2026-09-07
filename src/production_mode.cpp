@@ -14,148 +14,200 @@
 #include <pico/stdlib.h>
 #include <production_mode.h>
 #include <stdio.h>
+#include <string.h>
 #include <tusb.h>
 
-// round88b: 配置区单寄存器读取统一走 i2c_write_read(原子 write+restart+read
-// 组合事务, 末尾产生 STOP -- 与 verify_cy8cmbr3116_burn/0xC6 读回/驱动数据路径
-// 同形, round75/80 真机验证过的形状)。1.6.5 首版烧录轮询手写的
-// write(nostop=true)+read(nostop=true) 组合在整个会话中从不产生 STOP,
-// 真机实测 CTRL_CMD 轮询永远读不到有效值 -> 误判 timeout -> 不发软复位,
-// 新配置停在 RAM、触摸行为错乱。注意: i2c_read 的末参是 SDK 的 nostop,
-// 不是"阻塞"语义。
-static bool mbrReadReg(uint8_t addr, uint8_t reg, uint8_t* out) {
-    return i2c_write_read(0, addr, &reg, 1, out, 1) == 1;
+namespace {
+constexpr uint8_t MBR_CONFIG_SIZE = 128;
+constexpr uint8_t MBR_CRC_OFFSET = 0x7E;
+constexpr uint32_t MBR_IDLE_TIMEOUT_MS = 200;
+constexpr uint32_t MBR_SAVE_TIMEOUT_MS = 1200;
+constexpr uint32_t MBR_RESET_TIMEOUT_MS = 300;
+
+void serviceMbrWait(uint32_t ms) {
+    uint32_t start = to_ms_since_boot(get_absolute_time());
+    while (to_ms_since_boot(get_absolute_time()) - start < ms) {
+        tud_task();
+        watchdog_update();
+        sleep_ms(1);
+    }
 }
 
-bool detect3116(uint8_t addr) {
-    // round88b: 读形状统一为组合事务(原 write(nostop=true)+read(nostop=true)
-    // 从不产生 STOP, 与新烧录序列同一误用源)。
-    uint8_t a = 0;
-    if (!mbrReadReg(addr, I2C_ADDR_ADDRESS, &a) || a != addr) {
-        return false;
+bool mbrReadReg(uint8_t addr, uint8_t reg, uint8_t* out) {
+    return i2c_write_stop_read(0, addr, reg, out, 1) == 1;
+}
+
+bool mbrWriteReg(uint8_t addr, uint8_t reg, uint8_t value) {
+    uint8_t data[2] = { reg, value };
+    return i2c_write(0, addr, data, sizeof(data), false) == (int)sizeof(data);
+}
+
+uint16_t mbrConfigCrc(const uint8_t* cfg) {
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < MBR_CRC_OFFSET; i++) {
+        crc ^= (uint16_t)cfg[i] << 8;
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+bool mbrWaitCommandIdle(uint8_t addr, uint32_t timeoutMs, bool tolerateNak) {
+    uint32_t start = to_ms_since_boot(get_absolute_time());
+    bool sawAck = false;
+    while (to_ms_since_boot(get_absolute_time()) - start < timeoutMs) {
+        tud_task();
+        watchdog_update();
+        uint8_t command = 0xFF;
+        if (mbrReadReg(addr, CTRL_CMD_ADDRESS, &command)) {
+            sawAck = true;
+            if (command == 0) return true;
+        } else if (!tolerateNak && sawAck) {
+            return false;
+        }
+        sleep_ms(5);
+    }
+    return false;
+}
+
+bool mbrWaitAfterReset(uint8_t addr) {
+    // SW_RESET may execute as late as 50 ms after ACK; TI2CBOOT is up to 15 ms.
+    serviceMbrWait(65);
+    uint32_t start = to_ms_since_boot(get_absolute_time());
+    while (to_ms_since_boot(get_absolute_time()) - start < MBR_RESET_TIMEOUT_MS) {
+        uint8_t chipAddress = 0;
+        if (mbrReadReg(addr, I2C_ADDR_ADDRESS, &chipAddress) && chipAddress == addr) return true;
+        serviceMbrWait(5);
+    }
+    return false;
+}
+
+bool mbrResetAndWait(uint8_t addr) {
+    return mbrWriteReg(addr, CTRL_CMD_ADDRESS, 0xFF) && mbrWaitAfterReset(addr);
+}
+
+bool mbrWriteConfig(uint8_t addr, const uint8_t* cfg) {
+    uint8_t packet[MBR_CONFIG_SIZE + 1];
+    packet[0] = 0;
+    memcpy(packet + 1, cfg, MBR_CONFIG_SIZE);
+    return i2c_write(0, addr, packet, sizeof(packet), false) == (int)sizeof(packet);
+}
+
+bool mbrCompareConfig(const uint8_t* lhs, const uint8_t* rhs, uint8_t* mismatch) {
+    for (uint8_t i = 0; i < MBR_CONFIG_SIZE; i++) {
+        if (lhs[i] != rhs[i]) {
+            if (mismatch) *mismatch = i;
+            return false;
+        }
     }
     return true;
 }
 
-void program_cy8cmbr3116_custom(uint8_t addr, uint8_t* cfg) {
-    // round88 烧录序列修正(逐条对标 TRM):
-    // - TRM §1.5.80 CTRL_CMD: 设备在启动和命令完成时把该寄存器清零, 主机只能
-    //   在其值为 0 时写入; 非零时写入行为未定义。旧代码连写两次 0x02 属违例,
-    //   改为单次写入 + 轮询 0x86 归零判完成(官方语义, 取代盲等)。
-    // - TRM §1.5.81/§1.5.82: 完成后读 0x88 bit0 判 ERR(0=成功); 出错再读
-    //   0x89 取错误码(0x00 成功 / 0xFD Flash 写失败 / 0xFE 配置 CRC 不符 /
-    //   0xFF 命令无效)。出错绝不发 0xFF 软复位, 避免芯片带着坏配置复位。
-    // - Datasheet 时序参数: NVM 写入命令执行最长 ~220ms, 轮询上限 500ms 覆盖;
-    //   期间泵 tud_task + watchdog(本函数在配置模式 Core0 调用, 看门狗无人喂)。
-    // - 软复位(0xFF)后芯片需重新启动(读 Flash/CRC/校准基线), I2C 短暂 NAK;
-    //   轮询探测恢复后再返回, 后续 verify 读回不再撞首击 NAK。
-    for (uint8_t i = 0; i < 128; i++) {
-        uint8_t buf[2] = { i, cfg[i] };
-        i2c_write(0, addr, buf, 2, true);
+bool mbrRecoverPrevious(uint8_t addr, const uint8_t* previous) {
+    if (!mbrResetAndWait(addr)) return false;
+    uint8_t current[MBR_CONFIG_SIZE];
+    return read_cy8cmbr3116_config(addr, current) && mbrCompareConfig(current, previous, nullptr);
+}
+}
+
+bool detect3116(uint8_t addr) {
+    uint8_t value = 0;
+    return mbrReadReg(addr, I2C_ADDR_ADDRESS, &value) && value == addr;
+}
+
+MbrProgramResult program_cy8cmbr3116_custom(uint8_t addr, const uint8_t* cfg) {
+    MbrProgramResult result = { MBR_PROGRAM_INVALID_CONFIG, 0, 0, 0 };
+    if (!cfg) return result;
+    const uint8_t verifyAddr = cfg[I2C_ADDR_ADDRESS];
+    if (verifyAddr < 0x08 || verifyAddr > 0x77) return result;
+    const uint16_t expectedCrc = mbrConfigCrc(cfg);
+    const uint16_t suppliedCrc = (uint16_t)cfg[0x7E] | ((uint16_t)cfg[0x7F] << 8);
+    if (expectedCrc != suppliedCrc) {
+        result.offset = MBR_CRC_OFFSET;
+        return result;
     }
-    // round88b: 前置检查 CTRL_CMD==0(TRM §1.5.80: 非零时写入行为未定义)。
-    if (!mbrReadReg(addr, CTRL_CMD_ADDRESS, &cur)) {
-        printf("CTRL_CMD readback failed, burn aborted.\n");
-        return;
+
+    uint8_t previous[MBR_CONFIG_SIZE];
+    if (!read_cy8cmbr3116_config(addr, previous)) {
+        result.code = MBR_PROGRAM_BACKUP_FAILED;
+        return result;
     }
-    if (cur != 0) {
-        // 前一命令未完成, 此刻写 0x86 行为未定义(TRM §1.5.80) -- 放弃本次烧录
-        printf("CTRL_CMD busy (0x%02X), burn aborted.\n", cur);
-        return;
+    if (!mbrWaitCommandIdle(addr, MBR_IDLE_TIMEOUT_MS, false)) {
+        result.code = MBR_PROGRAM_BUSY;
+        return result;
     }
-    uint8_t buf[2] = { CTRL_CMD_ADDRESS, 0x02 };  // 校验 CRC 并保存配置到 NVM
-    i2c_write(0, addr, buf, 2, true);
-    bool done = false;
-    for (int i = 0; i < 50 && !done; i++) {  // 50 x 10ms = 500ms 上限
-        tud_task();
-        watchdog_update();
-        sleep_ms(10);
-        // round88b: TRM §1.5.80 -- 命令完成时设备把 0x86 清零; 轮询读回为 0
-        // 即完成。读形状必须是 write(1B, 带 STOP)+read 组合事务(mbrReadReg),
-        // 读不到寄存器值与读到非零值同等视为"未完成"。
-        if (mbrReadReg(addr, CTRL_CMD_ADDRESS, &cur) && cur == 0) {
-            done = true;
-        }
+
+    if (!mbrWriteConfig(addr, cfg)) {
+        result.code = MBR_PROGRAM_RAM_WRITE_FAILED;
+        mbrRecoverPrevious(addr, previous);
+        return result;
     }
-    if (!done) {
-        printf("CTRL_CMD timeout, burn aborted.\n");
-        return;
+    serviceMbrWait(1);
+
+    uint8_t ram[MBR_CONFIG_SIZE];
+    uint8_t mismatch = 0;
+    if (!read_cy8cmbr3116_config(addr, ram) || !mbrCompareConfig(ram, cfg, &mismatch)) {
+        result.code = MBR_PROGRAM_RAM_VERIFY_FAILED;
+        result.offset = mismatch;
+        mbrRecoverPrevious(addr, previous);
+        return result;
     }
+
+    if (!mbrWaitCommandIdle(addr, MBR_IDLE_TIMEOUT_MS, false) ||
+        !mbrWriteReg(addr, CTRL_CMD_ADDRESS, 0x02)) {
+        result.code = MBR_PROGRAM_SAVE_START_FAILED;
+        mbrRecoverPrevious(addr, previous);
+        return result;
+    }
+    if (!mbrWaitCommandIdle(addr, MBR_SAVE_TIMEOUT_MS, true)) {
+        result.code = MBR_PROGRAM_SAVE_TIMEOUT;
+        // Command state is unknown: never write another CTRL_CMD while it may be nonzero.
+        return result;
+    }
+
     uint8_t status = 0;
-    if (!mbrReadReg(addr, 0x88, &status)) {
-        printf("CTRL_CMD_STATUS readback failed, burn aborted.\n");
-        return;
+    if (!mbrReadReg(addr, CTRL_CMD_STATUS_ADDRESS, &status)) {
+        result.code = MBR_PROGRAM_STATUS_READ_FAILED;
+        return result;
     }
-    if (status & 0x01) {  // TRM §1.5.81: bit0 ERR
-        uint8_t err = 0;
-        mbrReadReg(addr, 0x89, &err);  // TRM §1.5.82: 0xFD flash / 0xFE CRC / 0xFF invalid
-        printf("burn error: status=0x%02X err=0x%02X%s%s\n", status, err,
-               err == 0xFD ? " (flash write failed)" : "",
-               err == 0xFE ? " (config CRC mismatch)" : "");
-        return;  // 出错不发软复位
+    result.status = status;
+    if (status & 0x01) {
+        result.code = MBR_PROGRAM_DEVICE_ERROR;
+        if (!mbrReadReg(addr, CTRL_CMD_ERR_ADDRESS, &result.error)) result.error = 0xFF;
+        return result;
     }
-    buf[1] = 0xFF;  // 软复位, 新配置生效
-    i2c_write(0, addr, buf, 2, true);
-    // 复位后启动延时: 轮询探测 I2C 恢复(最长 200ms), 期间泵 USB/看门狗
-    for (int i = 0; i < 20; i++) {
-        tud_task();
-        watchdog_update();
-        sleep_ms(10);
-        uint8_t a = 0;
-        if (mbrReadReg(addr, I2C_ADDR_ADDRESS, &a) && a == addr) {
-            break;
-        }
+
+    if (!mbrWriteReg(addr, CTRL_CMD_ADDRESS, 0xFF) || !mbrWaitAfterReset(verifyAddr)) {
+        result.code = MBR_PROGRAM_RESET_FAILED;
+        return result;
     }
+
+    uint8_t persisted[MBR_CONFIG_SIZE];
+    if (!read_cy8cmbr3116_config(verifyAddr, persisted) || !mbrCompareConfig(persisted, cfg, &mismatch)) {
+        result.code = MBR_PROGRAM_NVM_VERIFY_FAILED;
+        result.offset = mismatch;
+        return result;
+    }
+
+    result.code = MBR_PROGRAM_OK;
+    return result;
 }
 
-// round75: post-burn read-back for the panel 0xBA path. After the soft
-// reset the chip needs a moment before I2C answers again; poll briefly,
-// then compare the THRESHOLD register (0x0C) with what was written.
-// Diagnostic only -- the caller has already printed "done", so a skipped
-// verify must not look like a failed burn.
-void verify_cy8cmbr3116_burn(uint8_t addr, uint8_t* cfg) {
-    for (int attempt = 0; attempt < 30; attempt++) {
-        tud_task();  // keep the USB stack serviced while we wait
-        watchdog_update();
-        uint8_t reg = 0x0C;
-        uint8_t val = 0;
-        if (i2c_write(0, addr, &reg, 1, true) == 1 &&
-            i2c_read(0, addr, &val, 1, false) == 1) {
-            if (val == cfg[0x0C]) {
-                printf("verify ok\n");
-            } else {
-                printf("verify mismatch: reg 0x0C wrote 0x%02X read 0x%02X\n", cfg[0x0C], val);
-            }
-            return;
-        }
-        sleep_ms(10);
-    }
-    printf("verify skipped (chip busy)\n");
-}
-
-// round80: read back the chip's current 128-byte config block (0x00-0x7F)
-// for the panel 0xC6 "read from chip" path. Chunked 4x32B reads with an
-// explicit register-pointer write per chunk -- the write-with-stop then
-// 32B-read transaction shape is the one already proven on-device by
-// verify_cy8cmbr3116_burn (round75), and a single 128B burst is untested
-// on this chip family. USB + watchdog are pumped between chunks because
-// this runs on Core0 inside config-mode handleCommand (updateInputState
-// is not feeding the dog there).
-// Returns false on any I2C failure; the caller answers with a text line.
 bool read_cy8cmbr3116_config(uint8_t addr, uint8_t* cfg) {
+    if (!cfg) return false;
     for (uint8_t chunk = 0; chunk < 4; chunk++) {
         tud_task();
         watchdog_update();
         uint8_t reg = chunk * 32;
-        if (i2c_write(0, addr, &reg, 1, true) != 1) return false;
-        if (i2c_read(0, addr, cfg + chunk * 32, 32, false) != 32) return false;
+        if (i2c_write_stop_read(0, addr, reg, cfg + chunk * 32, 32) != 32) return false;
     }
     return true;
 }
 
 void program3116() {
     while (1) {
-        tud_task();  // round51: Core0 owns the USB stack in production mode
+        tud_task();
         printf("\n");
         if (detect3116(0x43) && detect3116(0x44)) {
             printf("+-----------------------------+\n");
@@ -172,7 +224,7 @@ void program3116() {
             printf("programing 0x43.\n");
             program_cy8cmbr3116_custom(0x37, cy8cmbr3116_cfg_0x43);
         } else {
-                printf("waiting for the FIRST chip.\n");
+            printf("waiting for the FIRST chip.\n");
         }
         sleep_ms(500);
     }
