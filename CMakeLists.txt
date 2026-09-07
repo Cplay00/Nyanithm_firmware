@@ -1,4 +1,4 @@
-﻿# Generated Cmake Pico project file
+# Generated Cmake Pico project file
 
 cmake_minimum_required(VERSION 3.13)
 
@@ -65,7 +65,7 @@ pico_generate_pio_header(Nyanithm ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 pico_set_program_name(Nyanithm "Nyanithm")
 
-pico_set_program_version(Nyanithm "1.6.3-beta1")
+pico_set_program_version(Nyanithm "1.6.4-beta1")
 
 # round53: build variant for the NYANFW1 firmware signature (control panel
 # validates UF2 variant vs connected device before flashing)

@@ -12,6 +12,7 @@
 #include <chuni_io.h>
 #include <controller_config.h>
 #include <gpio_def.h>
+#include <hardware/watchdog.h>
 #include <hw_devices.h>
 #include <nyanithm_shared.h>
 #include <tusb.h>
@@ -710,6 +711,47 @@ void cdc_respond() {
             RGB_LED.setColor((g_lampCount - 1) - i, r, g, b);
         }
         RGB_LED.flush();
+    }
+    if (cmd == CMD_DETECT) {
+        // round86: hardware identity probe in NORMAL mode. The config-mode
+        // handler (app_link.cpp CMD_DETECT) already answers 0xBC; the panel
+        // needs the same identity before entering config mode so it can gate
+        // calibration routing (#7) and show the probe card on connect (#6).
+        // Same 6-byte frame: [0]=0xBC sync [1]=mprMask [2]=mbrMask [3]=tofCount
+        // [4]=flags [5]=config hwVer. Differences from the config-mode probe:
+        //   - ToF channels are NOT scanned. Core0's updateAir() owns the PCA954X
+        //     mux channel in normal mode; leaving the mux on a probe channel
+        //     would break ToF polling after the probe. tofCount is derived from
+        //     config hwVer (2/4 = 32" = 5 ToF, else 4) and marked by flag bit2 so
+        //     the host can tell derived values from measured ones.
+        //   - Core1 blocks here up to ~1.7s worst case (10 absent probes x ~11ms
+        //     retry + mux presence check). Safe: i2c_port spinlocks serialize
+        //     with Core0's touch scan on i2c0 (round80's 0xBE/0xBF debug reads
+        //     already do blocking I2C from this context), and Core0 keeps
+        //     feeding the watchdog -- only CDC/HID output is delayed, same as
+        //     the existing config-mode probe cost.
+        uint8_t mprMask = 0;
+        for (int i = 0; i < 3; i++) {
+            tud_task();
+            watchdog_update();
+            if (findI2CDevice(0, 0x5A + i)) mprMask |= (1 << i);
+        }
+        static const uint8_t mbrAddrs[6] = { 0x37, 0x40, 0x41, 0x42, 0x43, 0x44 };
+        uint8_t mbrMask = 0;
+        for (int i = 0; i < 6; i++) {
+            tud_task();
+            watchdog_update();
+            if (findI2CDevice(0, mbrAddrs[i])) mbrMask |= (1 << i);
+        }
+        watchdog_update();
+        bool muxPresent = findI2CDevice(1, 0x70);
+        uint8_t hw = ControllerConfig.hwVer;
+        uint8_t tofCount = (hw == 2 || hw == 4) ? 5 : 4;
+        uint8_t flags = (muxPresent ? 0b00000001 : 0) | 0b00000100;  // bit2: tofCount derived, not scanned
+        uint8_t frame[6] = { CMD_DETECT, mprMask, mbrMask, tofCount, flags, hw };
+        tud_cdc_write(frame, sizeof(frame));
+        tud_cdc_write_flush();
+        g_tele.cdcTxBytes += sizeof(frame);
     }
     if (cmd == CMD_CONFIG_MODE) {
         RGB_LED.fill(0x00, 0x0f, 0x00);
