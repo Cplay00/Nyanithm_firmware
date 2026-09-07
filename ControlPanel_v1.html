@@ -5656,9 +5656,15 @@ function validateUf2ForDevice(p, devInfo) {
             let op = "";
             if (rawSession) {
                 // round86: 「原始结果」模式 —— 呈现传感器底层物理读数 (含未触碰时的 idle 底噪)
-                const noiseFloor = perKeyIsMbr() ? 130 : 6;
-                on = v > noiseFloor;
-                op = on ? Math.min(1, (v - noiseFloor) / (sensorMax - noiseFloor)).toFixed(2) : "0.35";
+                if (perKeyIsMbr()) {
+                    const noiseFloor = 130;
+                    on = v > noiseFloor;
+                    op = on ? Math.min(1, (v - noiseFloor) / (255 - noiseFloor)).toFixed(2) : "0.35";
+                } else {
+                    // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度
+                    on = v > 4;
+                    op = Math.min(1.0, Math.max(0.0, v / 100.0)).toFixed(2);
+                }
                 tc.innerText = "" + v;
             } else {
                 // round86: 「模拟结果」模式 —— 以设备在游戏中的真实结果的模拟!
@@ -5666,9 +5672,14 @@ function validateUf2ForDevice(p, devInfo) {
                 // 触发判定 (v > 0) 激活高亮, 呈现游戏中的实际输入结果 (128 标准判定或真实压力映射)
                 on = v > 0;
                 if (on) {
-                    if (v === 128) op = "1.00";
-                    else op = Math.min(1, v / 255).toFixed(2);
-                    op = (0.35 + parseFloat(op) * 0.65).toFixed(2);
+                    if (perKeyIsMbr()) {
+                        if (v === 128) op = "1.00";
+                        else op = Math.min(1, v / 255).toFixed(2);
+                        op = (0.35 + parseFloat(op) * 0.65).toFixed(2);
+                    } else {
+                        // MPR121: 触摸值达到 100 时背景亮度达到最大, 0-100 线性提升亮度
+                        op = Math.min(1.0, v / 100.0).toFixed(2);
+                    }
                     tc.innerText = "" + v;
                 } else {
                     tc.innerText = "";
