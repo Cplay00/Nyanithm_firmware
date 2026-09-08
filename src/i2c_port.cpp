@@ -20,6 +20,19 @@ static spin_lock_t *i2c_locks[2] = { nullptr, nullptr };
 uint I2C_SDA[2] = { 0, 4 };
 uint I2C_SCL[2] = { 1, 5 };
 
+// round88e: the previous fixed 5 ms absolute deadline was a WHOLE-transaction
+// budget, silently capping the maximum transfer length: the 129-byte MBR3116
+// config burst needs ~2.9 ms at BR400K but ~5.8 ms at BR200K (boot production
+// mode), so every NVM config write returned PICO_ERROR_TIMEOUT before the
+// chip even ACKed the address. Scale the deadline with length -- 100 us/byte
+// is ~2.2x the 200 kHz byte time -- keeping the 5 ms base for controller
+// setup, clock stretch and STOP. Healthy transactions are unaffected; only
+// failure detection on a wedged bus slows (worst 17.9 ms for the config
+// burst), which every caller tolerates.
+static absolute_time_t i2cDeadline(size_t len) {
+    return make_timeout_time_us(5000 + (uint64_t)len * 100);
+}
+
 int i2c_write(uint8_t port, uint8_t addr, uint8_t* src, size_t len, bool nostop) {
 #if HWI2C
     if (port >= 2) return PICO_ERROR_INVALID_ARG;
@@ -27,7 +40,7 @@ int i2c_write(uint8_t port, uint8_t addr, uint8_t* src, size_t len, bool nostop)
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
     i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
-    int ret = i2c_write_blocking_until(i2c, addr, src, len, nostop, make_timeout_time_us(5000));
+    int ret = i2c_write_blocking_until(i2c, addr, src, len, nostop, i2cDeadline(len));
     if (lk) spin_unlock(lk, save);
     return ret;
 #else
@@ -41,7 +54,7 @@ int i2c_read(uint8_t port, uint8_t addr, uint8_t* dst, size_t len, bool nostop) 
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
     i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
-    int ret = i2c_read_blocking_until(i2c, addr, dst, len, nostop, make_timeout_time_us(5000));
+    int ret = i2c_read_blocking_until(i2c, addr, dst, len, nostop, i2cDeadline(len));
     if (lk) spin_unlock(lk, save);
     return ret;
 #else
@@ -60,9 +73,9 @@ int i2c_write_read(uint8_t port, uint8_t addr, uint8_t* wr, size_t wr_len, uint8
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
     i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
-    int ret = i2c_write_blocking_until(i2c, addr, wr, wr_len, true, make_timeout_time_us(5000));
+    int ret = i2c_write_blocking_until(i2c, addr, wr, wr_len, true, i2cDeadline(wr_len));
     if (ret == (int)wr_len) {
-        ret = i2c_read_blocking_until(i2c, addr, rd, rd_len, false, make_timeout_time_us(5000));
+        ret = i2c_read_blocking_until(i2c, addr, rd, rd_len, false, i2cDeadline(rd_len));
     } else if (ret >= 0) {
         ret = PICO_ERROR_GENERIC;
     }
@@ -83,9 +96,9 @@ int i2c_write_stop_read(uint8_t port, uint8_t addr, uint8_t reg, uint8_t* rd, si
     uint32_t save = 0;
     if (lk) save = spin_lock_blocking(lk);
     i2c_inst_t *i2c = (port == 0) ? i2c0 : i2c1;
-    int ret = i2c_write_blocking_until(i2c, addr, &reg, 1, false, make_timeout_time_us(5000));
+    int ret = i2c_write_blocking_until(i2c, addr, &reg, 1, false, i2cDeadline(1));
     if (ret == 1) {
-        ret = i2c_read_blocking_until(i2c, addr, rd, rd_len, false, make_timeout_time_us(5000));
+        ret = i2c_read_blocking_until(i2c, addr, rd, rd_len, false, i2cDeadline(rd_len));
     } else if (ret >= 0) {
         ret = PICO_ERROR_GENERIC;
     }

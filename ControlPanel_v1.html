@@ -5302,8 +5302,8 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    // round88: Mock 版本串随固件 1.6.5 / round88d 精确构建标识同步。
-                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5;hw_v1;BID=round88d";
+                    // round88e: Mock 版本串随固件 1.6.5 / round88e 精确构建标识同步。
+                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5;hw_v1;BID=round88e";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -7876,8 +7876,11 @@ function validateUf2ForDevice(p, devInfo) {
 
     async function mbrRestoreAllBuiltins() {
         if (!configMode) { log("请先进入配置模式", "warn"); return; }
-        if (!devInfo || devInfo.buildId !== "round88d") {
-            log("安全恢复要求设备运行已验证构建 round88d；当前构建无法确认，拒绝写入 NVM", "error");
+        // round88e: 已验证构建白名单。round88d 起固件带官方 NVM 状态机;
+        // round88e 仅放宽 I2C 事务截止时间(按长度缩放), NVM 行为不变。
+        const verifiedBuilds = ["round88d", "round88e"];
+        if (!devInfo || !verifiedBuilds.includes(devInfo.buildId)) {
+            log("安全恢复要求设备运行已验证构建 (round88d/round88e)；当前构建无法确认，拒绝写入 NVM", "error");
             return;
         }
         const required = ["0x40", "0x41", "0x42"];
