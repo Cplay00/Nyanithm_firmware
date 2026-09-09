@@ -4485,6 +4485,17 @@ function cmpVersion(a, b) {
     return 0;
 }
 
+// round88f: BID("roundNNx")单调序比较。N = 主序, 字母后缀按
+// round88 < round88a < ... < round88z < round89 排序(多字母取首字母,
+// 与字典序一致)。无法解析/缺 BID 返回 -Infinity,与白名单拒绝同判。
+// 取代 round88e 的硬编码枚举白名单: 每发一个新构建都要同步加白名单,
+// 否则设备升级到新固件后"安全恢复"即被自身旧面板拒绝(前向兼容断裂)。
+function cmpBuildId(bid) {
+    const m = (bid || "").match(/^round(\d+)([a-z]?)/);
+    if (!m) return -Infinity;
+    return Number(m[1]) + (m[2] ? (m[2].charCodeAt(0) - 96) / 26 : 0);
+}
+
 // devInfo: {fw, api, hwVer, var, sig, raw} 或 null
 function validateUf2ForDevice(p, devInfo) {
     const errors = [], warnings = [];
@@ -5302,8 +5313,8 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    // round88e: Mock 版本串随固件 1.6.5 / round88e 精确构建标识同步。
-                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5;hw_v1;BID=round88e";
+                    // round88f: Mock 版本串随固件 1.6.5 / round88f 精确构建标识同步。
+                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5;hw_v1;BID=round88f";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -7876,11 +7887,12 @@ function validateUf2ForDevice(p, devInfo) {
 
     async function mbrRestoreAllBuiltins() {
         if (!configMode) { log("请先进入配置模式", "warn"); return; }
-        // round88e: 已验证构建白名单。round88d 起固件带官方 NVM 状态机;
-        // round88e 仅放宽 I2C 事务截止时间(按长度缩放), NVM 行为不变。
-        const verifiedBuilds = ["round88d", "round88e"];
-        if (!devInfo || !verifiedBuilds.includes(devInfo.buildId)) {
-            log("安全恢复要求设备运行已验证构建 (round88d/round88e)；当前构建无法确认，拒绝写入 NVM", "error");
+        // round88f: 门禁改为 BID 单调序比较(cmpBuildId)——round88d 起固件带
+        // 官方 NVM 状态机,任何 >= round88d 的构建均放行;旧硬编码白名单
+        // 会在设备升级到白名单外的新固件时拒绝恢复(前向兼容断裂)。
+        // 无法解析/缺失 BID 仍拒绝(与 round88e 前的无 BID 构建同判)。
+        if (!devInfo || cmpBuildId(devInfo.buildId) < cmpBuildId("round88d")) {
+            log("安全恢复要求设备运行 round88d 及之后的已验证构建；当前构建无法确认，拒绝写入 NVM", "error");
             return;
         }
         const required = ["0x40", "0x41", "0x42"];
@@ -7900,6 +7912,10 @@ function validateUf2ForDevice(p, devInfo) {
                 return;
             }
         }
+        // round88f: 备份完成即挂全局兜底。mbrBurnOne 内 waitForLine 超时会
+        // throw,旧版若主循环/回滚循环被异常击穿,函数直接散场——回滚一步
+        // 不走、backups 引用也不落 window,三片原表随会话丢失。
+        window.__mbrRestoreBackups = backups;
         for (let i = 0; i < required.length; i++) {
             const c = required[i];
             const tpl = MBR_TABLES[c];
@@ -7907,7 +7923,12 @@ function validateUf2ForDevice(p, devInfo) {
             mbrTable = new Uint8Array(tpl);
             mbrTableCache[c] = mbrTable;
             mbrDirty[c] = true;
-            const ok = await mbrBurnOne(c);
+            let ok = false;
+            try {
+                ok = await mbrBurnOne(c);
+            } catch (e) {
+                log(`芯片 ${c} 烧录异常: ${e.message}`, "error");
+            }
             if (!ok) {
                 let rollbackFail = 0;
                 for (let j = i; j >= 0; j--) {
@@ -7915,14 +7936,17 @@ function validateUf2ForDevice(p, devInfo) {
                     mbrTable = new Uint8Array(backups[doneChip]);
                     mbrTableCache[doneChip] = mbrTable;
                     mbrDirty[doneChip] = true;
-                    if (!(await mbrBurnOne(doneChip))) rollbackFail++;
+                    try {
+                        if (!(await mbrBurnOne(doneChip))) rollbackFail++;
+                    } catch (e) {
+                        rollbackFail++;
+                        log(`芯片 ${doneChip} 回滚异常: ${e.message}`, "error");
+                    }
                 }
-                window.__mbrRestoreBackups = backups;
                 log(`安全恢复停止: ${c} 未通过完整校验；已回滚 ${i + 1 - rollbackFail}/${i + 1} 片。备份保留在 window.__mbrRestoreBackups。`, "error");
                 return;
             }
         }
-        window.__mbrRestoreBackups = backups;
         $("mbrChip").value = "0x40";
         mbrCurChip = "0x40";
         mbrTable = new Uint8Array(mbrTableCache["0x40"]);

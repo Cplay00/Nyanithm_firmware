@@ -104,6 +104,11 @@ bool mbrCompareConfig(const uint8_t* lhs, const uint8_t* rhs, uint8_t* mismatch)
     return true;
 }
 
+// Roll-back for a failed burn: nothing was persisted to NVM yet at this
+// point, so resetting the part is enough to return it to its previous config.
+// Returns false only when the reset or the post-reset read-back itself failed,
+// which the caller reports so the host can see the part is in an unverified
+// state (a follow-up 0xC6 read is the recovery action).
 bool mbrRecoverPrevious(uint8_t addr, const uint8_t* previous) {
     if (!mbrResetAndWait(addr)) return false;
     uint8_t current[MBR_CONFIG_SIZE];
@@ -140,7 +145,10 @@ MbrProgramResult program_cy8cmbr3116_custom(uint8_t addr, const uint8_t* cfg) {
 
     if (!mbrWriteConfig(addr, cfg)) {
         result.code = MBR_PROGRAM_RAM_WRITE_FAILED;
-        mbrRecoverPrevious(addr, previous);
+        // 0x80 sentinel: the post-failure reset/verify-back also failed, so the
+        // part's live config is unverified (distinct from chip CTRL_CMD_ERR
+        // codes 0xFD/0xFE which only appear for MBR_PROGRAM_DEVICE_ERROR).
+        if (!mbrRecoverPrevious(addr, previous)) result.error = 0x80;
         return result;
     }
     serviceMbrWait(1);
@@ -150,14 +158,14 @@ MbrProgramResult program_cy8cmbr3116_custom(uint8_t addr, const uint8_t* cfg) {
     if (!read_cy8cmbr3116_config(addr, ram) || !mbrCompareConfig(ram, cfg, &mismatch)) {
         result.code = MBR_PROGRAM_RAM_VERIFY_FAILED;
         result.offset = mismatch;
-        mbrRecoverPrevious(addr, previous);
+        if (!mbrRecoverPrevious(addr, previous)) result.error = 0x80;
         return result;
     }
 
     if (!mbrWaitCommandIdle(addr, MBR_IDLE_TIMEOUT_MS, false) ||
         !mbrWriteReg(addr, CTRL_CMD_ADDRESS, 0x02)) {
         result.code = MBR_PROGRAM_SAVE_START_FAILED;
-        mbrRecoverPrevious(addr, previous);
+        if (!mbrRecoverPrevious(addr, previous)) result.error = 0x80;
         return result;
     }
     if (!mbrWaitCommandIdle(addr, MBR_SAVE_TIMEOUT_MS, true)) {
