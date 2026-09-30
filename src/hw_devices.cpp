@@ -7,9 +7,11 @@
 
 #include <controller_config.h>
 #include <hw_devices.h>
+#include <mbr_distance_gate.h>
 #include <tca9539.h>
 #include <hardware/timer.h>
 #include <hardware/watchdog.h>
+#include <cstring>
 
 VL53L0X tof0(1, 0x29);
 VL53L0X tof1(1, 0x29);
@@ -393,6 +395,76 @@ volatile bool gameRawEnabled = false;  // round68: cfg2 bit1 baseline (experimen
 static uint32_t pressureSnapLastMs = 0;
 static const uint32_t PRESSURE_SNAP_INTERVAL_MS = 5;
 
+// round89a: opt-in signal-domain gate. A recent coherent host read is not a
+// new chip scan: SYNC is used only for consistency, never as a refresh ID.
+// Disabled profiles perform no additional I2C reads. Core0 owns this state.
+static const uint32_t MBR_DISTANCE_POLL_MS = 5;
+static const uint32_t MBR_DISTANCE_MAX_READ_AGE_MS = 15;
+struct MbrDistanceSample {
+    uint16_t counts[16] = {0};
+    uint32_t readStartedMs = 0;
+    bool attempted = false;
+    bool valid = false;
+};
+static MbrDistanceSample mbrDistanceSamples[3];
+static MbrDistanceGateState mbrDistanceStates[3][16];
+static bool mbrDistanceEnabledForFrame = false;
+static bool mbrDistanceResetForFrame = false;
+
+static void prepareMbrDistanceGate() {
+    static uint8_t previousProfile[8] = {0};
+    static uint8_t previousLayout = 0;
+    bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) ||
+                  ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4;
+    bool enabled = useMbr && mbrDistanceGateEnabled(ControllerConfig);
+    mbrDistanceResetForFrame = false;
+    if (enabled != mbrDistanceEnabledForFrame ||
+        (enabled && (previousLayout != ControllerConfig.hwVer ||
+         std::memcmp(previousProfile, &ControllerConfig.mbrDistanceMagic,
+                     sizeof(previousProfile)) != 0))) {
+        mbrDistanceResetForFrame = true;
+        for (uint8_t m = 0; m < 3; m++) {
+            mbrDistanceSamples[m] = MbrDistanceSample{};
+            for (uint8_t e = 0; e < 16; e++) mbrDistanceStates[m][e] = MbrDistanceGateState{};
+        }
+        std::memcpy(previousProfile, &ControllerConfig.mbrDistanceMagic, sizeof(previousProfile));
+        previousLayout = ControllerConfig.hwVer;
+    }
+    mbrDistanceEnabledForFrame = enabled;
+}
+
+static void mbrDistanceReadSample(uint8_t m, CY8CMBR3116* chip) {
+    MbrDistanceSample& sample = mbrDistanceSamples[m];
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (!sample.attempted || now - sample.readStartedMs >= MBR_DISTANCE_POLL_MS) {
+        sample.readStartedMs = now;
+        sample.attempted = true;
+        sample.valid = chip->readDifferenceCounts(sample.counts);
+        if (sample.valid) {
+            for (uint8_t e = 0; e < 16; e++) {
+                int16_t lane = laneTable[m][e];
+                if (lane >= 0) pressureSnap[lane] = sample.counts[e] > 255 ? 255 : sample.counts[e];
+            }
+        }
+    }
+}
+
+// All chip reads finish before masks are formed at one common host time. A
+// slow later chip must not leave an earlier, now over-age sample authorized.
+static uint16_t mbrDistanceAllowedMask(uint8_t m, uint16_t hardwareBits, uint32_t now) {
+    const MbrDistanceSample& sample = mbrDistanceSamples[m];
+    bool usable = sample.valid && now - sample.readStartedMs <= MBR_DISTANCE_MAX_READ_AGE_MS;
+    uint16_t allowed = 0;
+    for (uint8_t e = 0; e < 16; e++) {
+        bool mapped = laneTable[m][e] >= 0;
+        if (mbrDistanceGateUpdate(ControllerConfig, sample.counts[e], usable && mapped,
+                                  (hardwareBits & (1u << e)) != 0, mbrDistanceStates[m][e])) {
+            allowed |= 1u << e;
+        }
+    }
+    return allowed;
+}
+
 // round66: MPR121 bulk diff read (mirrors CMD_DEBUG_DIFF's 0xC2 path: 3 chips,
 // filtered+baseline in 6 bulk transactions ~1ms). Writes pressureSnap clamped
 // 0-255. Returns false on I2C error (snapshot kept stale).
@@ -450,6 +522,9 @@ static bool mbrReadPressureSnap() {
 // report session is active. round68: also on while cfg2 bit1 game-raw
 // baseline is set.
 static void updatePressureSnap() {
+    // The gate publishes the same coherent count snapshot during touch scan,
+    // independent of a panel session, and avoids a duplicate pressure read.
+    if (mbrDistanceEnabledForFrame) return;
     if (rawReportLevel == 0 && !gameRawEnabled) return;
     uint32_t nowMs = to_ms_since_boot(get_absolute_time());
     if (nowMs - pressureSnapLastMs < PRESSURE_SNAP_INTERVAL_MS) return;
@@ -474,6 +549,16 @@ void updateTouch_v2() {
 
     hwTouch[0] = t0; hwTouch[1] = t1; hwTouch[2] = 0;  // round50: pre-verification snapshot
 
+    uint16_t distanceAllowed[2] = {0xFFFF, 0xFFFF};
+    if (mbrDistanceEnabledForFrame) {
+        mbrDistanceReadSample(0, &MBR3116D);
+        mbrDistanceReadSample(1, &MBR3116E);
+        uint32_t sampledAt = to_ms_since_boot(get_absolute_time());
+        distanceAllowed[0] = mbrDistanceAllowedMask(0, t0, sampledAt);
+        distanceAllowed[1] = mbrDistanceAllowedMask(1, t1, sampledAt);
+        t0 &= distanceAllowed[0]; t1 &= distanceAllowed[1];
+    }
+
     // round84: per-GAME-LANE stretched snapshot of the previous cycle. The
     // gate-anchoring check (laneNeighborConfirmed) is lane-space, so the
     // stretched bits from both chips are projected through laneTable once
@@ -486,19 +571,26 @@ void updateTouch_v2() {
     static uint8_t verifiedCount[2][16] = {0};
     static uint32_t lastTouchedMsV2[2][16] = {0};
     static bool fastOkV2[2][16] = {0};  // round80: strong flick first-cycle output flag
+    if (mbrDistanceResetForFrame) {
+        std::memset(prevLaneStretched, 0, sizeof(prevLaneStretched));
+        std::memset(prevStretched, 0, sizeof(prevStretched));
+        std::memset(confirmReq, 0, sizeof(confirmReq));
+        std::memset(verifiedCount, 0, sizeof(verifiedCount));
+        std::memset(lastTouchedMsV2, 0, sizeof(lastTouchedMsV2));
+        std::memset(fastOkV2, 0, sizeof(fastOkV2));
+    }
     uint32_t nowVer = to_ms_since_boot(get_absolute_time());
     // round64: per-lane MBR thresholds. base_k defaults to 80 (=round50
     // MBR3116_VERIFY_TH); amplitude tiers are relative offsets off it, so
-    // per-key values only tighten (hardware gate stays at 128).
+    // per-key values only tighten; native BUTTON_STAT remains a separate gate.
         static const uint16_t MBR_VERIFY_BASE = 80;
         static const uint16_t MBR_TIER_OFFSET_MEDIUM = 40;
         static const uint16_t MBR_TIER_OFFSET_STRONG = 120;
         static const uint16_t MBR_TIER_OFFSET_SKIP = 220;
-        // round80: strong flick fast path. User empirical data: a full-contact
-        // press saturates the DIFFERENCE_COUNT scale (>=255, SKIP tier at 300
-        // exists), while 4mm hover reads ~128. 200 = firm-contact territory,
-        // ~1.6x the 4mm-hover signal; noise pulses (round47b)
-        // top out an order of magnitude lower. See fastOkV2 use below.
+        // round80: preserve the legacy strong-signal fast path. Native button
+        // DIFF is 0..255, and 200 is a count threshold, not evidence of contact
+        // or a fixed height. The legacy +220 skip tier is retained for default-
+        // off compatibility; round89a rejects invalid values above 255.
         static const uint16_t MBR_FLICK_FAST_TH = 200;
         // round84: gate value granted to a slide-edge lane whose GAME-LANE
         // neighbor confirmed last cycle (see laneNeighborConfirmed below).
@@ -528,13 +620,25 @@ void updateTouch_v2() {
         bool diffRetried[2] = {false, false};
         for (uint8_t m = 0; m < 2; m++) {
             for (uint8_t e = 0; e < 16; e++) {
+                if (mbrDistanceEnabledForFrame && !(distanceAllowed[m] & (1u << e))) {
+                    verifiedCount[m][e] = 0;
+                    confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                    fastOkV2[m][e] = false;
+                    lastTouchedMsV2[m][e] = 0;
+                    continue;
+                }
                 if (raw[m] & (1 << e)) {
                     if (verifiedCount[m][e] < 2) {
                         if (!diffRead[m]) {
-                            diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
-                            if (!diffOk[m]) {
-                                diffRetried[m] = true;
+                            if (mbrDistanceEnabledForFrame) {
+                                diffOk[m] = mbrDistanceSamples[m].valid;
+                                std::memcpy(diffCounts[m], mbrDistanceSamples[m].counts, sizeof(diffCounts[m]));
+                            } else {
                                 diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                                if (!diffOk[m]) {
+                                    diffRetried[m] = true;
+                                    diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                                }
                             }
                             diffRead[m] = true;
                         }
@@ -544,25 +648,22 @@ void updateTouch_v2() {
                             uint16_t diff = diffCounts[m][e];
                             uint16_t baseK = verifyBaseK[m][e];
                             // round80: hover-rejection gate (mbrTouchGate, 0=off).
-                            // The chip NVM threshold (0x0C=128) lets BUTTON_STAT
-                            // assert ~4mm above the panel and the round50 verify
-                            // baseline (80) is even looser, so hover passed
-                            // straight through. Raising only the software ON-gate
-                            // pushes the trigger point close to physical contact;
-                            // applies to touch-ON only (release/sticky untouched).
+                            // Legacy new-touch verification only: no physical
+                            // distance guarantee, and held/release/sticky state
+                            // is untouched. The opt-in round89a gate has already
+                            // applied a continuous per-electrode hard rejection.
                             // round84: confirmed-neighbor anchoring. A slide's
                             // trailing/leading edge sweeps weak signal into a
                             // lane next to one that JUST confirmed -- spatial
-                            // continuity the hover band cannot fake (the first
-                            // lane of a hover never has a confirmed neighbor).
+                            // continuity for legacy slide behavior. A hovering
+                            // finger next to real contact can share this anchor.
                             // Anchor is the GAME LANE (k +/- 1 via laneTable),
                             // never "any electrode on the same chip": 3116
                             // electrodes are physically shuffled (v2 puts tc1/2
                             // and tc15/16 on one chip), a same-chip rule would
                             // let a hover on one side slip through while the
-                            // other side is held. Cap: the relaxed gate stays a
-                            // floor below the chip threshold+hysteresis, so the
-                            // chip-level hover protection is never penetrated.
+                            // other side is held. This relaxation cannot bypass
+                            // the opt-in continuous gate applied before this loop.
                             uint16_t rejectTh = baseK;
                             if (ControllerConfig.mbrTouchGate > rejectTh) rejectTh = ControllerConfig.mbrTouchGate;
                             int16_t lane = laneTable[m][e];
@@ -632,11 +733,24 @@ void updateTouch_v2() {
         static uint32_t lastConfirmed[2][16] = {0};
         static uint8_t dipGrace[2][16] = {0};
         static uint8_t stickyGrace[2][16] = {0};
+        if (mbrDistanceResetForFrame) {
+            std::memset(touchCount, 0, sizeof(touchCount));
+            std::memset(lastConfirmed, 0, sizeof(lastConfirmed));
+            std::memset(dipGrace, 0, sizeof(dipGrace));
+            std::memset(stickyGrace, 0, sizeof(stickyGrace));
+        }
         uint16_t raw[2] = {t0, t1};
         uint16_t stretched[2] = {0, 0};
         uint32_t now = to_ms_since_boot(get_absolute_time());
         for (uint8_t m = 0; m < 2; m++) {
             for (uint8_t e = 0; e < 16; e++) {
+                if (mbrDistanceEnabledForFrame && !(distanceAllowed[m] & (1u << e))) {
+                    touchCount[m][e] = 0;
+                    lastConfirmed[m][e] = 0;
+                    dipGrace[m][e] = 0;
+                    stickyGrace[m][e] = 0;
+                    continue;
+                }
                 bool isTouched = (raw[m] >> e) & 1;
                 if (isTouched) {
                     lastTouchedMsV2[m][e] = now;
@@ -775,6 +889,18 @@ void updateTouch_v1() {
     // round45p: save pre-verification hardware touch snapshot for CMD_DEBUG_CHAIN
     hwTouch[0] = t0; hwTouch[1] = t1; hwTouch[2] = t2;
 
+    uint16_t distanceAllowed[3] = {0xFFFF, 0xFFFF, 0xFFFF};
+    if (mbrDistanceEnabledForFrame) {
+        mbrDistanceReadSample(0, &MBR3116A);
+        mbrDistanceReadSample(1, &MBR3116B);
+        mbrDistanceReadSample(2, &MBR3116C);
+        uint32_t sampledAt = to_ms_since_boot(get_absolute_time());
+        distanceAllowed[0] = mbrDistanceAllowedMask(0, t0, sampledAt);
+        distanceAllowed[1] = mbrDistanceAllowedMask(1, t1, sampledAt);
+        distanceAllowed[2] = mbrDistanceAllowedMask(2, t2, sampledAt);
+        t0 &= distanceAllowed[0]; t1 &= distanceAllowed[1]; t2 &= distanceAllowed[2];
+    }
+
     // round84: per-GAME-LANE stretched snapshot of the previous cycle (MBR
     // branch only -- the MPR branch keeps its behavior untouched this round).
     // Projected after the shared stretch stage from the STRETCHED bits
@@ -795,6 +921,14 @@ void updateTouch_v1() {
     static uint8_t confirmReq[3][12] = {0};     // round45: amplitude-tier confirmation cycles (1=fast, 2=normal, 3=strict)
    static uint8_t verifiedCount[3][12] = {0};     // round50: shared MPR121/MBR3116 verification
    static bool fastOk[3][12] = {0};  // round80: strong flick first-cycle output flag (shared MPR/MBR)
+    if (mbrDistanceResetForFrame) {
+        std::memset(prevLaneStretched, 0, sizeof(prevLaneStretched));
+        std::memset(prevStretched, 0, sizeof(prevStretched));
+        std::memset(confirmReq, 0, sizeof(confirmReq));
+        std::memset(verifiedCount, 0, sizeof(verifiedCount));
+        std::memset(lastTouchedMs, 0, sizeof(lastTouchedMs));
+        std::memset(fastOk, 0, sizeof(fastOk));
+    }
    uint32_t nowVer = to_ms_since_boot(get_absolute_time());  // round45r: sticky dip verification preservation
    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
         uint16_t raw[3] = {t0, t1, t2};
@@ -928,16 +1062,15 @@ void updateTouch_v1() {
         uint8_t maxElec[3] = {12, 12, 8};  // electrodes used per chip in v1 layout
         // round64: per-lane MBR thresholds. base_k defaults to 80 (=round50
         // MBR3116_VERIFY_TH); amplitude tiers are relative offsets off it, so
-        // per-key values only tighten (hardware gate stays at 128).
+        // per-key values only tighten; native BUTTON_STAT remains a separate gate.
         static const uint16_t MBR_VERIFY_BASE = 80;
         static const uint16_t MBR_TIER_OFFSET_MEDIUM = 40;
         static const uint16_t MBR_TIER_OFFSET_STRONG = 120;
         static const uint16_t MBR_TIER_OFFSET_SKIP = 220;
-        // round80: strong flick fast path. User empirical data: a full-contact
-        // press saturates the DIFFERENCE_COUNT scale (>=255, SKIP tier at 300
-        // exists), while 4mm hover reads ~128. 200 = firm-contact territory,
-        // ~1.6x the 4mm-hover signal; noise pulses (round47b)
-        // top out an order of magnitude lower. See fastOk use below.
+        // round80: preserve the legacy strong-signal fast path. Native button
+        // DIFF is 0..255, and 200 is a count threshold, not evidence of contact
+        // or a fixed height. The legacy +220 skip tier is retained for default-
+        // off compatibility; round89a rejects invalid values above 255.
         static const uint16_t MBR_FLICK_FAST_TH = 200;
         // round84: gate value granted to a slide-edge lane whose GAME-LANE
         // neighbor confirmed last cycle (mirror of the v2 layout change).
@@ -962,15 +1095,27 @@ void updateTouch_v1() {
         bool diffRetried[3] = {false, false, false};
         for (uint8_t m = 0; m < 3; m++) {
             for (uint8_t e = 0; e < maxElec[m]; e++) {
+                if (mbrDistanceEnabledForFrame && !(distanceAllowed[m] & (1u << e))) {
+                    verifiedCount[m][e] = 0;
+                    confirmReq[m][e] = CONFIRM_CYCLES;
+                    fastOk[m][e] = false;
+                    lastTouchedMs[m][e] = 0;
+                    continue;
+                }
                 if (raw[m] & (1 << e)) {
                     if (verifiedCount[m][e] < 2) {
                         // New touch - verify with sensor difference count
                         if (!diffRead[m]) {
-                            diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
-                            if (!diffOk[m]) {
-                                // round47b-patch: I2C error - re-read once before trusting
-                                diffRetried[m] = true;
+                            if (mbrDistanceEnabledForFrame) {
+                                diffOk[m] = mbrDistanceSamples[m].valid;
+                                std::memcpy(diffCounts[m], mbrDistanceSamples[m].counts, sizeof(diffCounts[m]));
+                            } else {
                                 diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                                if (!diffOk[m]) {
+                                    // round47b-patch: I2C error - re-read once before trusting
+                                    diffRetried[m] = true;
+                                    diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
+                                }
                             }
                             diffRead[m] = true;
                         }
@@ -981,12 +1126,10 @@ void updateTouch_v1() {
                             uint16_t diff = diffCounts[m][e];
                             uint16_t baseK = verifyBaseK[m][e];
                             // round80: hover-rejection gate (mbrTouchGate, 0=off).
-                            // The chip NVM threshold (0x0C=128) lets BUTTON_STAT
-                            // assert ~4mm above the panel and the round50 verify
-                            // baseline (80) is even looser, so hover passed
-                            // straight through. Raising only the software ON-gate
-                            // pushes the trigger point close to physical contact;
-                            // applies to touch-ON only (release/sticky untouched).
+                            // Legacy new-touch verification only: no physical
+                            // distance guarantee, and held/release/sticky state
+                            // is untouched. The opt-in round89a gate has already
+                            // applied a continuous per-electrode hard rejection.
                             // round84: confirmed-neighbor anchoring (v2 mirror --
                             // see the full rationale there). Anchor is the GAME
                             // LANE (k +/- 1 via laneTable), never "any electrode
@@ -1076,11 +1219,24 @@ void updateTouch_v1() {
    static uint32_t lastConfirmed[3][12] = {0};
    static uint8_t  dipGrace[3][12] = {0};
    static uint8_t  stickyGrace[3][12] = {0};           // round45n: sticky-mode dip grace counter
+    if (mbrDistanceResetForFrame) {
+        std::memset(touchCount, 0, sizeof(touchCount));
+        std::memset(lastConfirmed, 0, sizeof(lastConfirmed));
+        std::memset(dipGrace, 0, sizeof(dipGrace));
+        std::memset(stickyGrace, 0, sizeof(stickyGrace));
+    }
    uint16_t raw[3] = {t0, t1, t2};
    uint16_t stretched[3] = {0, 0, 0};
    uint32_t now = to_ms_since_boot(get_absolute_time());
    for (uint8_t m = 0; m < 3; m++) {
        for (uint8_t e = 0; e < 12; e++) {
+           if (mbrDistanceEnabledForFrame && !(distanceAllowed[m] & (1u << e))) {
+               touchCount[m][e] = 0;
+               lastConfirmed[m][e] = 0;
+               dipGrace[m][e] = 0;
+               stickyGrace[m][e] = 0;
+               continue;
+           }
            bool isTouched = (raw[m] >> e) & 1;
            if (isTouched) {
                lastTouchedMs[m][e] = now;
@@ -1388,6 +1544,7 @@ void updateInputState() {
     }
     // round66: pressure snapshot (5ms throttle) - inside the seqlock writer
     // section so Core1's GET_INPUT snapshot gets one coherent state.
+    prepareMbrDistanceGate();
     updatePressureSnap();
     if (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2) {
         updateTouch_v1();

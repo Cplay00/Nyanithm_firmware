@@ -6,6 +6,7 @@
  */
 
 #include <controller_config.h>
+#include <mbr_distance_gate.h>
 #include <hardware/flash.h>
 #include <hardware/watchdog.h>
 #include <pico/flash.h>
@@ -33,6 +34,7 @@ controller_config defaultConfig{
     .heightRangeCfg = 0,                  // 0 = runtime default (10mm)
     .thTouchKey = { 0 },                  // round64: per-key touch, 0 = inherit th_touch
     .thReleaseKey = { 0 },                // round64: per-key release, 0 = inherit th_release
+    .mbrDistanceFlags = 0,                // strict MBR gate is explicitly opt-in
     .xorSum = 0,                          // 前127字节异或和
 };
 
@@ -75,8 +77,9 @@ static void sanitizeConfig(controller_config* config) {
     if (config->cfg3 > INPUT_LATENCY_MAX_MS) config->cfg3 = INPUT_LATENCY_MAX_MS;
     // round64: per-key threshold clamping. 0 = inherit global (preserved).
     // MPR121: same 1-63 scale as th_touch. MBR3116: byte range 1-255 (values
-    // <=128 are kept but only take effect above the 128 hardware gate).
+    // only tighten the legacy software verification; BUTTON_STAT is separate).
     bool useMbr = (config->cfg0 & CFG0_BIT_MBR3116) || config->hwVer >= 3;
+    mbrDistanceSanitize(*config, useMbr);
     uint8_t maxKey = useMbr ? 255 : 63;
     for (int i = 0; i < 32; i++) {
         if (config->thTouchKey[i] > maxKey) config->thTouchKey[i] = maxKey;

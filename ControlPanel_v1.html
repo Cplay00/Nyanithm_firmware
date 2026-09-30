@@ -3569,7 +3569,7 @@ input[type="range"]:disabled {
                         </button>
                     </div>
                     <!-- round86: 一键校准阈值独立一行全宽(从 Device Status 面板移入),
-                         点击后按硬件探测结果自动路由 MPR121 统计校准 / MBR3116 悬空阈值校准 -->
+                         点击后按硬件探测结果自动路由 MPR121 统计校准 / MBR3116 悬空信号观察 -->
                     <button id="btnCalibrate" class="btn btn-cal-full" disabled>
                         <svg viewBox="0 0 16 16" fill="none">
                             <path d="M9.5 1.5L10.4 4.1L13 5L10.4 5.9L9.5 8.5L8.6 5.9L6 5L8.6 4.1L9.5 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
@@ -3578,7 +3578,7 @@ input[type="range"]:disabled {
                         </svg>
                         一键校准阈值
                     </button>
-                    <div class="field-hint" style="margin-top:4px;">点击后自动探测触摸主控并进入对应向导：MPR121 → 静置+划键统计校准；MBR3116 → 悬空阈值校准（悬停在期望的最远触发高度采样）。需固件 1.6.0+（悬空校准需 1.6.3+）。</div>
+                    <div class="field-hint" style="margin-top:4px;">点击后自动探测触摸主控并进入对应向导：MPR121 → 静置+划键统计校准；MBR3116 → 悬空 DIFF 观察。MBR 观察不会自动生成或应用阈值；需要有效轻触样本和分离裕量才能评估。需固件 1.6.0+（MBR 原始信号观察需 1.6.3+）。</div>
 
                     <div class="config-section">
                         <div class="section-subtitle">通用设置</div>
@@ -3694,7 +3694,7 @@ input[type="range"]:disabled {
                                 <div class="slider-track">
                                     <input type="range" id="mbrThreshold" min="96" max="200" step="1" value="128" disabled>
                                 </div>
-                                <span class="field-hint">寄存器 0x0C，默认同步调整<b>所有目标芯片</b>；配置模式下经「高级参数 → 同步烧录全部芯片」写入 NVM 生效。芯片合法区间 31-200(datasheet 上限 200)。悬空误触发调大、漏触调小；推荐用「一键校准阈值」向导自动定值。导入外部表时可超出滑块量程，以表值为准。</span>
+                                <span class="field-hint">寄存器 0x0C，默认同步调整<b>所有目标芯片</b>；配置模式下经「高级参数 → 同步烧录全部芯片」写入 NVM 生效。芯片合法区间 31–200。提高阈值可能减少误触，也可能漏掉轻触；ATH 开启时此手动阈值不生效。应结合悬空与轻触的实测样本调整，观察向导不会自动定值。</span>
                                 <span class="field-hint warn" id="mbrThresholdWarn" style="display:none"></span>
                             </div>
                             <div class="slider-row" data-mbr-only>
@@ -3708,7 +3708,7 @@ input[type="range"]:disabled {
                                 <div class="slider-track">
                                     <input type="range" id="rgMbrGate" min="0" max="255" step="1" value="0" disabled>
                                 </div>
-                                <span class="field-hint">仅 3116 生效。0 = 关闭（旧行为）。固件软件悬空门，有效触发点 = max(芯片触摸阈值+滞回, 本门)。round85 起：悬空根治主闸门推荐用「一键校准阈值」写芯片阈值（合法区间 128-200），本门随之降为 ~130 噪声兜底位；单提本门无法压制近距离悬空（0.5mm 悬空 diff 已饱和 255）。保存并重启后生效。需固件 ≥ 1.6.2-beta1。</span>
+                                <span class="field-hint">仅 3116 生效。0 = 关闭（旧行为）。既有软件 DIFF 门为附加判据，不能换算成毫米；悬空和轻触信号重叠或饱和时，仅提高此门无法可靠区分。观察向导不会自动改写此门。保存并重启后生效。需固件 ≥ 1.6.2-beta1。</span>
                             </div>
                             <div class="slider-row">
                                 <div class="slider-top">
@@ -3827,6 +3827,24 @@ input[type="range"]:disabled {
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="config-section" id="mbrSignalContainer" style="display:none;">
+                        <details class="adv-details" id="mbrSignalSection">
+                            <summary>实验性持续信号门（全局 DIFF 标定）</summary>
+                            <label class="checkbox-item" style="justify-content:flex-start;">
+                                <input type="checkbox" id="ckMbrSignalGate" class="form-check-input" disabled>
+                                <span class="form-check-label">启用实验性持续信号门</span>
+                            </label>
+                            <span class="field-hint">默认关闭，需固件 ≥ 1.6.6-beta1。未经真机标定，信号值不等于毫米。零点 Z 为归一化 0%，满点 F 为 100%；仅在手动确认参数后保存。此功能不修改芯片寄存器或既有悬空抑制门。</span>
+                            <div class="field-grid">
+                                <div class="field-item"><label class="field-label" for="mbrSignalZero">DIFF 零点 Z</label><input type="number" class="num-input" id="mbrSignalZero" min="0" max="254" step="1" value="0" disabled></div>
+                                <div class="field-item"><label class="field-label" for="mbrSignalFull">DIFF 满点 F</label><input type="number" class="num-input" id="mbrSignalFull" min="1" max="255" step="1" value="255" disabled></div>
+                                <div class="field-item"><label class="field-label" for="mbrSignalOn">ON 比例（%）</label><input type="number" class="num-input" id="mbrSignalOn" min="1" max="100" step="1" value="70" disabled></div>
+                                <div class="field-item"><label class="field-label" for="mbrSignalOff">OFF 比例（%）</label><input type="number" class="num-input" id="mbrSignalOff" min="0" max="99" step="1" value="50" disabled></div>
+                            </div>
+                            <span class="field-hint" id="mbrSignalStatus">尚未读取设备配置；开关关闭。</span>
+                        </details>
                     </div>
 
                     <div class="config-section collapsible collapsed" id="mbrSection" style="display:none;">
@@ -4060,7 +4078,7 @@ input[type="range"]:disabled {
              寄存器数据表(TRM 001-91082)翻译成可交互参数项,按功能分组;
              风险等级 1(警告)黄标 / 2(严重)红标;16-bit 实时读数区走 0xC7。
              高风险参数项改动 → 写入芯片按钮报红;严重违例(I2C_ADDR 变更 /
-             FT+HYS>255)直接拒绝烧录;警告级(FSS_EN 开启/SENSOR_EN 关键位
+             非法 FT/HYS)直接拒绝烧录;警告级(FSS_EN 开启/SENSOR_EN 关键位
              关闭/EMC_EN/GUARD_EN)写入前需勾选「已知晓风险」。 -->
         <div class="flash-modal" id="mbrRegModal" style="display:none;" role="dialog" aria-modal="true" aria-label="MBR3116 寄存器详细设置">
             <div class="flash-modal-card mbr-reg-card">
@@ -4074,7 +4092,7 @@ input[type="range"]:disabled {
                 <div class="flash-modal-body">
                     <!-- 状态卡片: 自动阈值/手动阈值链路一目了然(评审建议#1) -->
                     <div class="mbr-reg-status" id="mbrRegStatus"></div>
-                    <!-- 0xC7 实时读数区(16-bit diff 定标) -->
+                    <!-- 0xC7 实时读数区(16-bit 容器；按钮 DIFF 仍为 0–255) -->
                     <details class="adv-details mbr-reg-debug">
                         <summary>调试读数 (0xC7 实时采样 · 需固件 ≥ 1.6.5)</summary>
                         <div class="mbr-reg-debug-grid">
@@ -4087,7 +4105,7 @@ input[type="range"]:disabled {
                             </div>
                         </div>
                         <pre class="log-box mbr-reg-dbg-out" id="mbrDbgOut">未采样</pre>
-                        <span class="field-hint">diff=信号量(16-bit 全量程): 悬空 2mm≈255(饱和) → 10mm≈0, 与触摸高度单调相关, 用于判定当前阈值实际拦截的悬空高度; cp=寄生电容 pF; raw=原始计数; baseline=基线。</span>
+                        <span class="field-hint">DIFF=按钮信号（0–255；16-bit 回包不代表未裁剪）；255 可能已饱和。cp=寄生电容 pF；raw=原始计数；baseline=基线。未经实机距离标定，不换算毫米。</span>
                     </details>
                     <!-- 参数编辑区(JS 按 MBR_REG_DEFS 生成) -->
                     <div id="mbrRegBody"></div>
@@ -4174,6 +4192,133 @@ const CFG_NUM_KEYS = 32;
 // round80: MBR3116 悬空抑制门(controller_config.mbrTouchGate, 0=旧行为)。
 // 需固件 >= 1.6.2-beta1(旧固件该字节为 reserved, sanitize 不清零但也不生效)。
 const CFG_OFF_MBR_TOUCH_GATE = 90;
+// round89a: 与 nyanithm_shared.h 的 8B 实验性持续信号门扩展一致。
+const CFG_OFF_MBR_SIGNAL_PROFILE = 91;
+const MBR_SIGNAL_MAGIC = 0xD6;
+const MBR_SIGNAL_VERSION = 1;
+const MBR_SIGNAL_CHECK_SEED = 0xA7;
+const MBR_SIGNAL_MIN_FW = "1.6.6-beta1";
+
+// This additive feature requires both a numeric version and its known build
+// floor. Legacy cmpVersion treats a beta patch as NaN and must not gate it.
+function supportsMbrSignalFirmware(firmware, buildId) {
+    const version = typeof firmware === "string" && firmware.match(/^(\d+)\.(\d+)\.(\d+)(?:-beta([1-9]\d*))?$/);
+    const build = typeof buildId === "string" && buildId.match(/^round(\d+)([a-z]*)$/);
+    if (!version || !build) return false;
+    const parts = version.slice(1, 4).map(Number);
+    const floor = [1, 6, 6];
+    if (parts.some(n => !Number.isSafeInteger(n)) || !Number.isSafeInteger(Number(build[1]))) return false;
+    let atLeast = true;
+    for (let i = 0; i < 3; i++) {
+        if (parts[i] !== floor[i]) { atLeast = parts[i] > floor[i]; break; }
+    }
+    return atLeast && (Number(build[1]) > 89 ||
+        (Number(build[1]) === 89 && build[2] >= "a"));
+}
+
+function validateMbrSignalProfile(profile) {
+    const errors = [];
+    if (!profile || typeof profile.enabled !== "boolean") errors.push("启用状态必须为布尔值");
+    for (const name of ["zero", "full", "onPercent", "offPercent"]) {
+        if (!profile || !Number.isInteger(profile[name])) errors.push(name + " 必须为整数");
+    }
+    if (profile) {
+        if (profile.zero < 0 || profile.zero > 254) errors.push("DIFF 零点 Z 须为 0–254");
+        if (profile.full < 1 || profile.full > 255 || profile.full <= profile.zero) errors.push("满点 F 须大于 Z 且不超过 255");
+        if (profile.onPercent < 1 || profile.onPercent > 100) errors.push("ON 比例须为 1–100%");
+        if (profile.offPercent < 0 || profile.offPercent >= profile.onPercent) errors.push("OFF 比例须为 0% 以上且小于 ON");
+    }
+    return { valid: errors.length === 0, errors };
+}
+
+function decodeMbrSignalProfile(buf) {
+    const o = CFG_OFF_MBR_SIGNAL_PROFILE;
+    const defaults = { enabled: false, zero: 0, full: 255, onPercent: 70, offPercent: 50 };
+    if (!buf || buf.length !== CFG_SIZE) return { ...defaults, valid: false, legacy: true };
+    let check = MBR_SIGNAL_CHECK_SEED;
+    for (let i = 0; i < 7; i++) check ^= buf[o + i];
+    const profile = { enabled: !!(buf[o + 2] & 1), zero: buf[o + 3], full: buf[o + 4], onPercent: buf[o + 5], offPercent: buf[o + 6] };
+    const valid = buf[o] === MBR_SIGNAL_MAGIC && buf[o + 1] === MBR_SIGNAL_VERSION &&
+        (buf[o + 2] & ~1) === 0 && buf[o + 7] === check && validateMbrSignalProfile(profile).valid;
+    return valid ? { ...profile, valid: true, legacy: false } : { ...defaults, valid: false, legacy: true };
+}
+
+function encodeMbrSignalProfile(buf, profile) {
+    if (!buf || buf.length !== CFG_SIZE) throw new Error("配置长度必须为 128 字节");
+    const result = validateMbrSignalProfile(profile);
+    if (!result.valid) throw new Error(result.errors.join("；"));
+    const o = CFG_OFF_MBR_SIGNAL_PROFILE;
+    buf.set([MBR_SIGNAL_MAGIC, MBR_SIGNAL_VERSION, profile.enabled ? 1 : 0,
+        profile.zero, profile.full, profile.onPercent, profile.offPercent], o);
+    let check = MBR_SIGNAL_CHECK_SEED;
+    for (let i = 0; i < 7; i++) check ^= buf[o + i];
+    buf[o + 7] = check;
+    return buf;
+}
+
+// Match the firmware extension sanitizer before CFG_SET/readback comparisons.
+// Points are preserved when switching to MPR; only this MBR opt-in is cleared.
+function sanitizeMbrSignalProfile(buf) {
+    if (!buf || buf.length !== CFG_SIZE) throw new Error("配置长度必须为 128 字节");
+    const profile = decodeMbrSignalProfile(buf);
+    if (!profile.valid) {
+        buf[CFG_OFF_MBR_SIGNAL_PROFILE + 2] = 0;
+        buf[CFG_OFF_MBR_SIGNAL_PROFILE + 7] = 0;
+    } else if (!(buf[3] & 0b00000010) && buf[2] < 3) {
+        encodeMbrSignalProfile(buf, { ...profile, enabled: false });
+    }
+    return buf;
+}
+
+// 仅评估同一量纲的按钮 DIFF(0–255)，不把 RAW/BASELINE 转换成 DIFF。
+// 样本形状: { lane, targetLane, diff, clipped? }。targetLane 是采样时明确指定
+// 的物理区域；不能通过“哪个通道最大”替代定位。结果只供评估，不自动启用或写设备。
+function evaluateMbrCalibration(input) {
+    const errors = [], stats = [];
+    const lanes = input && input.requiredLanes;
+    const minSamples = input && input.minSamplesPerLane !== undefined ? input.minSamplesPerLane : 20;
+    const margin = input && input.noiseMargin !== undefined ? input.noiseMargin : 5;
+    if (!input || input.quantity !== "DIFF") errors.push("必须使用同一量纲的 DIFF 样本，RAW/BASELINE 不可混用");
+    if (!Array.isArray(lanes) || !lanes.length || new Set(lanes).size !== lanes.length ||
+        lanes.some(lane => !Number.isInteger(lane) || lane < 0 || lane >= CFG_NUM_KEYS)) errors.push("必需区域列表无效");
+    if (!Number.isInteger(minSamples) || minSamples < 2) errors.push("每区最少样本数须为至少 2 的整数");
+    if (!Number.isInteger(margin) || margin < 1 || margin > 127) errors.push("噪声裕量须为 1–127 的整数");
+    const groups = [input && input.prohibitedSamples, input && input.contactSamples];
+    if (groups.some(group => !Array.isArray(group) || !group.length)) errors.push("禁止悬空与有效轻触两组均须有样本");
+    if (errors.length) return { valid: false, errors, stats, proposal: null };
+    const required = new Set(lanes);
+    groups.forEach((samples, groupIndex) => {
+        samples.forEach((sample, index) => {
+            if (!sample || !required.has(sample.lane) || sample.targetLane !== sample.lane) {
+                errors.push(`${groupIndex ? "轻触" : "悬空"}样本 ${index + 1} 未命中指定区域`);
+            }
+            if (!sample || !Number.isInteger(sample.diff) || sample.diff < 0 || sample.diff > 255) {
+                errors.push(`样本 ${index + 1} DIFF 须为 0–255 的整数`);
+            } else if (sample.clipped || sample.diff === 255) {
+                errors.push(`样本 ${index + 1} 已裁剪或饱和，不能建立可信两点标定`);
+            }
+        });
+    });
+    if (errors.length) return { valid: false, errors, stats, proposal: null };
+    for (const lane of lanes) {
+        const hover = groups[0].filter(s => s.lane === lane).map(s => s.diff);
+        const touch = groups[1].filter(s => s.lane === lane).map(s => s.diff);
+        if (hover.length < minSamples || touch.length < minSamples) errors.push(`区域 ${lane + 1} 样本不足（悬空 ${hover.length} / 轻触 ${touch.length}）`);
+        const hoverMax = hover.length ? Math.max(...hover) : null;
+        const contactMin = touch.length ? Math.min(...touch) : null;
+        const gap = hoverMax !== null && contactMin !== null ? contactMin - hoverMax : null;
+        if (touch.length && touch.every(value => value === 0)) errors.push(`区域 ${lane + 1} 轻触全为 0，未取得有效接触信号`);
+        if (gap !== null && gap <= 0) errors.push(`区域 ${lane + 1} 悬空与轻触信号重叠`);
+        else if (gap !== null && gap <= margin * 2) errors.push(`区域 ${lane + 1} 分离裕量不足（${gap} ≤ ${margin * 2}）`);
+        stats.push({ lane, prohibitedCount: hover.length, contactCount: touch.length, hoverMax, contactMin, gap });
+    }
+    const zero = Math.max(...stats.map(s => s.hoverMax === null ? 255 : s.hoverMax)) + margin;
+    const full = Math.min(...stats.map(s => s.contactMin === null ? 0 : s.contactMin)) - margin;
+    if (zero >= full) errors.push("跨区域信号范围重叠或全局裕量不足，全局门限不能可靠分离");
+    return { valid: !errors.length, errors, stats,
+        proposal: errors.length ? null : { enabled: false, zero, full, onPercent: 70, offPercent: 50 },
+        note: "只评估本次样本；不是毫米距离或全环境零误触保证，不自动应用" };
+}
 
 const BIT_FORCE16 = 0b00000001;
 const BIT_MBR3116 = 0b00000010;
@@ -4188,14 +4333,13 @@ const BIT_GAME_RAW_SLIDER = 0b00000010;
 // 一代 hw_v1 固件版本白名单:0xBC 探测不可用(旧固件)时的回退门禁依据。
 // round86: 1.6.4-beta1 = 0xBC 下放普通模式(连接即自动探测)。
 // round88: 1.6.5 = 0xC7 调试通道 + 0xBA 烧录序列官方化(正式版号, 不带 beta)。
-const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1", "1.6.1-beta2", "1.6.2-beta1", "1.6.3-beta1", "1.6.4-beta1", "1.6.5"];
-// round77/78: 面板自身版本标识(显示于页头品牌区)。cmpVersion 对 "1-beta2" 这类
-// 带后缀补丁段按 0 处理(NaN||0),即 1.6.1-beta2 在版本门禁中等价 1.6.0,≥1.6.0
-// 的功能门禁(0xC4/0xC5/逐键阈值)全部照常通过。
+const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1", "1.6.1-beta2", "1.6.2-beta1", "1.6.3-beta1", "1.6.4-beta1", "1.6.5", "1.6.6-beta1"];
+// round77/78: 面板自身版本标识(显示于页头品牌区)。round89a 修复 beta 补丁段
+// 的数值解析；新 profile 另要求严格版本格式和精确构建下限。
 // round85: 0xC5=2(原始报送)与悬空截止校准按固件 >= 1.6.3-beta1 门禁
 // (cmpVersion 主版本 3>2 天然成立,无需特判)。
 // round88: 0xC7 调试通道按固件 >= 1.6.5 门禁(纯三段数值, cmpVersion 天然可用)。
-const PANEL_VERSION = "1.1.1-beta6";
+const PANEL_VERSION = "1.1.1-beta7";
 
 // ====== UF2 固件文件解析(刷写前校验) ======
 const UF2_MAGIC0 = 0x0A324655;   // "UF2\n"
@@ -4334,7 +4478,7 @@ const MBR_REG_DEFS = [
     { a: 0x1A, n: "FINGER_THRESHOLD14", d: "传感器 14 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
     { a: 0x1B, n: "FINGER_THRESHOLD15", d: "传感器 15 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
     { a: 0x1C, n: "SENSOR_DEBOUNCE", d: "ON 判定消抖: 信号须连续 N 个扫描周期超阈值才报按下。低 4 位有效 1-15。越大越稳但延迟变高", min: 0, max: 15, r: 0 },
-    { a: 0x1D, n: "BUTTON_HYS", d: "迟滞覆盖: bit7=1 启用覆盖, 低 5 位=迟滞值 0-31。OFF 判定线=FT+HYS, 必须 FT+HYS≤255 否则按键无法报 ON(硬死区)", min: 0, max: 255, r: 0 },
+    { a: 0x1D, n: "BUTTON_HYS", d: "迟滞覆盖: bit7=1 启用覆盖, 低 5 位=迟滞值 0-31，bit6:5 须为 0。ON 判定线=FT+HYS，OFF 判定线=FT−HYS；ATH 开启时手动 FT 不生效", min: 0, max: 255, r: 0 },
     { a: 0x1F, n: "BUTTON_LBR", d: "低基线复位阈值覆盖: bit7=1 启用, 0-127。基线漂移向下追踪的速度(温度/湿度适应)", min: 0, max: 255, r: 0 },
     { a: 0x20, n: "BUTTON_NNT", d: "负噪声阈值覆盖: bit7=1 启用, 0-127。基线向下吸收带宽, 太小会误触发、太大会吞轻触", min: 0, max: 255, r: 0 },
     { a: 0x21, n: "BUTTON_NT", d: "噪声阈值覆盖: bit7=1 启用, 0-127。基线冻结线——信号超过它基线不追踪(悬空信号即落此区), 推荐 FingerThreshold 的 40%", min: 0, max: 255, r: 0 },
@@ -4344,22 +4488,22 @@ const MBR_REG_DEFS = [
     { a: 0x4F, n: "DEVICE_CFG2", d: "全局开关: bit7:6 接近ARST / bit5:4 按键ARST(0关/1=5s/2=20s, 5s 会吞长按!) / bit3 ATH_EN 自动阈值 / bit2 EMC / bit1 GUARD / bit0 SHIELD。抗悬空预设把 bit3 清 0", min: 0, max: 255, r: 1 },
     { a: 0x50, n: "DEVICE_CFG3", d: "供电配置(bit0 SUPPLY_LOW_POWER)。本机 5V 内部稳压必须保持 0, 改 1 可能损坏芯片", min: 0, max: 1, r: 2 },
     { a: 0x51, n: "I2C_ADDR", d: "芯片 I2C 地址(8-119)。改错 = 固件彻底找不到芯片 = 变砖, 烧录时会被面板直接拒绝", min: 8, max: 119, r: 2 },
-    { a: 0x52, n: "REFRESH_CTRL", d: "扫描刷新间隔, 单位 20ms(低 6 位)。本机 0x01=20ms 满速, 调大会全局变慢", min: 0, max: 63, r: 1 },
+    { a: 0x52, n: "REFRESH_CTRL", d: "低功耗状态扫描间隔配置，低6位、20ms单位。不能据此确定Active触摸刷新；Active还受扫描与处理时间限制", min: 0, max: 63, r: 1 },
     { a: 0x53, n: "STATE_TIMEOUT", d: "IDLE→active 状态超时(低 4 位, 单位约 3.2s)。保持默认", min: 0, max: 15, r: 1 }
 ];
 
 // round88: 抗悬空预设(面板侧, 模板不动——用户决策)。值全部来自官方
 // Design Guide Table 6-2 比例(FT=实触信号 80%, NT/NNT=40%, HYS=10%, LBR=50)
 // 与 TRM 编码: 0x1D/0x1F/0x20/0x21 的 bit7=OVERRIDE 必须置 1, 否则值被忽略;
-// 0x4F=0x60: 保留 bit7:6=01(PROX_ARST=20s), 按键 ARST=20s(bit5:4=10),
+// 0x4F=0x60: bit7:6=01(PROX_ARST=5s), 按键 ARST=20s(bit5:4=10),
 // 清 bit3(ATH_EN=0 → 手动 FINGER_THRESHOLD 生效)。ARST 5s 被官方
 // Design Guide p.48 否决: 长按满 5s 强制抬手+基线对齐, 音游长按会被吞。
 const MBR_ANTIHOVER_PRESET = {
     ft: 200,             // FINGER_THRESHOLD 0x0C-0x1B(全部使能传感器)
-    hys: 0x80 | 25,      // 0x1D: OVERRIDE|25 → ON=diff>225, OFF=diff<200(拦截 ~2.75mm 内悬空)
+    hys: 0x80 | 25,      // 0x1D: OVERRIDE|25 → ON≥225，OFF≤175；没有毫米距离标定
     lbr: 0x80 | 50,      // 0x1F: 官方推荐 50
     nnt: 0x80 | 80,      // 0x20: 官方 40% 比例
-    nt: 0x80 | 80,       // 0x21: 基线冻结线 80(≥6.4mm 悬空被基线吸收)
+    nt: 0x80 | 80,       // 0x21: 基线冻结线 80；不能据此换算距离
     debounce: 2,         // 0x1C 低 4 位
     cfg2: 0x60           // 0x4F
 };
@@ -4480,7 +4624,7 @@ function parseUf2(buf) {
 }
 
 function cmpVersion(a, b) {
-    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+    const pa = a.split(".").map(p => parseInt(p, 10)), pb = b.split(".").map(p => parseInt(p, 10));
     for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); }
     return 0;
 }
@@ -5014,9 +5158,12 @@ function validateUf2ForDevice(p, devInfo) {
         return buf;
     }
 
+    // round89a: 模拟已保存 Flash 与当前 RAM 配置的区别。新建端口恢复最近
+    // CFG_SAVE 快照, CFG_SET 单独执行不会跨重连持久化。
+    let mockSavedConfig = null;
     class MockPort {
         constructor() {
-            this.cfg = buildMockConfig();
+            this.cfg = mockSavedConfig ? mockSavedConfig.slice() : buildMockConfig();
             this.configMode = false;
             this.cfgSetPending = null;  // round63f: CFG_SET 载入流跨 write 累积
             this.mbrPending = null;  // round75: 0xBA 载荷跨 write 累积(面板改双写)
@@ -5177,8 +5324,8 @@ function validateUf2ForDevice(p, devInfo) {
                     if (!(a >= 0x40 && a <= 0x44) || s > 15) {
                         this.sendText("mbrdebug: address / sensor not allowed.", 10);
                     } else {
-                        // 模拟读数: diff 以传感器编号相位摆动(0-255), 悬空换算
-                        // 与面板提示一致; sync 恒定; cp 随编号 8-30pF;
+                        // 模拟读数: DIFF 以传感器编号相位摆动(0-255), 不代表毫米;
+                        // sync 恒定; cp 随编号 8-30pF;
                         // baseline=1024+40*s; raw=baseline+diff。
                         const t = Date.now() / 1000;
                         const diff = Math.round(127.5 + 127.5 * Math.sin(t * 1.2 + s * 0.9));
@@ -5204,6 +5351,8 @@ function validateUf2ForDevice(p, devInfo) {
                     const cfg = new Uint8Array(this.cfgSetPending);
                     this.cfgSetPending = null;
                     if (cfg[0] === CFG_MAGIC && calcXorSum(cfg) === cfg[127]) {
+                        sanitizeMbrSignalProfile(cfg);
+                        cfg[127] = calcXorSum(cfg);
                         this.cfg = cfg;
                         this.sendText("read 128 byte. check ok. config changed.", 15);
                     } else {
@@ -5260,8 +5409,11 @@ function validateUf2ForDevice(p, devInfo) {
                     this.sendText("read 128 byte ok", 25);
                     this.sendText("using config in page 3", 35);
                 }
-                else if (cmd === CMD.CFG_SAVE) { this.sendText("saveConfig result: 0, currentPage = 3", 15); }
-        else if (cmd === CMD.CFG_ERASE) { this.sendText("erase ok", 15); }
+                else if (cmd === CMD.CFG_SAVE) {
+                    mockSavedConfig = this.cfg.slice();
+                    this.sendText("saveConfig result: 0, currentPage = 3", 15);
+                }
+        else if (cmd === CMD.CFG_ERASE) { mockSavedConfig = null; this.sendText("erase ok", 15); }
         else if (cmd === CMD.CFG_SET) {
             // round63f: 真实固件 setConfig() 一次性读 128 字节, 面板可能分块发送。
             // Mock 必须跨 write 累积载入流(此前按单次 write 解析, 分块会被拆坏)。
@@ -5273,6 +5425,8 @@ function validateUf2ForDevice(p, devInfo) {
                 const cfg = new Uint8Array(this.cfgSetPending);
                 this.cfgSetPending = null;
                 if (cfg[0] === CFG_MAGIC && calcXorSum(cfg) === cfg[127]) {
+                    sanitizeMbrSignalProfile(cfg);
+                    cfg[127] = calcXorSum(cfg);
                     this.cfg = cfg;
                     this.sendText("read 128 byte. check ok. config changed.", 15);
                 } else {
@@ -5284,7 +5438,7 @@ function validateUf2ForDevice(p, devInfo) {
                 else if (cmd === CMD.GET_STATUS) {
                     this.sendText("get status...", 8);
                     this.sendText("Nyanithm build MOCK-1.5.3", 16);
-                    this.sendText("hwVer: 1", 24);
+                    this.sendText("hwVer: " + this.cfg[2], 24);
                     this.sendText("tof0 = 812 tof1 = 905 tof2 = 770 tof3 = 640", 32);
                     this.sendText("using config in page 3", 40);
                 }
@@ -5313,8 +5467,8 @@ function validateUf2ForDevice(p, devInfo) {
                     }
                 }
                 else if (cmd === CMD.GET_VERSION) {
-                    // round88f: Mock 版本串随固件 1.6.5 / round88f 精确构建标识同步。
-                    const s = "FW:1.6.5 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5;hw_v1;BID=round88f";
+                    // round89a: Mock 覆盖实验性持续 DIFF 门的版本门禁。
+                    const s = "FW:1.6.6-beta1 API:0x10 HW:v1 Built:Jan 01 2026 12:00:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta1;hw_v1;BID=round89a";
                     this.send([s.length], 8);
                     this.send(Array.from(new TextEncoder().encode(s)), 14);
                 }
@@ -5378,11 +5532,18 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     let mockPort = null;
+    function acquireMockPort() {
+        // Enumerating an open device returns that same port. Creating another
+        // instance here would make __mockPort point at an unused transport.
+        if (!mockPort || mockPort.dev.closed) mockPort = new MockPort();
+        window.__mockPort = mockPort;
+        return mockPort;
+    }
     // round72d: 桥接实例到 window 供控制台调试/自动化注入设备侧配置
     // (与 window.dumpCfgCmdLog 同惯例;仅 MOCK 分支存在)。
     const mockSerial = {
-        getPorts: async () => { mockPort = new MockPort(); window.__mockPort = mockPort; return [mockPort]; },
-        requestPort: async () => { mockPort = new MockPort(); window.__mockPort = mockPort; return mockPort; },
+        getPorts: async () => [acquireMockPort()],
+        requestPort: async () => acquireMockPort(),
         addEventListener: () => {},
         removeEventListener: () => {},
     };
@@ -5416,7 +5577,7 @@ function validateUf2ForDevice(p, devInfo) {
             // 上次连接的那台(localStorage 记录连接时的枚举序索引,跨刷新尽力
             // 恢复;同 VID/PID 设备 Web Serial 无稳定唯一 ID,枚举序是唯一近似)。
             // 索引基于本次 getPorts() 快照计算,连接后不再二次调用 getPorts()
-            // (Mock 的 getPorts 有创建新实例的副作用,真机也应避免无谓重查)。
+            // 同一枚举快照用于选口,避免无谓重查。
             const authorized = await navigator.serial.getPorts();
             const nyList = authorized.filter(p => {
                 const info = p.getInfo();
@@ -5541,6 +5702,7 @@ function validateUf2ForDevice(p, devInfo) {
     }
 
     async function closePort() {
+        mbrSignalFwSupport = false;
         stopCfgKeepalive();
         stopLedAnim();
         stopTofPoll();
@@ -5565,6 +5727,7 @@ function validateUf2ForDevice(p, devInfo) {
 
     // 意外断开(拔线 / 设备重启进 BOOTSEL / 刷写后重枚举)的幂等清理
     function handleUnexpectedDisconnect(reason) {
+        mbrSignalFwSupport = false;
         if (!connected && !port && !reader) return;
         stopSaveRebootReconnect();  // round63j: 意外断开时停止保存后自动重连计时器
         stopCfgKeepalive();
@@ -5697,6 +5860,10 @@ function validateUf2ForDevice(p, devInfo) {
 
     // 0xBD: [1B len][ASCII] "FW:%s API:..." -> devInfo
     async function queryDevInfo() {
+        // Capabilities belong to this successful handshake, never a previous
+        // device whose version request timed out or returned malformed text.
+        mbrSignalFwSupport = false;
+        updateMbrSignalUi();
         flushReadBuffer();
         await writeBytes(new Uint8Array([CMD.GET_VERSION]));
         const lenB = await waitForBytes(1, 800);
@@ -5727,6 +5894,9 @@ function validateUf2ForDevice(p, devInfo) {
             rawLevelFwSupport = !!(devInfo.fw && cmpVersion(devInfo.fw, "1.6.3-beta1") >= 0);
             // round88: 0xC7 调试读数门禁, 需固件 1.6.5+(正式版号, cmpVersion 纯数值)。
             mbrDebugFwSupport = !!(devInfo.fw && cmpVersion(devInfo.fw, "1.6.5") >= 0);
+            mbrSignalFwSupport = !!(devInfo.sig && devInfo.sig.version === devInfo.fw &&
+                devInfo.sig.variant === "hw_v1" && devInfo.var === "hw_v1" &&
+                supportsMbrSignalFirmware(devInfo.fw, devInfo.buildId));
             // round64: v1.6 逐键阈值门禁。0xBD 版本 >=1.6.0 才允许编辑逐键;
             // 旧固件保留 reserved 全 0, UI 显示全部"继承"并禁用。
             // round68: ckGameRaw 同门禁(实验开关需 1.6.0 固件)。旧固件清勾选
@@ -6263,6 +6433,8 @@ function validateUf2ForDevice(p, devInfo) {
     let rawReportSupported = false;  // 固件 1.6.0+ 或 Mock 时置真
     let mbrGateFwSupport = false;  // round81: 悬空抑制滑块门禁, 固件 1.6.2-beta1+
     let mbrDebugFwSupport = false;  // round88: 0xC7 调试读数门禁, 固件 1.6.5+
+    let mbrSignalFwSupport = false; // round89a: 实验性持续信号门, 固件 1.6.6-beta1+
+    let mbrSignalEdited = false;
     let rawLevelFwSupport = false; // round85: 0xC5 level 2 门禁, 固件 1.6.3-beta1+
     function setRawReportMode(level) {
         if (!rawReportSupported) return Promise.resolve(false);
@@ -6459,6 +6631,10 @@ function validateUf2ForDevice(p, devInfo) {
         // round80/81: MBR3116 悬空抑制门(0=旧行为)。固件 sanitize 对 uint8
         // 全域放行, 面板只做 0-255 钳位; 需固件 >= 1.6.2-beta1。
         buf[CFG_OFF_MBR_TOUCH_GATE] = Math.max(0, Math.min(255, parseInt($("rgMbrGate").value) || 0));
+        // 不支持的旧固件保留 reserved 原字节，禁止绕过 UI 启用新门。
+        if (!mbrSignalFwSupport && $("ckMbrSignalGate").checked) throw new Error("当前固件不支持实验性持续信号门");
+        if (mbrSignalFwSupport && mbrSignalEdited) encodeMbrSignalProfile(buf, readMbrSignalProfileUi());
+        if (mbrSignalFwSupport) sanitizeMbrSignalProfile(buf);
 
         // round64: 逐键阈值(0 = 继承,仅在 fw>=1.6.0 允许编辑)。底包保真:
         // 未编辑的键保持 lastReadConfig 原字节,编辑过的按 perKey 状态写回。
@@ -6525,6 +6701,13 @@ function validateUf2ForDevice(p, devInfo) {
         setSlider($("rgHeight"), buf[25] || 10, { quiet: true });
         // round80/81: 悬空抑制读回(0=关闭)。
         setSlider($("rgMbrGate"), buf[CFG_OFF_MBR_TOUCH_GATE] || 0, { quiet: true });
+        const signalProfile = decodeMbrSignalProfile(buf);
+        $("ckMbrSignalGate").checked = signalProfile.enabled && mbrSignalFwSupport;
+        $("mbrSignalZero").value = signalProfile.zero;
+        $("mbrSignalFull").value = signalProfile.full;
+        $("mbrSignalOn").value = signalProfile.onPercent;
+        $("mbrSignalOff").value = signalProfile.offPercent;
+        mbrSignalEdited = false;
         // round64: 逐键阈值读回(0 = 继承)。仅 fw>=1.6.0 时这些偏移才可能非 0;
         // 旧固件读到的 reserved 全 0, 逐键 UI 显示"全部继承"。
         // round67: 校准回填后(calPendingBackfill)进入配置模式的这次 unpack 不能
@@ -6544,6 +6727,35 @@ function validateUf2ForDevice(p, devInfo) {
         updateTouchUi();
         updateUI();
     }
+
+    function readMbrSignalProfileUi() {
+        return { enabled: $("ckMbrSignalGate").checked,
+            zero: Number($("mbrSignalZero").value || NaN), full: Number($("mbrSignalFull").value || NaN),
+            onPercent: Number($("mbrSignalOn").value || NaN), offPercent: Number($("mbrSignalOff").value || NaN) };
+    }
+    function mbrSignalUsesMbr() {
+        return perKeyIsMbr() || getHwVer() === 3 || getHwVer() === 4;
+    }
+    function updateMbrSignalUi() {
+        if (!mbrSignalUsesMbr() && $("ckMbrSignalGate").checked) {
+            $("ckMbrSignalGate").checked = false;
+            mbrSignalEdited = true;
+        }
+        const profile = readMbrSignalProfileUi();
+        const result = validateMbrSignalProfile(profile);
+        const canEdit = connected && configMode && mbrSignalFwSupport && mbrSignalUsesMbr();
+        ["ckMbrSignalGate", "mbrSignalZero", "mbrSignalFull", "mbrSignalOn", "mbrSignalOff"].forEach(id => $(id).disabled = !canEdit);
+        const status = $("mbrSignalStatus");
+        status.classList.toggle("warn", !result.valid);
+        status.textContent = !mbrSignalFwSupport
+            ? "当前固件未确认支持，禁止启用；需固件 ≥ " + MBR_SIGNAL_MIN_FW
+            : !result.valid ? "参数无效：" + result.errors.join("；")
+            : `${profile.enabled ? "已勾选（须保存生效）" : "关闭"} · DIFF ${profile.zero}→${profile.full} · ON ≥ ${profile.zero + Math.ceil((profile.full - profile.zero) * profile.onPercent / 100)} / OFF ≤ ${profile.zero + Math.floor((profile.full - profile.zero) * profile.offPercent / 100)} · 同时须通过原生与逐键门限`;
+        if (mbrSignalFwSupport && mbrSignalEdited && !result.valid) $("btnSaveAndReboot").disabled = true;
+    }
+    ["ckMbrSignalGate", "mbrSignalZero", "mbrSignalFull", "mbrSignalOn", "mbrSignalOff"].forEach(id => {
+        $(id).addEventListener("input", () => { mbrSignalEdited = true; updateUI(); });
+    });
 
     // ================================================================
     // 配置模式按钮
@@ -6619,8 +6831,6 @@ function validateUf2ForDevice(p, devInfo) {
             crossCheckProbe();
             // round57: 配置模式心跳(每 30s 发 0xC3 重置固件 60s 自动退出计时器)
             startCfgKeepalive();
-            // round85: 悬空截止校准建议在场时回填(mbrTable 阈值 + rgMbrGate=130)
-            if (hoverCalResult) await applyHoverCalBackfill();
             return true;
         } catch (e) { log("进入配置模式失败: " + e.message, "error"); return false; }
     }
@@ -7258,6 +7468,7 @@ function validateUf2ForDevice(p, devInfo) {
     //   MBR3116 → 悬空阈值校准(runHoverCalSequence,向导化)。
     let calRouteMbr = false;
     function calFillIntroMpr() {
+        $("calWizardApply").disabled = false;
         $("calIntroTitle").textContent = "一键校准阈值 (MPR121)";
         $("calIntroBody").innerHTML =
             '<p class="cal-intro-p">校准分两轮运行，请按提示操作：</p>' +
@@ -7269,14 +7480,14 @@ function validateUf2ForDevice(p, devInfo) {
         $("calWizardStart").textContent = "开始校准";
     }
     function calFillIntroMbr() {
-        $("calIntroTitle").textContent = "悬空阈值校准 (MBR3116)";
+        $("calIntroTitle").textContent = "悬空信号观察 (MBR3116)";
+        $("calWizardApply").disabled = true;
         $("calIntroBody").innerHTML =
-            '<p class="cal-intro-p">校准只有一个阶段（6 秒采样），请按提示操作：</p>' +
+            '<p class="cal-intro-p">本入口仅观察悬空信号（6 秒采样）：</p>' +
             '<div class="cal-phase-row"><span class="cal-phase-num">1</span>' +
-            '<div class="cal-phase-text"><strong>悬停（6 秒）</strong>：把一根手指悬停在触摸板上方，保持在<strong>「你希望的最远触发高度」</strong>——比该高度更近会触发、更远不触发。保持不动，不要触碰表面。</div></div>' +
-            '<p class="cal-intro-note">采样完成后将给出建议的芯片触摸阈值（合法区间 128-200），点击「确认并开始修改」会自动进入配置模式并回填；随后用「同步烧录全部芯片」写入 NVM 并「保存并重启」。</p>' +
-            '<p class="cal-intro-note">原理：芯片无 mm 距离输出，但信号量与悬空高度单调相关。面板取该高度信号峰值的 1.25 倍作阈值（对齐官方「阈值=80% 信号量」准则的逆向），即比校准高度更近才触发。</p>';
-        $("calWizardStart").textContent = "开始校准";
+            '<div class="cal-phase-text"><strong>悬停（6 秒）</strong>：把手指放在需要观察的悬空位置，保持不动，不要触碰表面。</div></div>' +
+            '<p class="cal-intro-note">没有有效轻触样本、区域定位与噪声裕量验证，单个悬空峰值无法产生可信阈值或毫米距离。本入口不自动回填、不写入芯片。</p>';
+        $("calWizardStart").textContent = "开始观察";
     }
     async function startCalibration() {
         if (calRunning) { log("校准向导已在运行"); return; }
@@ -7498,21 +7709,17 @@ function validateUf2ForDevice(p, devInfo) {
         });
         $("calWizardCancelIntro").addEventListener("click", () => calCloseWizard());
         // round86 #7: result 屏「取消」按路由回滚 -- MPR 撤销已回填的建议值,
-        // MBR 仅清除悬空校准建议(未写表单)。
+        // MBR 仅结束信号观察,没有参数回填。
         $("calWizardCancelResult").addEventListener("click", () => {
-            if (calRouteMbr) { hoverCalResult = null; log("已放弃本次悬空校准建议值", "warn"); }
+            if (calRouteMbr) { hoverCalResult = null; log("已结束本次悬空信号观察"); }
             else calRevertBackfill();
             calCloseWizard();
         });
         $("calWizardApply").addEventListener("click", () => {
             calCloseWizard();
             if (calRouteMbr) {
-                // MBR: 建议值尚未写表单,确认后与旧 confirm() 流程一致 --
-                // 保留 hoverCalResult,自动进配置模式由 applyHoverCalBackfill 消费。
-                if (hoverCalResult) {
-                    log("悬空校准建议已记录: 阈值 " + hoverCalResult.threshold + "。进入配置模式后自动回填。");
-                    if (!configMode) withSerialLock(() => enterConfigMode());
-                }
+                hoverCalResult = null;
+                log("MBR 单悬空观察不应用参数：需要有效轻触样本和分离裕量验证", "warn");
                 return;
             }
             calPreTouch = null;  // 已确认,快照作废(复查 B1)
@@ -7993,7 +8200,7 @@ function validateUf2ForDevice(p, devInfo) {
     // - 编辑直接写当前芯片缓存(mbrTableCache)并标脏;「全局应用」开关默认开,
     //   同步写全部目标芯片缓存(与滑条联动语义一致);关=仅当前芯片。
     // - 校验(评审建议#2): I2C_ADDR(0x51) ≠ 目标芯片地址 → 严重违例, 写入禁用;
-    //   FT(0x0C-0x1B)+HYS(0x1D 低5位,bit7=1 时) > 255 → 硬死区违例, 写入禁用;
+    //   FT 合法范围 31–200；HYS 保留位 bit6:5 须为 0。
     //   FSS_EN 非 0 / 有效 SENSOR_EN 位被关 / 0x4F 的 EMC(bit2)/GUARD(bit1)
     //   置位 → 警告级, 写入前须勾选「已知晓风险」。
     // - 「写入芯片」= 0xBA 双写烧录当前芯片(复用 mbrBurnOne);全局模式下写完
@@ -8077,12 +8284,14 @@ function validateUf2ForDevice(p, devInfo) {
         const ntOn = (mbrTable[0x21] & 0x80) !== 0;
         const nt = mbrTable[0x21] & 0x7F;
         const html =
+            `<span>当前编辑区（模板/缓存，不代表芯片实时状态）</span> · ` +
             (ath
-                ? `<span class="mbr-st-warn">自动阈值 SmartSense(手动阈值不生效!)</span>`
-                : `<span class="mbr-st-ok">手动阈值生效中</span>`) +
-            ` · 触发 ${ft} + 迟滞 ${hysOn ? hys : "自动"} (ON=${hysOn ? Math.min(255, ft + hys) : "?"})` +
+                ? `<span class="mbr-st-warn">ATH 开启：手动 FT 不生效，实际判定线未知</span>`
+                : `<span>ATH 关闭：手动 FT=${ft}</span>`) +
+            ` · 迟滞 ${hysOn ? hys : "自动"}` +
+            (!ath && hysOn ? ` · ON≥${ft + hys} / OFF≤${ft - hys}` : " · ON/OFF 无法由编辑表确定") +
             ` · 基线冻结 ${ntOn ? nt : "自动"}` +
-            ` · ARST ${["关", "5s⚠", "20s"][arst] || "?"}`;
+            ` · ARST ${["关", "5s⚠", "20s"][arst] || "?"} · 写入后须从芯片回读核对`;
         el.innerHTML = html;
     }
 
@@ -8097,16 +8306,18 @@ function validateUf2ForDevice(p, devInfo) {
             severe = true;
             reasons.push(`I2C_ADDR(0x51)=0x${mbrTable[0x51].toString(16).toUpperCase()} ≠ 目标芯片 0x${addrInt.toString(16).toUpperCase()} —— 写入将使芯片失联变砖`);
         }
-        // 严重 2: FT+HYS > 255 硬死区
-        const hysOn = (mbrTable[0x1D] & 0x80) !== 0;
-        const hys = mbrTable[0x1D] & 0x1F;
+        // 严重 2: 依据官方 FT 范围与 BUTTON_HYS 保留位校验。
+        if (mbrTable[0x1D] & 0x60) {
+            severe = true;
+            reasons.push("BUTTON_HYS(0x1D) 的保留位 bit6:5 非 0");
+        }
         const en = (mbrTable[0x00] | (mbrTable[0x01] << 8)) & 0xFFFF;
         for (let i = 0; i < 16; i++) {
             if (!(en & (1 << i))) continue;
             const ft = mbrTable[0x0C + i];
-            if (hysOn && ft + hys > 255) {
+            if (ft < 31 || ft > 200) {
                 severe = true;
-                reasons.push(`传感器 ${i}: FT(${ft}) + HYS(${hys}) > 255 —— ON 判定硬死区, 该键永远无法报 ON`);
+                reasons.push(`传感器 ${i}: FT(${ft}) 超出官方合法区间 31–200`);
             }
         }
         let warn = false;
@@ -8115,8 +8326,8 @@ function validateUf2ForDevice(p, devInfo) {
             warn = true;
             reasons.push("FSS_EN(0x02/0x03) 非 0 —— 邻键抑制会吞掉相邻双押, 音游严禁开启");
         }
-        // 警告: 本机布局的有效传感器被关闭(v1: CS0-11 于 0x40-0x42 / v2: CS0-7 于 0x43/0x44)
-        const needMask = (hwVerValue === 3 || hwVerValue === 4) ? 0x00FF : 0x0FFF;
+        // v1 maps CS0-11 across three chips; v2 maps all 16 on each of two.
+        const needMask = (hwVerValue === 3 || hwVerValue === 4) ? 0xFFFF : 0x0FFF;
         if ((en & needMask) !== needMask) {
             warn = true;
             reasons.push(`SENSOR_EN 有本机传感器被关闭(使能 ${en.toString(2).padStart(16, "0")}) —— 对应按键将失联`);
@@ -8125,7 +8336,7 @@ function validateUf2ForDevice(p, devInfo) {
         const cfg2 = mbrTable[0x4F];
         if (cfg2 & 0x02 || cfg2 & 0x04) {
             warn = true;
-            reasons.push("DEVICE_CFG2(0x4F) 开启了 EMC_EN/GUARD_EN —— EMC 需要牺牲 CS10-15, GUARD 需要 CS11/10, 本机布局不可用");
+            reasons.push("DEVICE_CFG2(0x4F) 开启了 EMC_EN/GUARD_EN —— EMC要求关闭CS10-15，GUARD占用CS2，与现有滑条电极冲突");
         }
         mbrRegRisk = { severe, warn, reasons };
         const btn = $("btnMbrRegWrite");
@@ -8224,11 +8435,9 @@ function validateUf2ForDevice(p, devInfo) {
             const diff = data[5] | (data[6] << 8);
             const base = data[7] | (data[8] << 8);
             const raw = data[9] | (data[10] << 8);
-            // 悬空高度换算: 实测 2mm≈255(饱和)/10mm≈0 → h ≈ 10 - 8*diff/255 (贴面 <2mm)
-            const mm = diff >= 255 ? "<2 (饱和)" : (10 - 8 * diff / 255).toFixed(1);
             out.textContent =
                 `CS${sensor} @0x${addr.toString(16).toUpperCase()} sync=${data[3]} cp=${data[4]}pF\n` +
-                `diff=${diff} (≈悬空 ${mm} mm)  baseline=${base}  raw=${raw}`;
+                `DIFF=${diff}${diff >= 255 ? "（可能饱和/裁剪）" : ""}  baseline=${base}  raw=${raw}\n未经距离标定，不换算毫米。`;
         } catch (e) {
             let extra = "";
             try { extra = await waitForLine(500); } catch (e2) { /* 无文本 */ }
@@ -8269,7 +8478,7 @@ function validateUf2ForDevice(p, devInfo) {
         renderMbrHex();
         syncMbrFields();
         syncMbrRegInputs();
-        log(`抗悬空预设已写入编辑表(全局${$("mbrRegGlobal").checked ? "应用" : "仅当前芯片"}): FT=${P.ft}+HYS=25(ON=225) NT/NNT=80 LBR=50 debounce=2 ARST=20s ATH=关。用「写入芯片」落 NVM。`, "");
+        log(`参数预设已写入编辑表(全局${$("mbrRegGlobal").checked ? "应用" : "仅当前芯片"}): FT=${P.ft},HYS=25(ON≥225/OFF≤175) NT/NNT=80 LBR=50 debounce=2 ARST=20s ATH=关。未经悬空/轻触验证；用「写入芯片」落 NVM。`, "");
     });
 
     // 恢复模板值: 当前芯片回到固件内置模板(untrusted)
@@ -8398,31 +8607,22 @@ function validateUf2ForDevice(p, devInfo) {
         }
     }));
 
-    // round85: 悬空截止校准(悬空截止高度 → 芯片 FINGER_THRESHOLD)。
-    // 原理: 芯片无 mm 距离输出, 但 diff 与悬空高度单调相关(实测 4mm≈128,
-    // 0.5mm≈255 饱和)。让用户把手指悬停在"期望的最远触发高度"采样原始 diff
-    // 峰值 P, 阈值 = clamp(1.25×P, 128, 200) -- 即该高度信号量的 ~80% 以下
-    // 不再置位(对齐 Infineon「阈值=80% 信号量」准则的逆向)。同时把固件侧
-    // mbrTouchGate 联动下调到 130(噪声兜底位): 有效触发点 = max(芯片阈值+
-    // 滞回, gate), 单提其一无效。
-    // 采样在普通模式完成(0xC5=2 原始会话 + 0xB1 帧流, 与固件验证同源通道;
-    // 0xC2 DEBUG_DIFF 对 3116 无效), 回填在配置模式完成(改 mbrTable +
-    // rgMbrGate 表单, 需 0xB5 保存配置 + 0xBA 烧录芯片 NVM 两步才持久)。
-    // round86 #7: 向导化 -- intro 屏由 startCalibration 填充;采样走 running
-    // 屏(环形倒计时);结果走 result 屏。原 confirm()/alert() 交互废弃。
+    // round89a: 旧单悬空峰值向导仅作信号观察。缺少有效轻触样本和区域定位，
+    // 无法验证两类信号是否可分，禁止生成阈值或自动回填芯片/既有 gate。
     let hoverCalRunning = false;
-    let hoverCalResult = null;  // { peak, threshold } 供配置模式回填
+    let hoverCalResult = null;  // 保留旧调用点兼容；观察流程始终不产生回填值
     let hoverCalPrevMode = 2;   // round86 审查修复(P3): 采样前用户报送档位(finally 恢复)
     async function runHoverCalSequence() {
         if (hoverCalRunning) { log("悬空截止校准已在运行"); return; }
         hoverCalRunning = true;
+        hoverCalResult = null;
         if ($("calWizardStart")) $("calWizardStart").disabled = true;
         try {
             const SECONDS = CAL_IS_MOCK ? 2 : 6;
             calShowScreen("calScreenRunning");
-            $("calRunTitle").textContent = "悬空阈值校准 · 采样中";
-            $("calRunHint").textContent = "请把手指悬停在「最远触发高度」并保持，不要触碰表面";
-            log("--- 悬空阈值校准: 请保持悬停 " + SECONDS + "s ---");
+            $("calRunTitle").textContent = "悬空信号观察 · 采样中";
+            $("calRunHint").textContent = "请在需要观察的位置悬停，不要触碰表面；本次不生成阈值";
+            log("--- 悬空信号观察: 请保持悬停 " + SECONDS + "s ---");
             if (!inputPolling) await startInputPolling();
             // 强制原始会话采样(level 2; 旧固件自动回退 level 1, MBR 两档等价)
             hoverCalPrevMode = inputRawMode;
@@ -8459,27 +8659,14 @@ function validateUf2ForDevice(p, devInfo) {
                 .map((v, i) => ({ v, i })).filter(x => x.v >= peak * 0.8)
                 .sort((a, b) => b.v - a.v).slice(0, 6);
             log(`悬空采样完成: ${frames} 帧, 全板原始 diff 峰值 = ${peak}, 热区 tc${hotLanes.map(x => x.i + 1).join("/tc")} = [${hotLanes.map(x => x.v).join(",")}]`);
-            if (peak < 60) {
-                // 峰值过低: 结果屏给出重试指引(不再用 alert 阻塞)
-                $("calReportBody").innerHTML =
-                    `<div style='margin-bottom:8px'>采样峰值过低: <b>${peak}</b> (&lt;60)</div>` +
-                    "<div class='cal-report-note'>手指可能离得太远或未悬停在触摸板上方。请重试，把手指悬停在期望的最远触发高度附近。</div>";
-                calShowScreen("calScreenResult");
-                return;
-            }
-            const threshold = Math.max(128, Math.min(200, Math.round(peak * 1.25)));
-            hoverCalResult = { peak, threshold };
-            const gateNow = parseInt($("rgMbrGate").value) || 0;
-            log(`建议芯片阈值 = clamp(1.25×${peak}, 128, 200) = ${threshold}` +
-                (gateNow > 140 ? `,同时建议把悬空抑制滑块从 ${gateNow} 下调到 130(噪声兜底位)` : ""));
             $("calReportBody").innerHTML = [
-                `悬空原始 diff 峰值: <b>${peak}</b>`,
-                `建议芯片触摸阈值: <b>${threshold}</b> <span style="color:var(--c-text-tertiary)">(合法区间 128-200)</span>`,
-                gateNow > 140 ? `<div style="margin-top:6px">同时将把「悬空抑制」滑块从 ${gateNow} 调整为 <b>130</b>（芯片阈值成为主闸门，固件门降为噪声兜底）</div>` : "",
-                "<div style='margin-top:10px' class='cal-report-note'>点击「确认并开始修改」将自动进入配置模式并回填建议值；随后用「同步烧录全部芯片」写入 NVM，并「保存并重启」持久化配置。</div>",
+                `悬空 DIFF 峰值: <b>${peak}</b> · ${frames} 帧`,
+                peak >= 255 ? "<div class='cal-report-note'>信号已达 255，存在裁剪/饱和，不能据此确定触发距离。</div>" : "",
+                "<div style='margin-top:10px' class='cal-report-note'>没有有效轻触样本、指定区域定位与分离裕量验证；本次仅供观察，不能生成可信阈值或毫米距离。自动应用已禁用，设备参数未修改。</div>",
             ].join("");
+            $("calWizardApply").disabled = true;
             calShowScreen("calScreenResult");
-            log("--- 悬空阈值校准完成: 请查看报告并确认 ---");
+            log("--- 悬空观察完成：仅记录信号，不推荐阈值、不自动应用 ---");
         } catch (e) {
             log("悬空阈值校准出错: " + e.message, "error");
             calCloseWizard();
@@ -8497,26 +8684,7 @@ function validateUf2ForDevice(p, devInfo) {
         calSnapshotHover();
         await runHoverCalSequence();
     }
-    // round86: 悬空校准取消回滚 -- 回填尚未发生(hoverCalResult 在 result 确认
-    // 时才消费),取消只需清建议值与向导态。
-    function calSnapshotHover() { /* 回填在确认后才写表单,无需快照 */ }
-    // 配置模式回填: enterConfigMode 成功后若 hoverCalResult 在场则应用。
-    // round86 #12: 回填阈值同时写当前芯片缓存(标脏),「同步烧录全部芯片」可落 NVM。
-    async function applyHoverCalBackfill() {
-        if (!hoverCalResult) return;
-        const { peak, threshold } = hoverCalResult;
-        hoverCalResult = null;
-        if (!mbrTable) { log("校准回填失败: 寄存器表为空", "error"); return; }
-        if (!MBR_CRC_OK) { log("校准回填失败: CRC 自检未通过", "error"); return; }
-        mbrWriteThreshold(threshold);
-        syncMbrFields();
-        // round86 审查修复(P1): 回填同样经全芯片传播(阈值改写全部缓存并标脏)
-        const db = mbrTable[0x1C] & 0x0F, sn = mbrTable[0x08] & 0x03;
-        mbrPropagateEdits(threshold, db, sn);
-        setSlider($("rgMbrGate"), 130, { quiet: true });
-        log(`悬空截止校准回填: 芯片阈值 → ${threshold} (峰值 ${peak}), 悬空抑制滑块 → 130 (噪声兜底)。` +
-            `请用「同步烧录全部芯片」写入 NVM,并「保存并重启」持久化配置。`, "info");
-    }
+    function calSnapshotHover() { /* 信号观察不回填参数,无需快照 */ }
 
     // round86: 独立「悬空截止校准」按钮已移除 -- 校准入口统一到「一键校准阈值」
     // (btnCalibrate)按硬件探测路由(#7)。runHoverCutoffCalibration 保留为路由目标。
@@ -9633,6 +9801,8 @@ function validateUf2ForDevice(p, devInfo) {
         $("ledSpeed").disabled = false;
 
         $("mbrSection").style.display = (inCfg && $("ckMbr3116").checked) ? "" : "none";
+        $("mbrSignalContainer").style.display = (inCfg && mbrSignalUsesMbr()) ? "" : "none";
+        updateMbrSignalUi();
 
         // round86 #2: 未进入配置模式时,四个配置分区(通用设置/参数调节/高级参数/
         // MBR 高级配置)整体半透明且不可交互,替代此前"控件各自 disabled 但分区
@@ -9671,7 +9841,7 @@ function validateUf2ForDevice(p, devInfo) {
     }
     initLogAutoDock();
 
-    $("ckMbr3116").addEventListener("change", () => { updateTouchUi(); refreshMbrChips(); });
+    $("ckMbr3116").addEventListener("change", () => { updateTouchUi(); refreshMbrChips(); updateUI(); });
     // round67: 一键校准阈值向导(压力上报 + 统计法)
     const btnCal = $("btnCalibrate");
     if (btnCal) btnCal.addEventListener("click", () => startCalibration());

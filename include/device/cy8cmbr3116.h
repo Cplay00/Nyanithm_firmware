@@ -381,6 +381,11 @@ public:
 
     uint8_t get_DIFFERENCE_COUNT_SENSOR(uint16_t* resultBuffer);
 
+    // Reads one coherent 0xB9..0xDB snapshot through the existing STOP-read
+    // transport. False leaves all 16 output values unchanged. Sync equality
+    // validates the snapshot, but does not imply a new sensor refresh.
+    bool readDifferenceCounts(uint16_t resultBuffer[16]);
+
     uint8_t get_GPO_DATA(uint8_t* resultBuffer);
 
     uint8_t get_DEBUG_SENSOR_ID(uint8_t* resultBuffer);

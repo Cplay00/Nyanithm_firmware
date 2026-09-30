@@ -532,6 +532,31 @@ uint8_t CY8CMBR3116::get_DIFFERENCE_COUNT_SENSOR(uint16_t* resultBuffer) {
     return error;
 }
 
+bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16]) {
+    if (resultBuffer == nullptr) return false;
+
+    // Infineon CY8CMBR3xxx_ReadDiffCounts: SYNC0, 16 little-endian
+    // differences, GPO_DATA, SYNC1. Bound retries to limit scan-loop latency.
+    constexpr uint8_t SNAPSHOT_SIZE = SYNC_COUNTER1_ADDRESS - SYNC_COUNTER0_ADDRESS + 1;
+    constexpr uint8_t MAX_ATTEMPTS = 2;
+    uint8_t snapshot[SNAPSHOT_SIZE];
+    for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (requestDataFromAddress(SYNC_COUNTER0_ADDRESS, SNAPSHOT_SIZE, snapshot) != 0) {
+            return false;
+        }
+        if (snapshot[0] != snapshot[SNAPSHOT_SIZE - 1]) continue;
+
+        // Publish only after the whole transfer and both sync bytes validate.
+        // Disabled sensors have undefined values; callers filter their mapping.
+        for (uint8_t sensor = 0; sensor < 16; sensor++) {
+            resultBuffer[sensor] = (uint16_t)snapshot[1 + sensor * 2]
+                | ((uint16_t)snapshot[2 + sensor * 2] << 8);
+        }
+        return true;
+    }
+    return false;
+}
+
 // GPO Data
 uint8_t CY8CMBR3116::get_GPO_DATA(uint8_t* resultBuffer) {
     return requestDataFromAddress(GPO_DATA_ADDRESS, 1, resultBuffer);

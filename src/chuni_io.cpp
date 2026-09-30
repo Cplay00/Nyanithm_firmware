@@ -73,7 +73,7 @@ void hid_task_chuni_input() {
                 report_buf[3] = touchData[1];
                 report_buf[4] = touchData[2];
                 report_buf[5] = touchData[3];
-                if (g == touchStateGen) break;
+                if ((g & 1u) == 0u && g == touchStateGen) break;
                 // round47b-patch: on timeout, skip this HID report entirely (keep last frame)
                 // instead of sending torn data that causes phantom touch / micro-dropout.
                 if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) return;
@@ -94,7 +94,7 @@ void hid_task_chuni_input() {
                         report_buf[9] |= (1 << i);
                     }
                 }
-                if (g == touchStateGen) break;
+                if ((g & 1u) == 0u && g == touchStateGen) break;
                 if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) return;  // round47b-patch: skip, keep last frame
             }
         }
@@ -330,7 +330,7 @@ void cdc_respond() {
             for (int i = 0; i < 6; i++) {
                 if (airKeys[i]) air |= 1 << i;
             }
-            if (g == touchStateGen) {
+            if ((g & 1u) == 0u && g == touchStateGen) {
                 // round55: additive input latency (cfg3, 0-15ms). Hold each new
                 // frame until nowMs >= frameFirstSeenMs + latencyMs, so state
                 // younger than the configured delay is never served. Poll rate
@@ -505,14 +505,28 @@ void cdc_respond() {
         uint32_t g;
         uint16_t hw[3], rw[3];
         uint8_t td[32];
+        // round89a: a timed-out writer can leave the generation odd and
+        // unchanged. Serve the last coherent 46B chain (zero on first request).
+        static uint16_t lastHw[3] = {0}, lastRw[3] = {0};
+        static uint8_t lastTd[32] = {0};
+        bool snapshotFresh = false;
         uint32_t spinStart = to_ms_since_boot(get_absolute_time());
         while (true) {
             do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 5);
             hw[0] = hwTouch[0]; hw[1] = hwTouch[1]; hw[2] = hwTouch[2];
             rw[0] = rawTouch[0]; rw[1] = rawTouch[1]; rw[2] = rawTouch[2];
             for (int i = 0; i < 32; i++) td[i] = touchData32[i];
-            if (g == touchStateGen) break;
+            if ((g & 1u) == 0u && g == touchStateGen) { snapshotFresh = true; break; }
             if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) break;
+        }
+        if (snapshotFresh) {
+            memcpy(lastHw, hw, sizeof(hw));
+            memcpy(lastRw, rw, sizeof(rw));
+            memcpy(lastTd, td, sizeof(td));
+        } else {
+            memcpy(hw, lastHw, sizeof(hw));
+            memcpy(rw, lastRw, sizeof(rw));
+            memcpy(td, lastTd, sizeof(td));
         }
         uint8_t sync[2] = {0xAA, 0x55};
         tud_cdc_write(sync, 2);

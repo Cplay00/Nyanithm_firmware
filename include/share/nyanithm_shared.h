@@ -13,12 +13,13 @@
 #else
 #include <stdint.h>
 #endif
+#include <stddef.h>
 
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.5"
-#define NYANITHM_BUILD_ID "round88f"
+#define NYANITHM_FW_VERSION "1.6.6-beta1"
+#define NYANITHM_BUILD_ID "round89a"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -43,6 +44,13 @@ const uint8_t CFG2_BIT_GAME_RAW_SLIDER = 0b00000010;
 // cfg3: additive input latency, 0-15 ms (MBR3116-style tuning knob, 0 = off).
 const uint8_t INPUT_LATENCY_MAX_MS = 15;
 
+// Versioned, opt-in global MBR difference-count gate. These are signal counts,
+// not a physical distance measurement. Old zero-filled reserved bytes stay off.
+const uint8_t MBR_DISTANCE_PROFILE_MAGIC = 0xD6;
+const uint8_t MBR_DISTANCE_PROFILE_VERSION = 1;
+const uint8_t MBR_DISTANCE_FLAG_ENABLED = 0x01;
+const uint8_t MBR_DISTANCE_PROFILE_CHECK_SEED = 0xA7;
+
 struct controller_config {
     uint8_t magic;            // 此值必须为 CONTROLLER_CONFIG_MAGIC
     uint8_t cfgVer;           // 配置文件版本
@@ -62,27 +70,36 @@ struct controller_config {
     // round64: v1.6 per-key thresholds, indexed by slider lane 0-31 (game view).
     // 0 = inherit global th_touch/th_release. MPR121 range 1-63 (same scale as
     // th_touch). MBR3116: values 1-255 stored; the software verify layer applies
-    // max(80, value), so the effective gate only tightens from the round50
-    // baseline (hardware gate stays 128) -- values <=128 never relax it.
+    // max(80, value), so the software gate only tightens from round50.
+    // Native BUTTON_STAT remains a separate candidate gate; ATH/configuration
+    // determines its actual threshold, not a universal fixed value of 128.
     // thReleaseKey only applies to MPR121 (MBR has no per-sensor release reg).
     uint8_t thTouchKey[32];    //
     uint8_t thReleaseKey[32];  //
     // round80: MBR3116 悬空抑制门 (hover-rejection gate)。0 = 关闭 (完全旧行为);
     // >0 时 MBR 新触摸 ON 验证门抬高为 max(verifyBaseK, mbrTouchGate), 仅作用于
-    // 触摸判定 (release/sticky 不变)。背景: 芯片 NVM 阈值 0x0C=128 使 BUTTON_STAT
-    // 在 PCB+亚克力上方 ~4mm 悬空即置位, 而固件验证基线 (80) 比芯片还松, 悬空直通;
-    // 用户实测 4mm 开始触发 / 0.5mm 已饱和 255, 物理上悬空近触与实触不可区分,
-    // 本门只能把触发点从 4mm 压近贴面, 建议真机从 200-220 起调。
+    // 触摸判定 (release/sticky 不变)。本字段为历史新触摸验证门；信号值不等于
+    // 毫米距离，近距悬空与接触可能重叠或同时饱和，不能保证贴面才触发。
     // v1 (hw1/hw2) 与 v2 (hw3/hw4) 双主控布局同样生效。
     // 注意: slide 过渡信号同样必须先过此门 (reject 在邻格快路径之前);
     // gate>=200 时强信号快路径的有效阈值也被抬到 gate 值, 属预期行为。
     // round84 修订: (a) 游戏车道 k±1 上一周期有已确认触摸时, 本格 gate 预检
-    // 下放为 verifyBaseK+40 (slide 连续性豁免; 悬空带首格永无已确认邻居,
-    // 无法自我锚定, 防护不被穿透); (b) 悬空根治主闸门应上芯片侧
-    // FINGER_THRESHOLD (面板「悬空截止校准」联动写入, 合法区间 31-200),
-    // 本门降级为噪声兜底 (建议 ~130), max 语义下单提其一无效。
+    // 下放为 verifyBaseK+40 (slide 连续性豁免)。已接触邻格也可能让悬空格受益，
+    // 因此不能作持续硬截止；round89a 的独立 profile 在豁免前持续执行。
+    // 原生手动 FINGER_THRESHOLD 31-200 仅在 ATH_EN=0 时接管，仍需实测可分性。
     uint8_t mbrTouchGate;      //
-    uint8_t reserved[36];      //
+    // Global zero/full signal points and ON/OFF percentages of that range.
+    // All eight bytes must validate before flags can enable the strict gate.
+    // Profile check = 0xA7 XOR bytes 91..97; distinct from the blob xorSum.
+    uint8_t mbrDistanceMagic;       // byte 91: MBR_DISTANCE_PROFILE_MAGIC
+    uint8_t mbrDistanceVersion;     // byte 92: independent profile version
+    uint8_t mbrDistanceFlags;       // byte 93: bit 0 enables; other bits invalid
+    uint8_t mbrDistanceZero;        // byte 94: 0..255, zero output at/below Z
+    uint8_t mbrDistanceFull;        // byte 95: 0..255, must be greater than Z
+    uint8_t mbrDistanceOnPercent;   // byte 96: 1..100
+    uint8_t mbrDistanceOffPercent;  // byte 97: 0..99, must be below ON
+    uint8_t mbrDistanceCheck;       // byte 98: profile check byte
+    uint8_t reserved[28];      // bytes 99..126
     uint8_t xorSum;            // 前127字节异或和, 用于校验
 };
 
@@ -90,6 +107,11 @@ struct controller_config {
 // protocol depend on it).
 #if defined(__cplusplus)
 static_assert(sizeof(struct controller_config) == 128, "controller_config must stay 128 bytes");
+static_assert(offsetof(controller_config, mbrTouchGate) == 90, "legacy MBR gate offset must stay 90");
+static_assert(offsetof(controller_config, mbrDistanceMagic) == 91, "MBR profile offset must stay 91");
+static_assert(offsetof(controller_config, mbrDistanceCheck) == 98, "MBR profile check offset must stay 98");
+static_assert(offsetof(controller_config, reserved) == 99, "reserved offset must stay 99");
+static_assert(offsetof(controller_config, xorSum) == 127, "config checksum offset must stay 127");
 #else
 _Static_assert(sizeof(struct controller_config) == 128, "controller_config must stay 128 bytes");
 #endif
@@ -137,15 +159,16 @@ typedef enum {
     // 0xC6 双写铁律同源, 单次合并写会被 stdio/TinyUSB 路径吞读载荷)。地址白名单
     // 0x40-0x44(0x37 工装地址不受理, 固件驱动对象无此构造地址), sensor 合法
     // 区间 0-15(TRM SENSOR_ID 0x82)。
-    // 固件写 SENSOR_ID -> 泵等待一个扫描周期(~30ms) -> 突发读调试区
+    // 固件写 SENSOR_ID -> 有界泵等待40ms -> 突发读调试区。等待不代表
+    // 识别了一个新芯片扫描，刷新周期仍须按原厂条件和实机状态核实。
     // 0xDB..0xE7 共 13 字节 -> SYNC1(0xDB)==SYNC2(0xE7) 且 DEBUG_SENSOR_ID
     // (0xDC)==sensor 校验通过后回 11 字节二进制(全小端):
     //   [0]=0xC7 回显 [1]=addr [2]=sensor [3]=SYNC_COUNTER
     //   [4]=DEBUG_CP(pF 原值) [5..6]=DIFFERENCE_COUNT [7..8]=BASELINE
     //   [9..10]=RAW_COUNT (0xE4 AVG_RAW_COUNT 不回传, 面板如需可后续扩展)
     // 校验失败或 I2C 错误回文本行 "3116 debug fail\n"(按首字节 0xC7 与长度区分)。
-    // 用途: 悬空/触摸定标(diff 与悬空高度单调相关, 实测 2mm≈255 饱和,
-    // 10mm≈0), 配合面板寄存器悬浮窗实时读数区使用。
+    // 用途: 指定电极的信号观察与研究；按钮 DIFF 为0..255，RAW/BASELINE
+    // 单位不同，不能把16位容器或未标定信号换算为毫米距离。
     CMD_MBR3116_DEBUG = 0xC7,
 } NyanithmCmd;
 
