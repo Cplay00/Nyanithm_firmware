@@ -1,0 +1,701 @@
+{
+  "device": {
+    "port": "COM6",
+    "usb_serial": "5303284739002C9C",
+    "version": "FW:1.6.6-beta1 API:0x10 HW:v2 Built:Oct  1 2026 02:11:12 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta1;hw_v1;BID=round89a",
+    "probe": "bc000e050502",
+    "raw_status": "RAW=0",
+    "initial_input": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "config_entry": "",
+    "config_trailer": "read...\nusing config in page 14",
+    "controller_config": "880202020000000a081190013c0000000000000000000000ff0a0000000000d2d2d200d200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082d6010100ff4632fa00000000000000000000000000000000000000000000000000000000e4",
+    "profile": [
+      214,
+      1,
+      1,
+      0,
+      255,
+      70,
+      50,
+      250
+    ],
+    "chips": {
+      "0x40": {
+        "hex": "ff0f000000000000ffffff00c8c8c8c8c8c8c8c8c8c8c8c87f7f7f7f010000000000000000000080050000020002000000000000001e1e00001e1e000000010100ffffffffffffffff0000000000016800400100000a00000000000000000000000000000000000000000000000000000000000000000000000000000000a32e",
+        "sha256": "b7e8208562703f7376a22390cbf82246a15eca97ec48905fc1f5bea9f48760b2",
+        "ath": true,
+        "device_cfg2": 104,
+        "ft": [
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          127,
+          127,
+          127,
+          127
+        ],
+        "sensor_en": "ff0f"
+      },
+      "0x41": {
+        "hex": "ff0f000000000000ffffff00c8c8c8c8c8c8c8c8c8c8c8c87f7f7f7f010000000000000000000080050000020002000000000000001e1e00001e1e000000010100ffffffffffffffff0000000000016800410100000a0000000000000000000000000000000000000000000000000000000000000000000000000000000080fa",
+        "sha256": "452e022625b31628f07e76e1bba80bfea180b22188f7ba74c87ac320cbea5486",
+        "ath": true,
+        "device_cfg2": 104,
+        "ft": [
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          127,
+          127,
+          127,
+          127
+        ],
+        "sensor_en": "ff0f"
+      },
+      "0x42": {
+        "hex": "ff0f000000000000ffffff00c8c8c8c8c8c8c8c8c8c8c8c87f7f7f7f010000000000000000000080050000020002000000000000001e1e00001e1e000000010100ffffffffffffffff0000000000016800420100000a00000000000000000000000000000000000000000000000000000000000000000000000000000000c496",
+        "sha256": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+        "ath": true,
+        "device_cfg2": 104,
+        "ft": [
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          200,
+          127,
+          127,
+          127,
+          127
+        ],
+        "sensor_en": "ff0f"
+      }
+    }
+  },
+  "native_stages": {
+    "native_finger_hover5": {
+      "attempts": 129,
+      "valid": 126,
+      "failed": 3,
+      "saturated": 0,
+      "delta_at_saturation": null
+    },
+    "native_idle": {
+      "attempts": 129,
+      "valid": 128,
+      "failed": 1,
+      "saturated": 0,
+      "delta_at_saturation": null
+    },
+    "native_light_contact_lift": {
+      "attempts": 355,
+      "valid": 346,
+      "failed": 9,
+      "saturated": 234,
+      "delta_at_saturation": [
+        157,
+        261
+      ]
+    },
+    "native_palm_approach5_lift": {
+      "attempts": 387,
+      "valid": 386,
+      "failed": 1,
+      "saturated": 8,
+      "delta_at_saturation": [
+        137,
+        149
+      ]
+    },
+    "native_palm_hover5": {
+      "attempts": 130,
+      "valid": 129,
+      "failed": 1,
+      "saturated": 0,
+      "delta_at_saturation": null
+    }
+  },
+  "board_stages": {
+    "center_contact_lift": {
+      "frames": 779,
+      "any_final_on": 147,
+      "final_lanes": [
+        17
+      ],
+      "saturated_lanes": [
+        17
+      ],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        255,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "contact_sweep": {
+      "frames": 717,
+      "any_final_on": 409,
+      "final_lanes": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        32
+      ],
+      "saturated_lanes": [
+        3,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        32
+      ],
+      "peak_by_lane": [
+        183,
+        233,
+        255,
+        222,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        180,
+        232,
+        0,
+        255
+      ]
+    },
+    "finger_hover10": {
+      "frames": 384,
+      "any_final_on": 0,
+      "final_lanes": [],
+      "saturated_lanes": [],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "finger_hover5": {
+      "frames": 383,
+      "any_final_on": 105,
+      "final_lanes": [
+        17
+      ],
+      "saturated_lanes": [],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        224,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "finger_light_hold": {
+      "frames": 379,
+      "any_final_on": 0,
+      "final_lanes": [],
+      "saturated_lanes": [],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "idle": {
+      "frames": 487,
+      "any_final_on": 0,
+      "final_lanes": [],
+      "saturated_lanes": [],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "gate179_light_contact_lift": {
+      "frames": 1155,
+      "any_final_on": 420,
+      "final_lanes": [
+        17
+      ],
+      "saturated_lanes": [
+        17
+      ],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        255,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "gate179_palm_approach5_lift": {
+      "frames": 1154,
+      "any_final_on": 315,
+      "final_lanes": [
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "saturated_lanes": [
+        15,
+        16,
+        17,
+        19
+      ],
+      "peak_by_lane": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        255,
+        255,
+        255,
+        188,
+        255,
+        151,
+        124,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "notes": {
+    "initial_gate_on": true,
+    "initial_on_count": 179,
+    "initial_off_count": 127,
+    "baseline_gate_off_changes": [
+      93,
+      98
+    ],
+    "static_light_hold_user_note": "contact may have been interrupted; exclude from calibration",
+    "sampling_units": {
+      "C5_2": "native button DIFF, 8-bit report; no freshness/error metadata",
+      "C0": "hardware/verified/final coherent chain, separate transaction from C5",
+      "C7": "single native sensor debug window; explicit failed responses excluded; SYNC consistency does not establish independent samples"
+    },
+    "heights": "user estimated from acrylic surface; not metrology",
+    "source_commit": "d2cafa0",
+    "device_bid": "round89a",
+    "native_palm_approach5_lift_user_confirmed_no_contact": true,
+    "gate179_palm_approach5_lift_user_confirmed_no_contact": true,
+    "user_constraint": "firmware and existing register changes only; no hardware changes",
+    "device_online_flash_authorized": true,
+    "comments": "keep production comments concise"
+  },
+  "files": {
+    "baseline_gate_off.bin": "22b6ad45897d13e4736f7c8c94ad7bbf9d812853ba5f47ec5f0776bbc3062c23",
+    "chip_40.bin": "b7e8208562703f7376a22390cbf82246a15eca97ec48905fc1f5bea9f48760b2",
+    "chip_41.bin": "452e022625b31628f07e76e1bba80bfea180b22188f7ba74c87ac320cbea5486",
+    "chip_42.bin": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+    "controller_config.bin": "210f4f9883c8630dd289a57c228ab8efc4e8f5c70a3c8651b62b44bc3b49918b",
+    "baseline_capture\\full_board.csv": "f862b28209d6cb32de3777c4701405078879b336eb49f5662c1c9cf15af9e12b",
+    "final_state\\chip_40.bin": "b7e8208562703f7376a22390cbf82246a15eca97ec48905fc1f5bea9f48760b2",
+    "final_state\\chip_41.bin": "452e022625b31628f07e76e1bba80bfea180b22188f7ba74c87ac320cbea5486",
+    "final_state\\chip_42.bin": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+    "final_state\\controller_config.bin": "210f4f9883c8630dd289a57c228ab8efc4e8f5c70a3c8651b62b44bc3b49918b",
+    "gate179_capture\\full_board.csv": "bf42e9efe47655f7aec1f1b7b7a6eba671629a2d93dbd0fe6d4018c90d5dc257",
+    "native_capture\\native.csv": "43bb9344a923e0a0b6986a75a8eea4f204b2b74f68b577775b99778cca04ac20"
+  },
+  "final_configuration_equal_to_initial": {
+    "controller_config.bin": true,
+    "chip_40.bin": true,
+    "chip_41.bin": true,
+    "chip_42.bin": true
+  },
+  "final_raw_status": "RAW=0",
+  "prepared_ath_ab": {
+    "applied": false,
+    "source_commit": "d2cafa0",
+    "candidates": {
+      "40": {
+        "changed_offsets": [
+          79,
+          126,
+          127
+        ],
+        "device_cfg2": [
+          104,
+          96
+        ],
+        "crc": [
+          11939,
+          8565
+        ],
+        "field_source": "TRM 001-91082 Rev E section 1.5.60 DEVICE_CFG2 bit 3"
+      },
+      "41": {
+        "changed_offsets": [
+          79,
+          126,
+          127
+        ],
+        "device_cfg2": [
+          104,
+          96
+        ],
+        "crc": [
+          64128,
+          62806
+        ],
+        "field_source": "TRM 001-91082 Rev E section 1.5.60 DEVICE_CFG2 bit 3"
+      },
+      "42": {
+        "changed_offsets": [
+          79,
+          126,
+          127
+        ],
+        "device_cfg2": [
+          104,
+          96
+        ],
+        "crc": [
+          38596,
+          39186
+        ],
+        "field_source": "TRM 001-91082 Rev E section 1.5.60 DEVICE_CFG2 bit 3"
+      }
+    }
+  },
+  "panel_mock": {
+    "checks": 25,
+    "errors": [],
+    "expectedConsole": [
+      {
+        "message": "Failed to load resource: the server responded with a status of 404 (File not found)",
+        "url": "http://127.0.0.1:8765/favicon.ico"
+      },
+      {
+        "message": "设备门禁未通过: 硬件探测到 3 颗 ToF(应为 4 或 5),ToF 总线异常或非一代设备。",
+        "url": "http://127.0.0.1:8765/Nyanithm_firmware_hw_v1/ControlPanel_v1.html?mock=gen2"
+      }
+    ],
+    "url": "http://127.0.0.1:8765/Nyanithm_firmware_hw_v1/ControlPanel_v1.html?mock=1",
+    "kind": "Mock only; no physical serial device"
+  },
+  "panel_sha256": "ab27a8ef4c6540f4a99dd546bd8c1316906afde9a2f442a069665286561a03f1",
+  "scope": {
+    "firmware_changed": false,
+    "mbr_nvm_programmed": false,
+    "controller_configuration_temporarily_disabled_then_restored": true,
+    "hid_game_validation": false,
+    "height_metrology": false
+  }
+}

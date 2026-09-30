@@ -4339,7 +4339,7 @@ const KNOWN_V1_FW = ["1.5.1", "1.5.2", "1.5.3", "1.6.0", "1.6.1-beta1", "1.6.1-b
 // round85: 0xC5=2(原始报送)与悬空截止校准按固件 >= 1.6.3-beta1 门禁
 // (cmpVersion 主版本 3>2 天然成立,无需特判)。
 // round88: 0xC7 调试通道按固件 >= 1.6.5 门禁(纯三段数值, cmpVersion 天然可用)。
-const PANEL_VERSION = "1.1.1-beta7";
+const PANEL_VERSION = "1.1.1-beta8";
 
 // ====== UF2 固件文件解析(刷写前校验) ======
 const UF2_MAGIC0 = 0x0A324655;   // "UF2\n"
@@ -4454,7 +4454,7 @@ const MBR_CRC_OK = Object.keys(MBR_TABLES).every(k => {
 // 16-bit 寄存器(SENSOR_EN/FSS_EN/TOGGLE_EN/CONFIG_CRC)按低字节/高字节拆两项。
 const MBR_REG_DEFS = [
     { a: 0x00, n: "SENSOR_EN 低字节", d: "传感器 CS0-7 使能位。关闭某个传感器 = 该键彻底失联", min: 0, max: 255, r: 1 },
-    { a: 0x01, n: "SENSOR_EN 高字节", d: "传感器 CS8-15 使能位。注意本机 12 键布局 CS12-15 必须保持使能(0x0F 高 nibble)", min: 0, max: 255, r: 1 },
+    { a: 0x01, n: "SENSOR_EN 高字节", d: "CS8-15 使能位。三芯片布局使用 CS0-11；双芯片布局使用 CS0-15", min: 0, max: 255, r: 1 },
     { a: 0x02, n: "FSS_EN 低字节", d: "邻键抑制组开关。开启后相邻双押会被吞掉——音游严禁开启", min: 0, max: 255, r: 1 },
     { a: 0x03, n: "FSS_EN 高字节", d: "邻键抑制组开关(CS8-15), 音游必须保持 0", min: 0, max: 255, r: 1 },
     { a: 0x08, n: "SENSITIVITY0", d: "传感器 0-3 灵敏度档位, 每片 2 位: 0=0.1pF 最灵敏/悬空最远 → 3=0.4pF 最迟钝", min: 0, max: 255, r: 0 },

@@ -5,7 +5,7 @@ const path = require('path');
 const assert = require('assert');
 const { chromium } = require('C:/Users/HP/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root = path.resolve(__dirname, '../..');
-const output = path.join(root, '_dev_tools/round89_panel_mock');
+const output = process.env.MBR_PANEL_OUTPUT || path.join(root, '_dev_tools/round89_panel_mock');
 fs.mkdirSync(output, { recursive: true });
 let checks = 0;
 const errors = [];
@@ -83,6 +83,14 @@ async function save(page) {
         await enter(page);
         check('default legacy profile stays off and editable', !await page.locator('#ckMbrSignalGate').isChecked() && await page.locator('#mbrSignalZero').isEnabled());
         check('beta patch retains C7 diagnostic feature', await page.locator('#btnMbrDbgRead').isEnabled());
+        await page.locator('#mbrSection .section-subtitle').click();
+        await page.locator('#btnMbrRegWin').click();
+        const sensorHint = page.locator('.mbr-reg-item:has(#mbrReg_01) .field-hint');
+        check('sensor-enable description matches both native layouts', await sensorHint.isVisible() &&
+            await sensorHint.innerText().then(t => t.includes('CS0-11') && t.includes('CS0-15')));
+        check('opening register description preserves sensor-enable value', await page.locator('#mbrReg_01').inputValue() === '15');
+        await page.locator('.mbr-reg-item:has(#mbrReg_01)').screenshot({ path: path.join(output, 'sensor_enable_description.png') });
+        await page.locator('#mbrRegClose').click();
         await page.locator('#mbrSignalZero').fill('200');
         await page.locator('#mbrSignalFull').fill('180');
         check('invalid zero/full disables save', await page.locator('#btnSaveAndReboot').isDisabled());
