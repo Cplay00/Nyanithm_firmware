@@ -1,5 +1,6 @@
 /* Modified from https://github.com/sebastianregelmann/CypressCY8CMBR3116 */
 #include <cy8cmbr3116.h>
+#include <pico/error.h>
 
 CY8CMBR3116::CY8CMBR3116(uint8_t _i2c_port, uint8_t I2C_ADDRESS) {
     i2c_port = _i2c_port;
@@ -642,8 +643,13 @@ uint8_t CY8CMBR3116::writeData(uint8_t registerAddress, uint8_t count, uint8_t* 
 
 // Method to retriev uint8_tCount of uint8_ts from an registerAddress to the resultBuffer
 uint8_t CY8CMBR3116::requestDataFromAddress(uint8_t registerAddress, uint8_t count, uint8_t* resultBuffer) {
-    int ret = i2c_write_stop_read(i2c_port, DEVICE_I2C_ADDRESS, registerAddress, resultBuffer, count);
-    return (ret == count) ? 0 : 1;
+    // MBR3 can NACK while waking; bound retries without repeating a timeout.
+    for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+        int ret = i2c_write_stop_read(i2c_port, DEVICE_I2C_ADDRESS, registerAddress, resultBuffer, count);
+        if (ret == count) return 0;
+        if (ret != PICO_ERROR_GENERIC) return 1;
+    }
+    return 1;
 }
 
 uint8_t CY8CMBR3116::applyRegister() {

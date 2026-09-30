@@ -1,0 +1,44 @@
+{
+  "completed": true,
+  "uf2": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\build_round89e\\Nyanithm.uf2",
+  "signature": "NYANFW1;1.6.6-beta3;hw_v1;BID=round89e",
+  "uf2_sha256": "48f84193bd8592823b8755bdc59052777c4b621ef82a13cb8e16ef1dc007f429",
+  "uf2_size": 186880,
+  "flash_range": [
+    268435456,
+    268528896
+  ],
+  "before_version": "FW:1.6.6-beta2 API:0x10 HW:v2 Built:Oct  1 2026 05:15:16 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta2;hw_v1;BID=round89c",
+  "backup": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_archive\\round89e_device_before_20261001",
+  "bootsel_command_sent": true,
+  "bootsel_drive": "E:\\",
+  "uf2_copied": true,
+  "after_version": "FW:1.6.6-beta3 API:0x10 HW:v2 Built:Oct  1 2026 05:49:04 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta3;hw_v1;BID=round89e",
+  "controller_config_equal": true,
+  "chips_equal": {
+    "0x40": true,
+    "0x41": true,
+    "0x42": true
+  },
+  "raw_status_after": "RAW=0",
+  "profile_after": [
+    214,
+    1,
+    1,
+    0,
+    255,
+    70,
+    50,
+    250
+  ],
+  "probe": {
+    "duration_s": 12.026625300000887,
+    "frames": 239,
+    "posture": "uncontrolled; not a no-contact acceptance test",
+    "first_gate_failures": 16,
+    "last_gate_failures": 155,
+    "failure_delta": 139,
+    "all_inputs_zero": true
+  },
+  "raw_status_final": "RAW=0"
+}

@@ -78,6 +78,7 @@ PRELUDE = r'''
 #include <stdint.h>
 #include <stddef.h>
 #include <mbr_distance_gate.h>
+#include <pico/error.h>
 
 extern "C" __declspec(dllimport) void* __stdcall GetStdHandle(unsigned long);
 extern "C" __declspec(dllimport) int __stdcall WriteFile(void*, const void*, unsigned long, unsigned long*, void*);
@@ -128,14 +129,17 @@ static uint32_t fakeNow = 100;
 static uint32_t get_absolute_time() { return fakeNow; }
 static uint32_t to_ms_since_boot(uint32_t time) { return time; }
 
+int i2c_write_stop_read(uint8_t, uint8_t, uint8_t, uint8_t*, size_t);
 class CY8CMBR3116 {
 public:
+    uint8_t i2c_port = 1, DEVICE_I2C_ADDRESS = 0;
     uint16_t hardwareBits = 0;
     uint16_t counts[16] = {0};
     unsigned coherentReads = 0, legacyReads = 0, statusReads = 0;
     uint32_t delayMs = 0;
     bool readFails = false, statusFails = false;
     unsigned tornReadsRemaining = 0;
+    unsigned genericFailuresRemaining = 0;
     uint8_t get_BUTTON_STAT(uint8_t* result) {
         ++statusReads;
         if (statusFails) return 1;
@@ -148,22 +152,24 @@ public:
         for (unsigned i = 0; i < 16; ++i) result[i] = counts[i];
         return 0;
     }
-    uint8_t requestDataFromAddress(uint8_t address, uint8_t count, uint8_t* result) {
+    int fakeReadRegisters(uint8_t address, uint8_t count, uint8_t* result) {
         CHECK(address == SYNC_COUNTER0_ADDRESS);
         CHECK(count == SYNC_COUNTER1_ADDRESS - SYNC_COUNTER0_ADDRESS + 1);
         ++coherentReads;
         fakeNow += delayMs;
-        if (readFails) return 1;
-        result[0] = 71;
+        if (readFails) return PICO_ERROR_TIMEOUT;
+        if (genericFailuresRemaining) { --genericFailuresRemaining; return PICO_ERROR_GENERIC; }
+        result[0] = 7;
         for (unsigned i = 0; i < 16; ++i) {
             result[1 + 2 * i] = counts[i] & 0xFF;
             result[2 + 2 * i] = counts[i] >> 8;
         }
         result[count - 2] = 0;  // GPO_DATA is not a difference count.
-        result[count - 1] = tornReadsRemaining ? 72 : 71;
+        result[count - 1] = tornReadsRemaining ? 8 : 7;
         if (tornReadsRemaining) --tornReadsRemaining;
-        return 0;
+        return count;
     }
+    uint8_t requestDataFromAddress(uint8_t address, uint8_t count, uint8_t* result);
     bool readDifferenceCounts(uint16_t result[16]);
 };
 class MPR121 {
@@ -177,6 +183,14 @@ public:
 };
 controller_config ControllerConfig = {};
 CY8CMBR3116 MBR3116A, MBR3116B, MBR3116C, MBR3116D, MBR3116E;
+int i2c_write_stop_read(uint8_t port, uint8_t address, uint8_t reg, uint8_t* result, size_t count) {
+    CHECK(port == 1);
+    CY8CMBR3116* chips[] = {&MBR3116A, &MBR3116B, &MBR3116C, &MBR3116D, &MBR3116E};
+    for (CY8CMBR3116* chip : chips)
+        if (chip->DEVICE_I2C_ADDRESS == address) return chip->fakeReadRegisters(reg, static_cast<uint8_t>(count), result);
+    CHECK(false);
+    return PICO_ERROR_INVALID_ARG;
+}
 MPR121 mpr0, mpr1, mpr2;
 #define GET_BIT(UNUM, BIT) (UNUM & (1 << BIT))
 '''
@@ -215,6 +229,11 @@ static void profile(bool enabled = true) {
     ControllerConfig.mbrDistanceCheck = mbrDistanceProfileCheck(ControllerConfig);
 }
 static void initialize(bool v2, bool enabled = true) {
+    CY8CMBR3116* devices[] = {&MBR3116A, &MBR3116B, &MBR3116C, &MBR3116D, &MBR3116E};
+    for (unsigned i = 0; i < 5; ++i) {
+        devices[i]->i2c_port = 1;
+        devices[i]->DEVICE_I2C_ADDRESS = 0x40 + i;
+    }
     ControllerConfig.hwVer = v2 ? 3 : 1;
     ControllerConfig.cfg0 = CFG0_BIT_MBR3116;
     ControllerConfig.th_touch = 6;
@@ -293,6 +312,10 @@ static void runScenario(unsigned scenario, bool v2) {
         chip(laneChip(0)).readFails = false;
         reConfirm(); CHECK(legacyReads() == legacyBefore);
         CHECK(g_mbrDistanceReadFailures == 3);
+        chip(laneChip(0)).genericFailuresRemaining = 2;
+        frame(); output(0, true); CHECK(g_mbrDistanceReadFailures == 3);
+        chip(laneChip(0)).genericFailuresRemaining = 3;
+        frame(); output(0, false); CHECK(g_mbrDistanceReadFailures == 4);
         g_mbrDistanceReadFailures = 0xFFFFFFFFu;
         chip(laneChip(0)).readFails = true;
         frame(); CHECK(g_mbrDistanceReadFailures == 0);
@@ -460,6 +483,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clang", type=Path, default=CLANG)
     parser.add_argument("--kernel32", type=Path, default=KERNEL32)
+    parser.add_argument("--sdk", type=Path, default=Path(r"D:\pico-sdk"))
     parser.add_argument("--output", type=Path, default=WORKSPACE / "_dev_tools" / "mbr_distance_pipeline_host")
     parser.add_argument("--case", type=int, help="Run just one numbered scenario (0..33)")
     args = parser.parse_args()
@@ -472,12 +496,16 @@ def main() -> int:
             parser.error(f"Missing compiler dependency: {dependency}")
     source_path = VARIANT / "src" / "hw_devices.cpp"
     driver_path = VARIANT / "src" / "cy8cmbr3116.cpp"
+    sdk_headers = args.sdk / "src/common/pico_base_headers/include"
+    if not (sdk_headers / "pico/error.h").is_file():
+        parser.error("Official Pico SDK error header is required")
     source = source_path.read_text(encoding="utf-8")
     driver = driver_path.read_text(encoding="utf-8")
     device_header = (VARIANT / "include" / "device" / "cy8cmbr3116.h").read_text(encoding="utf-8")
     definitions = "\n".join(re.search(rf"^#define {name}\s+[^\n]+", device_header, re.M).group(0)
                             for name in ("SYNC_COUNTER0_ADDRESS", "SYNC_COUNTER1_ADDRESS"))
     parts: list[tuple[Path, str, tuple[str, int]]] = [
+        (driver_path, "requestDataFromAddress", extract_function(driver, "uint8_t CY8CMBR3116::requestDataFromAddress(")),
         (driver_path, "readDifferenceCounts", extract_function(driver, "bool CY8CMBR3116::readDifferenceCounts(")),
         (source_path, "lane-tables-and-helpers", extract_block(source, "static const uint8_t V1_LANE_M", "void initMPR121()")),
         (source_path, "touch-globals", extract_block(source, "uint8_t touchData[4];", "// round66: real-time pressure")),
@@ -507,6 +535,7 @@ def main() -> int:
                "-Wno-missing-braces",  # Preserve production's legacy array initializers verbatim.
                "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fuse-ld=lld", "-nostdlib",
                f"-I{VARIANT / 'include' / 'share'}", f"-I{VARIANT / 'include' / 'software'}",
+               f"-I{sdk_headers}",
                str(generated), "-Wl,/entry:mbrPipelineTestEntry", "-Wl,/subsystem:console",
                str(args.kernel32), "-o", str(executable)]
     manifest["compile_command"] = command

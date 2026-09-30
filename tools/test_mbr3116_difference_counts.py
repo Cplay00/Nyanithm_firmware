@@ -19,6 +19,7 @@ HARNESS = r"""
 #undef NDEBUG // Zig release mode sets this; the harness must execute asserts.
 #endif
 #include <cy8cmbr3116.h>
+#include <pico/error.h>
 #include <array>
 #include <cassert>
 #include <cstdio>
@@ -31,6 +32,8 @@ struct Transfer {
 };
 static std::vector<Transfer> transfers;
 static size_t reads = 0;
+static uint8_t expectedRegister = 0xB9;
+static size_t expectedSize = 35;
 
 int i2c_write(uint8_t, uint8_t, uint8_t*, size_t, bool) {
     assert(false && "difference reads must not write configuration");
@@ -43,7 +46,7 @@ int i2c_read(uint8_t, uint8_t, uint8_t*, size_t, bool) {
 int i2c_write_stop_read(uint8_t port, uint8_t address, uint8_t reg,
                         uint8_t* data, size_t count) {
     assert(port == 1 && address == 0x41);
-    assert(reg == 0xB9 && count == 35);
+    assert(reg == expectedRegister && count == expectedSize);
     assert(reads < transfers.size() && "unbounded/unexpected retry");
     const Transfer& transfer = transfers[reads++];
     // A timeout can leave an arbitrary prefix in the receive buffer.
@@ -79,6 +82,8 @@ static Transfer frame(const std::array<uint16_t, 16>& values,
 static void prepare(std::initializer_list<Transfer> script) {
     transfers = script;
     reads = 0;
+    expectedRegister = 0xB9;
+    expectedSize = 35;
 }
 static void expectValues(const std::array<uint16_t, 18>& output,
                          const std::array<uint16_t, 16>& expected) {
@@ -118,10 +123,42 @@ int main() {
     std::puts("PASS short transfer leaves whole output unchanged");
 
     output = unchanged;
-    prepare({frame(first, 3, 3, -1)});
+    prepare({frame(first, 3, 3, PICO_ERROR_GENERIC), frame(second, 4, 4, PICO_ERROR_GENERIC),
+             frame(first, 5, 5, PICO_ERROR_GENERIC)});
+    assert(!chip.readDifferenceCounts(output.data() + 1));
+    assert(reads == 3 && output == unchanged);
+    std::puts("PASS persistent generic errors bounded to three, partial buffer unpublished");
+
+    prepare({frame(first, 3, 3, PICO_ERROR_GENERIC), frame(second, 4, 4)});
+    assert(chip.readDifferenceCounts(output.data() + 1));
+    assert(reads == 2);
+    expectValues(output, second);
+    std::puts("PASS first wake NACK then complete native burst");
+
+    output = unchanged;
+    prepare({frame(first, 3, 3, PICO_ERROR_GENERIC), frame(first, 3, 3, PICO_ERROR_GENERIC),
+             frame(second, 4, 4)});
+    assert(chip.readDifferenceCounts(output.data() + 1));
+    assert(reads == 3);
+    expectValues(output, second);
+    std::puts("PASS two wake NACKs then complete native burst");
+
+    output = unchanged;
+    prepare({frame(first, 3, 3, PICO_ERROR_TIMEOUT)});
     assert(!chip.readDifferenceCounts(output.data() + 1));
     assert(reads == 1 && output == unchanged);
-    std::puts("PASS transport error with partially written receive buffer");
+    std::puts("PASS SDK timeout is not repeated or published");
+
+    prepare({frame(first, 3, 3, PICO_ERROR_INVALID_ARG)});
+    assert(!chip.readDifferenceCounts(output.data() + 1));
+    assert(reads == 1 && output == unchanged);
+    std::puts("PASS invalid argument is not retried");
+
+    prepare({frame(first, 3, 4), frame(first, 3, 3, PICO_ERROR_GENERIC), frame(second, 4, 4)});
+    assert(chip.readDifferenceCounts(output.data() + 1));
+    assert(reads == 3);
+    expectValues(output, second);
+    std::puts("PASS SYNC and transport retries preserve coherent publication");
 
     output = unchanged;
     prepare({frame(first, 3, 4), frame(second, 4, 4, 34)});
@@ -142,7 +179,15 @@ int main() {
     assert(reads == 2);
     expectValues(output, zeros);
     std::puts("PASS zero-valued and repeated coherent snapshots remain valid reads");
-    std::puts("8/8 production driver tests passed");
+    Transfer status = frame(first, 0, 0, 2);
+    status.bytes[0] = 0x81; status.bytes[1] = 0x04;
+    prepare({frame(first, 0, 0, PICO_ERROR_GENERIC), status});
+    expectedRegister = 0xAA; expectedSize = 2;
+    std::array<uint8_t, 4> bits{0xBE, 0, 0, 0xEF};
+    assert(chip.get_BUTTON_STAT(bits.data() + 1) == 0);
+    assert(reads == 2 && bits[0] == 0xBE && bits[1] == 0x81 && bits[2] == 0x04 && bits[3] == 0xEF);
+    std::puts("PASS native BUTTON_STAT uses bounded wake retry");
+    std::puts("14/14 production driver tests passed");
 }
 """
 
@@ -175,8 +220,12 @@ def find_compiler(explicit):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", help="Path to a native g++, clang++, or Zig executable")
+    parser.add_argument("--sdk", type=Path, default=Path(r"D:\pico-sdk"))
     args = parser.parse_args()
     variant = Path(__file__).resolve().parents[1]
+    sdk_headers = args.sdk / "src/common/pico_base_headers/include"
+    if not (sdk_headers / "pico/error.h").is_file():
+        parser.error("Official Pico SDK error header is required")
     compiler = find_compiler(args.compiler)
     with tempfile.TemporaryDirectory(prefix="nyanithm_mbr_diff_") as directory:
         temporary = Path(directory)
@@ -188,6 +237,7 @@ def main():
         command = compiler + [
             "-std=c++17", "-Wall", "-Wextra", "-Werror", "-O2",
             "-I", str(temporary), "-I", str(variant / "include" / "device"),
+            "-I", str(sdk_headers),
             str(variant / "src" / "cy8cmbr3116.cpp"), str(harness), "-o", str(binary),
         ]
         build = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
