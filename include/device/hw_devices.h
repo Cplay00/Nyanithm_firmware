@@ -64,6 +64,7 @@ extern uint16_t hwTouch[3];    // pre-verification MPR121 touch snapshot
 extern uint16_t rawTouch[3];   // verified touch bits (after software verify)
 extern uint8_t  g_verifyFail[36];  // per-electrode I2C verification rejections (saturating)
 extern uint32_t g_loopMinUs, g_loopMaxUs, g_loopSumUs, g_loopCount;  // Core0 cycle timing
+extern volatile uint32_t g_mbrDistanceReadFailures;  // Per boot: transport or SYNC failure.
 
 // round66: real-time per-lane pressure snapshot (Core0 writer, Core1 reader).
 // rawReportLevel is set by Core1 (0xC5) and auto-cleared on CDC disconnect;

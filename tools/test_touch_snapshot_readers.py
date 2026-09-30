@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile the production touch snapshot readers with deterministic host fakes.
 
-The complete HID function and GET_INPUT / DEBUG_CHAIN command bodies are
+The complete HID function and GET_INPUT / DEBUG_CHAIN / TELEMETRY bodies are
 extracted from src/chuni_io.cpp, including their retry, timeout, pressure,
 telemetry, and USB write paths. No reader implementation is copied here.
 The fake clock and generation reads inject writer interleavings; no device,
@@ -83,6 +83,9 @@ uint16_t hwTouch[3]{};
 uint16_t rawTouch[3]{};
 uint8_t rawReportLevel = 0;
 bool gameRawEnabled = false;
+volatile uint32_t g_mbrDistanceReadFailures = 0;
+uint32_t g_loopMinUs = 0, g_loopMaxUs = 0, g_loopSumUs = 0, g_loopCount = 0;
+uint8_t g_verifyFail[36]{};
 
 // Reads occur at the actual reader's sequence checks. A hook can complete a
 // writer between the opening sequence read and the closing sequence read.
@@ -113,12 +116,18 @@ uint32_t to_ms_since_boot(uint64_t time) {
 std::vector<uint8_t> cdcBytes;
 std::vector<uint8_t> hidBytes;
 unsigned int hidReports = 0;
+uint32_t cdcWriteLimit = 0xFFFFFFFFu;
+std::function<void()> onCdcWrite;
 uint32_t tud_cdc_write(const void* data, uint32_t length) {
+    if (onCdcWrite) onCdcWrite();
+    length = std::min(length, cdcWriteLimit);
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
     cdcBytes.insert(cdcBytes.end(), bytes, bytes + length);
     return length;
 }
 uint32_t tud_cdc_write_flush() { return 0; }
+void tud_task() {}
+void sleep_us(uint32_t duration) { clockUs += duration; }
 bool tud_suspended() { return false; }
 bool tud_remote_wakeup() { return true; }
 bool tud_hid_n_ready(uint8_t) { return true; }
@@ -186,6 +195,11 @@ void beginCase() {
     prevAirState = 0;
     latencyFrameMs = 0;
     g_tele = {};
+    g_mbrDistanceReadFailures = 0;
+    g_loopMinUs = g_loopMaxUs = g_loopSumUs = g_loopCount = 0;
+    std::memset(g_verifyFail, 0, sizeof(g_verifyFail));
+    cdcWriteLimit = 0xFFFFFFFFu;
+    onCdcWrite = {};
     paintShared(1);
 }
 
@@ -372,6 +386,33 @@ int main() {
     assertHid();
     pass("HID changed generation retries before USB report");
 
+    beginCase();
+    readTelemetry();
+    assert(cdcBytes.size() == 528);
+    assert(std::all_of(cdcBytes.begin() + 36, cdcBytes.begin() + 40, [](uint8_t v) { return v == 0; }));
+    assert(g_tele.cdcTxBytes == 528);
+    pass("TELEMETRY empty gate counter keeps fixed 528-byte layout");
+
+    beginCase();
+    g_mbrDistanceReadFailures = 0x12345678u;
+    g_loopCount = 0xAABBCCDDu;
+    g_tele.riseCnt[0] = 0xE1F2;
+    g_tele.fallCnt[31] = 0x3456;
+    g_verifyFail[35] = 0xBC;
+    g_tele.edgeIdx = 0x778899AAu;
+    g_tele.edgeDir[31] = 0xEF;
+    cdcWriteLimit = 64;
+    onCdcWrite = []() { g_mbrDistanceReadFailures = 0x87654321u; };
+    readTelemetry();
+    assert(cdcBytes.size() == 528);
+    const uint8_t fields[] = {0xDD, 0xCC, 0xBB, 0xAA, 0x78, 0x56, 0x34, 0x12, 0xF2, 0xE1};
+    assert(std::equal(fields, fields + sizeof(fields), cdcBytes.begin() + 32));
+    assert(cdcBytes[166] == 0x56 && cdcBytes[167] == 0x34);
+    assert(cdcBytes[203] == 0xBC && cdcBytes[204] == 0xAA && cdcBytes[207] == 0x77);
+    assert(cdcBytes[527] == 0xEF && g_tele.cdcTxBytes == 528);
+    assert(g_mbrDistanceReadFailures == 0x87654321u);
+    pass("TELEMETRY gate counter snapshots once, split TX preserves adjacent fields");
+
     std::cout << passed << '/' << passed << " production-reader scenarios passed\n";
 }
 """
@@ -410,6 +451,7 @@ def main():
         "void hid_task_chuni_input() {" + extract_body(source, "void hid_task_chuni_input()") + "}\n",
         "void readGetInput() {" + extract_body(source, "if (cmd == CMD_GET_INPUT)") + "}\n",
         "void readDebugChain() {" + extract_body(source, "if (cmd == CMD_DEBUG_CHAIN)") + "}\n",
+        "void readTelemetry() {" + extract_body(source, "if (cmd == CMD_DEBUG_TELEMETRY)") + "}\n",
         CASES,
     ]
     with tempfile.TemporaryDirectory(prefix="nyanithm_touch_readers_") as directory:

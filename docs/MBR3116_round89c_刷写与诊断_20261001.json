@@ -1,0 +1,45 @@
+{
+  "completed": true,
+  "uf2": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\build_round89c\\Nyanithm.uf2",
+  "signature": "NYANFW1;1.6.6-beta2;hw_v1;BID=round89c",
+  "uf2_sha256": "726dafc39fcff28526c2534e75644e21b4c1091d38e60c1b05d2dc1df52acb88",
+  "uf2_size": 186880,
+  "flash_range": [
+    268435456,
+    268528896
+  ],
+  "before_version": "FW:1.6.6-beta1 API:0x10 HW:v2 Built:Oct  1 2026 02:11:12 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta1;hw_v1;BID=round89a",
+  "backup": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_archive\\round89c_device_before_20261001",
+  "bootsel_command_sent": true,
+  "recovered_host_error": "RuntimeError('expected exactly one RP2040 drive, found []')",
+  "bootsel_drive": "E:\\",
+  "uf2_copied": true,
+  "after_version": "FW:1.6.6-beta2 API:0x10 HW:v2 Built:Oct  1 2026 05:15:16 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta2;hw_v1;BID=round89c",
+  "controller_config_equal": true,
+  "chips_equal": {
+    "0x40": true,
+    "0x41": true,
+    "0x42": true
+  },
+  "raw_status_after": "RAW=0",
+  "profile_after": [
+    214,
+    1,
+    1,
+    0,
+    255,
+    70,
+    50,
+    250
+  ],
+  "probe": {
+    "duration_s": 12.04269850000128,
+    "frames": 239,
+    "posture": "uncontrolled; not a no-contact acceptance test",
+    "first_gate_failures": 16,
+    "last_gate_failures": 171,
+    "failure_delta": 155,
+    "all_inputs_zero": true
+  },
+  "raw_status_final": "RAW=0"
+}

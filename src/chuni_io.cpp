@@ -553,7 +553,7 @@ void cdc_respond() {
         //  [24..27]  loopMaxUs u32
         //  [28..31]  loopSumUs u32
         //  [32..35]  loopCount u32
-        //  [36..39]  i2cErrCount u32 (reserved)
+        //  [36..39]  mbrDistanceReadFailures u32 (since boot, round89c+)
         //  [40..103]  riseCnt[32] u16
         //  [104..167] fallCnt[32] u16
         //  [168..203] verifyFail[36] u8
@@ -571,8 +571,8 @@ void cdc_respond() {
         memcpy(&buf[off], &g_loopMaxUs, 4); off += 4;
         memcpy(&buf[off], &g_loopSumUs, 4); off += 4;
         memcpy(&buf[off], &g_loopCount, 4); off += 4;
-        uint32_t i2cReserved = 0;
-        memcpy(&buf[off], &i2cReserved, 4); off += 4;
+        uint32_t mbrReadFailures = g_mbrDistanceReadFailures;
+        memcpy(&buf[off], &mbrReadFailures, 4); off += 4;
         for (int i = 0; i < 32; i++) { memcpy(&buf[off], &g_tele.riseCnt[i], 2); off += 2; }
         for (int i = 0; i < 32; i++) { memcpy(&buf[off], &g_tele.fallCnt[i], 2); off += 2; }
         for (int i = 0; i < 36; i++) buf[off++] = g_verifyFail[i];

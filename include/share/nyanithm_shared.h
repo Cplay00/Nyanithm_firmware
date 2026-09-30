@@ -18,8 +18,8 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.6-beta1"
-#define NYANITHM_BUILD_ID "round89a"
+#define NYANITHM_FW_VERSION "1.6.6-beta2"
+#define NYANITHM_BUILD_ID "round89c"
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -140,7 +140,7 @@ typedef enum {
     CMD_DEBUG_RAW = 0xBE,
     CMD_DEBUG_ALL = 0xBF,
     CMD_DEBUG_CHAIN = 0xC0,
-    CMD_DEBUG_TELEMETRY = 0xC1,
+    CMD_DEBUG_TELEMETRY = 0xC1,  // 528B; +36 u32 gate read failures on round89c+.
     CMD_DEBUG_DIFF = 0xC2,
     CMD_CFG_KEEPALIVE = 0xC3,  // round57: 配置模式心跳,静默重置 60s 自动退出计时器
     CMD_GET_RAW_STATUS = 0xC4,  // round66: 压力上报开关查询,回文本行 RAW=0|1\n

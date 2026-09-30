@@ -258,6 +258,7 @@ static void legacySequence() {
     output(1, true);  // Historic confirmed game-lane neighbour relaxation remains.
     CHECK(coherentReads() == 0);
     CHECK(legacyReads() > 0);
+    CHECK(g_mbrDistanceReadFailures == 0);
 }
 static void runScenario(unsigned scenario, bool v2) {
     initialize(v2, scenario != 9);
@@ -280,12 +281,23 @@ static void runScenario(unsigned scenario, bool v2) {
         held(); setLane(0, 250, false); frame(1); output(0, false);
         reConfirm();
         break;
-    case 3:  // Count I2C failure clears output and recovery needs fresh confirmation.
+    case 3: {  // Failed gate reads count once; cache/profile changes preserve the total.
         held(); chip(laneChip(0)).readFails = true;
         frame(); output(0, false); CHECK(!mbrDistanceSamples[laneChip(0)].valid);
+        CHECK(g_mbrDistanceReadFailures == 1);
+        frame(1); output(0, false); CHECK(g_mbrDistanceReadFailures == 1);
+        frame(4); output(0, false); CHECK(g_mbrDistanceReadFailures == 2);
+        profile(false); frame(1); CHECK(g_mbrDistanceReadFailures == 2);
+        unsigned legacyBefore = legacyReads();
+        profile(); frame(1); CHECK(g_mbrDistanceReadFailures == 3);
         chip(laneChip(0)).readFails = false;
-        reConfirm(); CHECK(legacyReads() == 0);
+        reConfirm(); CHECK(legacyReads() == legacyBefore);
+        CHECK(g_mbrDistanceReadFailures == 3);
+        g_mbrDistanceReadFailures = 0xFFFFFFFFu;
+        chip(laneChip(0)).readFails = true;
+        frame(); CHECK(g_mbrDistanceReadFailures == 0);
         break;
+    }
     case 4: {  // The 5ms cache is used; a due read applies the low count immediately.
         setLane(0, 250); frame(0); output(0, true);
         unsigned readCount = coherentReads();
@@ -372,8 +384,10 @@ static void runScenario(unsigned scenario, bool v2) {
         unsigned previousReads = device.coherentReads;
         device.tornReadsRemaining = 2;
         frame(); output(0, false); CHECK(device.coherentReads == previousReads + 2);
+        CHECK(g_mbrDistanceReadFailures == 1);
         previousReads = device.coherentReads; device.tornReadsRemaining = 1;
         frame(); output(0, true); CHECK(device.coherentReads == previousReads + 2);
+        CHECK(g_mbrDistanceReadFailures == 1);
         CHECK(device.tornReadsRemaining == 0);
         CHECK(!device.readDifferenceCounts(nullptr));
         break;
@@ -398,6 +412,7 @@ static void runScenario(unsigned scenario, bool v2) {
         break;
     default: CHECK(false);
     }
+    if (scenario != 3 && scenario != 12) CHECK(g_mbrDistanceReadFailures == 0);
 }
 static void runMpr(bool withProfile) {
     initialize(false, withProfile); ControllerConfig.cfg0 = 0;
@@ -407,6 +422,7 @@ static void runMpr(bool withProfile) {
     for (unsigned i = 0; i < 20; ++i) { frame(); output(0, true); }
     CHECK(!mbrDistanceEnabledForFrame);
     CHECK(coherentReads() == 0); CHECK(legacyReads() == 0);
+    CHECK(g_mbrDistanceReadFailures == 0);
     mprs[m]->differences[e] = 1; frame(); output(0, true);  // Existing sustained verification.
     mprs[m]->hardwareBits = 0; frame(1); output(0, true);  // Existing sticky release.
     CHECK(mprs[m]->dataReads == 2);

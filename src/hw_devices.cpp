@@ -400,6 +400,7 @@ static const uint32_t PRESSURE_SNAP_INTERVAL_MS = 5;
 // Disabled profiles perform no additional I2C reads. Core0 owns this state.
 static const uint32_t MBR_DISTANCE_POLL_MS = 5;
 static const uint32_t MBR_DISTANCE_MAX_READ_AGE_MS = 15;
+volatile uint32_t g_mbrDistanceReadFailures = 0;
 struct MbrDistanceSample {
     uint16_t counts[16] = {0};
     uint32_t readStartedMs = 0;
@@ -440,6 +441,7 @@ static void mbrDistanceReadSample(uint8_t m, CY8CMBR3116* chip) {
         sample.readStartedMs = now;
         sample.attempted = true;
         sample.valid = chip->readDifferenceCounts(sample.counts);
+        if (!sample.valid) ++g_mbrDistanceReadFailures;
         if (sample.valid) {
             for (uint8_t e = 0; e < 16; e++) {
                 int16_t lane = laneTable[m][e];
