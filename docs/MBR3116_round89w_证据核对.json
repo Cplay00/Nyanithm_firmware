@@ -1,0 +1,50 @@
+{
+  "accepted_jobs": 4,
+  "gesture_restoration": {
+    "a_finger_contact": {
+      "chip_40.bin": true,
+      "chip_41.bin": true,
+      "chip_42.bin": true,
+      "controller_config.bin": true
+    },
+    "a_palm_hover5": {
+      "chip_40.bin": true,
+      "chip_41.bin": true,
+      "chip_42.bin": true,
+      "controller_config.bin": true
+    },
+    "b_finger_contact": {
+      "chip_40.bin": true,
+      "chip_41.bin": true,
+      "chip_42.bin": true,
+      "controller_config.bin": true
+    },
+    "b_palm_hover5": {
+      "chip_40.bin": true,
+      "chip_41.bin": true,
+      "chip_42.bin": true,
+      "controller_config.bin": true
+    }
+  },
+  "panel_restoration": {
+    "chip_40.bin": true,
+    "chip_41.bin": true,
+    "chip_42.bin": true,
+    "controller_config.bin": true
+  },
+  "panel_release": {
+    "bytes": 1358791,
+    "sha256": "accda37a26823ea901618fccf6cb3c725b145486476dde3a361f0ad20e2feedd",
+    "version": "1.1.1-beta9",
+    "devDiag": 0
+  },
+  "package": {
+    "name": "MBR3116_round89w_面板与原生滤波证据包.zip",
+    "files": 125,
+    "bytes": 3346024,
+    "sha256": "f8566f13d862200e91e2fa21d0811a42e6255e364232b33b0f83344238d94696",
+    "all_file_hashes_verified": true
+  },
+  "user_tests_paused": true,
+  "firmware_unchanged": "round89g"
+}
