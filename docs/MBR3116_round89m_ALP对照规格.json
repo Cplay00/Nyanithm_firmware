@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-02",
+  "address": "0x42",
+  "sensor": "CS0/PS0/lane18",
+  "source": "TRM 001-91082 Rev E 1.5.30/31/35 and AN90071 6.3.1/6.3.2",
+  "baseline_sha256": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+  "comparison": "Same temporary 12-bit Proximity as round89k; only ALP_FILTER_EN changes from ON to OFF, with CRC update",
+  "differences_from_alp_on": [
+    {
+      "offset": "0x27",
+      "before": 128,
+      "after": 0
+    },
+    {
+      "offset": "0x7e",
+      "before": 86,
+      "after": 113
+    },
+    {
+      "offset": "0x7f",
+      "before": 168,
+      "after": 9
+    }
+  ],
+  "differences_from_original": [
+    {
+      "offset": "0x26",
+      "before": 0,
+      "after": 1
+    },
+    {
+      "offset": "0x27",
+      "before": 128,
+      "after": 0
+    },
+    {
+      "offset": "0x2e",
+      "before": 0,
+      "after": 4
+    },
+    {
+      "offset": "0x7e",
+      "before": 196,
+      "after": 113
+    },
+    {
+      "offset": "0x7f",
+      "before": 150,
+      "after": 9
+    }
+  ],
+  "candidate_sha256": "75620d766ccd67e00bd5c2bb8b79ef4d086d840d076cdcea4ef51203ebd4a133",
+  "restoration": "Restore original after every job and compare controller plus all three tables again after reboot before allowing human confirmation",
+  "hardware_applied": false,
+  "pose_samples_pending": true
+}
