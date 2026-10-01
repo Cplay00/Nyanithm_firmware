@@ -1,0 +1,267 @@
+{
+  "date": "2026-10-02",
+  "scope": "Offline decoding of recorded restored tables; no live serial connection, generated config, or NVM writes",
+  "source_trial_ids": [
+    "1790875672052784000_palm_hover5",
+    "1790875704204811700_palm_contact",
+    "1790876594174295200_finger_contact",
+    "1790876627814037400_finger_hover3"
+  ],
+  "restored_table_sets_verified": 4,
+  "controller_sha256": "210f4f9883c8630dd289a57c228ab8efc4e8f5c70a3c8651b62b44bc3b49918b",
+  "chips": {
+    "0x40": {
+      "sha256": "b7e8208562703f7376a22390cbf82246a15eca97ec48905fc1f5bea9f48760b2",
+      "crc_valid": true,
+      "sensor_en": "0x0FFF",
+      "enabled_electrodes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "button_sensitivity_settings": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "button_sensitivity_ff": [
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400
+      ],
+      "configured_finger_thresholds": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "ath_enabled": true,
+      "shield_enabled": false,
+      "emc_enabled": false,
+      "hysteresis_override": false,
+      "stored_hysteresis_field": 0,
+      "emc_incompatible_enabled_electrodes": [
+        10,
+        11
+      ],
+      "game_lanes_lost_if_all_emc_incompatible_electrodes_disabled": [
+        9,
+        11
+      ]
+    },
+    "0x41": {
+      "sha256": "452e022625b31628f07e76e1bba80bfea180b22188f7ba74c87ac320cbea5486",
+      "crc_valid": true,
+      "sensor_en": "0x0FFF",
+      "enabled_electrodes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "button_sensitivity_settings": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "button_sensitivity_ff": [
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400
+      ],
+      "configured_finger_thresholds": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "ath_enabled": true,
+      "shield_enabled": false,
+      "emc_enabled": false,
+      "hysteresis_override": false,
+      "stored_hysteresis_field": 0,
+      "emc_incompatible_enabled_electrodes": [
+        10,
+        11
+      ],
+      "game_lanes_lost_if_all_emc_incompatible_electrodes_disabled": [
+        1,
+        3
+      ]
+    },
+    "0x42": {
+      "sha256": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+      "crc_valid": true,
+      "sensor_en": "0x0FFF",
+      "enabled_electrodes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "button_sensitivity_settings": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "button_sensitivity_ff": [
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400,
+        400
+      ],
+      "configured_finger_thresholds": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "ath_enabled": true,
+      "shield_enabled": false,
+      "emc_enabled": false,
+      "hysteresis_override": false,
+      "stored_hysteresis_field": 0,
+      "emc_incompatible_enabled_electrodes": [
+        10,
+        11
+      ],
+      "game_lanes_lost_if_all_emc_incompatible_electrodes_disabled": []
+    }
+  },
+  "ez_click": {
+    "installed_registry_version": "2.0.0.2305",
+    "executable": "C:\\Program Files (x86)\\Cypress\\EZ-Click\\2.0\\EZ-Click.exe",
+    "executable_exists": true,
+    "user_guide": "C:\\Program Files (x86)\\Cypress\\EZ-Click\\2.0\\Documentation\\EZ-ClickUserGuide.pdf",
+    "user_guide_sha256": "0f7dc1ca0e12c0f9235ceea966abcd68386f2e61ff9748c80ae768d3b03c79c5",
+    "export_formats": [
+      ".h (128-byte array for MBR3)",
+      ".hex (Intel HEX; not 128-byte flat binary)",
+      ".iic (BCP I2C instructions)"
+    ]
+  },
+  "hardware_evidence": {
+    "shield_connection": "User confirmed SH is not connected to shield copper on 2026-10-02",
+    "schematic_not_available": true
+  },
+  "decision": "NVM programming path exists and retains configuration on normal boot. No documented full SmartSense-off mode; current button settings already minimum sensitivity and maximum legal FT. Shield unavailable under firmware-only constraint. No new production candidate exported or applied.",
+  "native_limits": {
+    "sensitivity_ff": [
+      100,
+      200,
+      300,
+      400
+    ],
+    "finger_threshold": [
+      31,
+      200
+    ],
+    "hysteresis_count": [
+      0,
+      31
+    ],
+    "maximum_legal_ft_plus_hysteresis": 231
+  }
+}
