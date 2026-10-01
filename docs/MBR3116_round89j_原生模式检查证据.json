@@ -1,0 +1,173 @@
+{
+  "date": "2026-10-01",
+  "experiment": "Native Proximity 12-bit idle interface check",
+  "target": {
+    "address": "0x42",
+    "sensor": "CS0/PS0",
+    "lane": 18
+  },
+  "summary": {
+    "button_idle": {
+      "rows": 20,
+      "valid": 19,
+      "errors": 1,
+      "ranges": {
+        "raw": {
+          "min": 2921,
+          "median": 2927,
+          "max": 2930
+        },
+        "baseline": {
+          "min": 2928,
+          "median": 2928,
+          "max": 2928
+        },
+        "delta": {
+          "min": -7,
+          "median": -1,
+          "max": 2
+        },
+        "diff": {
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "host_ms": {
+          "min": 60.25429999863263,
+          "median": 61.44179998955224,
+          "max": 61.83459999738261
+        }
+      }
+    },
+    "warmup": {
+      "rows": 12,
+      "valid": 6,
+      "errors": 6,
+      "ranges": {
+        "raw": {
+          "min": 2906,
+          "median": 2906.0,
+          "max": 2907
+        },
+        "baseline": {
+          "min": 2906,
+          "median": 2906.0,
+          "max": 2907
+        },
+        "delta": {
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "diff": {
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "host_ms": {
+          "min": 60.28080001124181,
+          "median": 61.56494999595452,
+          "max": 61.777599999913946
+        }
+      }
+    },
+    "prox12_idle": {
+      "rows": 40,
+      "valid": 40,
+      "errors": 0,
+      "ranges": {
+        "raw": {
+          "min": 2905,
+          "median": 2905.5,
+          "max": 2906
+        },
+        "baseline": {
+          "min": 2906,
+          "median": 2906.0,
+          "max": 2906
+        },
+        "delta": {
+          "min": -1,
+          "median": -0.5,
+          "max": 0
+        },
+        "diff": {
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "host_ms": {
+          "min": 60.28070001048036,
+          "median": 61.49455000559101,
+          "max": 62.30820000928361
+        }
+      }
+    }
+  },
+  "candidate_applied": true,
+  "restoration_completed": true,
+  "after_reboot_controller_and_three_tables_equal": true,
+  "raw_mode": "RAW=0",
+  "preserved_native_proximity_filter": {
+    "PROX_CFG": "0x80",
+    "PROX_CFG2": 5,
+    "ALP_enabled_on_mode_activation": true
+  },
+  "final_slider": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "version": "FW:1.6.6-beta4 API:0x10 HW:v2 Built:Oct  1 2026 18:27:26 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta4;hw_v1;BID=round89g",
+  "uf2_backup_sha256": "aa4a65dbbf98ccb809142bb765d8ace786a489baa742edc8aa32dc25daefc941",
+  "independent_readonly_review": "round89c_readonly_review: documented fields/CRC/protocol and failure restoration reviewed; pure-memory worker 3/3 passed; did not access hardware",
+  "host_tests": {
+    "idle_probe": "7/7",
+    "per_job_capture": "9/9",
+    "common_capture": "PASS",
+    "browser_mock": "PASS: requests intercepted; countdown/restoring/blocking/labels/mobile/finish"
+  },
+  "no_cpp_or_production_panel_change": true,
+  "limitations": [
+    "Manual previous far-hand instruction, no new pose confirmation; not a distance sample",
+    "40 valid C7 rows do not prove SNR or unique physical scans",
+    "Warmup 6/12 native errors are preserved, not replaced with zeros",
+    "Native mode acceptance does not establish contact/hover separation",
+    "No production 32-lane reference gating or HID latency validation"
+  ],
+  "archive": {
+    "name": "MBR3116_round89j_原生模式检查原始.zip",
+    "files": 26,
+    "size": 36454,
+    "sha256": "f574ae95140788fa8737aa476fef5c9e1c50602d0834d23f10cb83ba79bedb9b"
+  }
+}
