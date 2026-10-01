@@ -1,0 +1,55 @@
+{
+  "status": "offline specification only; not applied; no replacement 128-byte table emitted",
+  "target": {
+    "address": "0x42",
+    "sensor": "CS0/PS0",
+    "lane": 18
+  },
+  "baseline_sha256": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+  "source": "Infineon TRM 001-91082 Rev E 1.5.30 PROX_EN and 1.5.35 PROX_RESOLUTION0; official Host API CalculateCrc",
+  "patch": {
+    "PROX_EN.PS0": 1,
+    "PROX_RESOLUTION0": 4,
+    "resolution_bits": 12,
+    "CRC": "recompute from actual readback using official API"
+  },
+  "predicted_changed_bytes": [
+    {
+      "offset": "0x26",
+      "original": 0,
+      "planned": 1
+    },
+    {
+      "offset": "0x2e",
+      "original": 0,
+      "planned": 4
+    },
+    {
+      "offset": "0x7e",
+      "original": 196,
+      "planned": 86
+    },
+    {
+      "offset": "0x7f",
+      "original": 150,
+      "planned": 168
+    }
+  ],
+  "preserved_prox_touch_th0": 512,
+  "preserved_other_fields": true,
+  "restore_source": "original live readback; round89i_after_pair_20261001/chip_42.bin",
+  "required_execution_checks": [
+    "Identify USB serial 5303284739002C9C and BID round89g",
+    "Back up all chip/controller tables and compare baseline hash",
+    "Enter config diagnostics, apply native documented patch, read back all tables",
+    "Sample direct 16-bit C7 values; do not use current button gate for this sensor",
+    "Restore original table before normal use and verify all bytes after reboot"
+  ],
+  "scope": "Local reference-signal experiment; six possible Proximity inputs do not imply 32-lane distance coverage",
+  "not_yet_verified": [
+    "Chip acceptance of this exact patch",
+    "Reference separation and noise margin",
+    "Physical refresh/latency after mode change",
+    "Full-board and multi-finger coverage"
+  ]
+}
