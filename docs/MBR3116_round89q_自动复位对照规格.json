@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-02",
+  "address": "0x42",
+  "sensor": "CS0",
+  "firmware_bid": "round89g",
+  "purpose": "Isolate five-second proximity auto-reset from sustained-palm baseline collapse; no production gate",
+  "source_trm": "https://www.infineon.com/assets/row/public/documents/30/57/infineon-cy8cmbr3xxx-capsense-express-controllers-registers-trm-additionaltechnicalinformation-en.pdf",
+  "source_section": "1.5.60 DEVICE_CFG2, page 91; bits7:6 PROXIMITY_ARST 1=five seconds, 0=disabled",
+  "source_guide": "https://assets.infineon.com/is/content/infineon/infineon/row/public/documents/30/42/infineon-an90071-cy8cmbr3xxx-capsenser-design-guide-applicationnotes-en.pdf",
+  "guide_sections": "5.1.1.8 page55; glossary Sensor Auto Reset page115",
+  "only_change_from_previous_candidate": {
+    "address": "0x4F",
+    "before": "0x68",
+    "after": "0x28",
+    "mask": "0xC0"
+  },
+  "unchanged": [
+    "16-bit output",
+    "ALP OFF",
+    "button auto-reset 20s",
+    "ATH ON",
+    "button FT200",
+    "proximity touch512/base200",
+    "0x40/0x41 and controller config"
+  ],
+  "changes_from_device_original_excluding_crc": [
+    "0x26",
+    "0x27",
+    "0x4F"
+  ],
+  "changes_from_previous_candidate_excluding_crc": [
+    "0x4F"
+  ],
+  "original_sha256": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+  "candidate_sha256": "98f66a804c11220f28cf59dcadc0026e4cef618f480cb4116b41af81deff14fc",
+  "candidate_crc_bytes": "3c 1b",
+  "candidate_crc_u16": "0x1B3C",
+  "recovery": "Read all four original blocks, save per-job backups, apply and verify candidate, capture, unconditionally restore attempted writes, reboot and compare all four blocks before confirmation; failed restoration blocks new jobs",
+  "not_yet_applied": true,
+  "height_reference": "acrylic top; manually estimated with ruler",
+  "runtime_limit": "Sequential C7 is diagnostic only; not inserted into game scanning; CS0/CS1 limitation remains"
+}
