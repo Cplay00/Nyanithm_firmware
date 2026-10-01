@@ -12,6 +12,7 @@
 #include <chuni_io.h>
 #include <controller_config.h>
 #include <gpio_def.h>
+#include <hardware/sync.h>
 #include <hardware/watchdog.h>
 #include <hw_devices.h>
 #include <nyanithm_shared.h>
@@ -69,10 +70,12 @@ void hid_task_chuni_input() {
             uint32_t spinStart = to_ms_since_boot(get_absolute_time());
             while (true) {
                 do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 5);
-                report_buf[2] = touchData[0];
-                report_buf[3] = touchData[1];
-                report_buf[4] = touchData[2];
-                report_buf[5] = touchData[3];
+                __dmb();
+                report_buf[2] = publishedTouchState.keys[0];
+                report_buf[3] = publishedTouchState.keys[1];
+                report_buf[4] = publishedTouchState.keys[2];
+                report_buf[5] = publishedTouchState.keys[3];
+                __dmb();
                 if ((g & 1u) == 0u && g == touchStateGen) break;
                 // round47b-patch: on timeout, skip this HID report entirely (keep last frame)
                 // instead of sending torn data that causes phantom touch / micro-dropout.
@@ -88,12 +91,9 @@ void hid_task_chuni_input() {
             uint32_t spinStart = to_ms_since_boot(get_absolute_time());
             while (true) {
                 do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 5);
-                report_buf[9] = 0;
-                for (int i = 0; i < 6; i++) {
-                    if (airKeys[i]) {
-                        report_buf[9] |= (1 << i);
-                    }
-                }
+                __dmb();
+                report_buf[9] = publishedTouchState.air;
+                __dmb();
                 if ((g & 1u) == 0u && g == touchStateGen) break;
                 if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) return;  // round47b-patch: skip, keep last frame
             }
@@ -322,14 +322,13 @@ void cdc_respond() {
         uint32_t spinStart = to_ms_since_boot(get_absolute_time());
         while (true) {
             do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 1);
+            __dmb();
             // round47b-patch: read into temp buffer; only commit to inputState on
             // seqlock success. On timeout, keep last good inputState (no torn data).
-            for (int i = 0; i < 32; i++) tmpSlider[i] = touchData32[i];
-            for (int i = 0; i < 32; i++) tmpPressure[i] = pressureSnap[i];
-            air = 0;
-            for (int i = 0; i < 6; i++) {
-                if (airKeys[i]) air |= 1 << i;
-            }
+            for (int i = 0; i < 32; i++) tmpSlider[i] = publishedTouchState.slider[i];
+            for (int i = 0; i < 32; i++) tmpPressure[i] = publishedTouchState.pressure[i];
+            air = publishedTouchState.air;
+            __dmb();
             if ((g & 1u) == 0u && g == touchStateGen) {
                 // round55: additive input latency (cfg3, 0-15ms). Hold each new
                 // frame until nowMs >= frameFirstSeenMs + latencyMs, so state
@@ -513,9 +512,11 @@ void cdc_respond() {
         uint32_t spinStart = to_ms_since_boot(get_absolute_time());
         while (true) {
             do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 5);
-            hw[0] = hwTouch[0]; hw[1] = hwTouch[1]; hw[2] = hwTouch[2];
-            rw[0] = rawTouch[0]; rw[1] = rawTouch[1]; rw[2] = rawTouch[2];
-            for (int i = 0; i < 32; i++) td[i] = touchData32[i];
+            __dmb();
+            hw[0] = publishedTouchState.hardware[0]; hw[1] = publishedTouchState.hardware[1]; hw[2] = publishedTouchState.hardware[2];
+            rw[0] = publishedTouchState.verified[0]; rw[1] = publishedTouchState.verified[1]; rw[2] = publishedTouchState.verified[2];
+            for (int i = 0; i < 32; i++) td[i] = publishedTouchState.slider[i];
+            __dmb();
             if ((g & 1u) == 0u && g == touchStateGen) { snapshotFresh = true; break; }
             if (to_ms_since_boot(get_absolute_time()) - spinStart >= 5) break;
         }

@@ -518,7 +518,7 @@ def main() -> int:
         ("updateTouch_v2", "void updateTouch_v2()"),
         ("updateTouch_v1", "void updateTouch_v1()"),
     ])
-    chunks = [definitions, PRELUDE]
+    chunks = ['#include <touch_snapshot.h>', definitions, PRELUDE]
     manifest = {"kind": "production-source host integration; fake devices, not real hardware", "fragments": []}
     for path, name, (code, line) in parts:
         chunks.append(f'\n#line {line} "{path.as_posix()}"\n{code}\n')

@@ -13,6 +13,7 @@
 #include <gpio_def.h>
 #include <mpr121.h>
 #include <pca954x.h>
+#include <touch_snapshot.h>
 #include <vl53l0x.h>
 
 extern VL53L0X tof0;
@@ -54,9 +55,8 @@ extern bool touchData4k[4];
 extern bool touchData6k[6];
 extern uint8_t touchData32[32];
 
-// round46: cross-core seqlock generation. Core0 bumps this BEFORE and AFTER
-// updating the shared touch state; Core1 readers copy shared bytes only when
-// the generation is even and unchanged across the copy (torn-read elimination).
+// Core0 publishes a completed scan; the seqlock covers only this short copy.
+extern TouchInputSnapshot publishedTouchState;
 extern volatile uint32_t touchStateGen;
 
 // round46: diagnostics shared from Core0 to Core1 (telemetry command 0xC1)

@@ -9,6 +9,7 @@
 #include <hw_devices.h>
 #include <mbr_distance_gate.h>
 #include <tca9539.h>
+#include <hardware/sync.h>
 #include <hardware/timer.h>
 #include <hardware/watchdog.h>
 #include <cstring>
@@ -371,11 +372,7 @@ uint16_t rawTouch[3] = {0, 0, 0};  // non-static for CMD_DEBUG_CHAIN access  // 
 uint16_t hwTouch[3] = {0, 0, 0};   // round45p: pre-verification hardware touch snapshot for CMD_DEBUG_CHAIN (zero I2C overhead)
 uint32_t lastTouchedMs[3][12] = {0};  // round45m: last touch timestamp per electrode (baseline correction skips recently-touched)
 
-// round46: cross-core seqlock generation for the shared touch state.
-// Core0 bumps to odd BEFORE writing (updateTouch/updateAir), bumps to even AFTER.
-// Core1 (HID + CDC) readers copy the shared bytes only between an even pair of
-// generation reads, eliminating torn reads that produced phantom touches /
-// dropped cells in the game (the CDC path was never covered by round45t).
+TouchInputSnapshot publishedTouchState{};
 volatile uint32_t touchStateGen = 0;
 
 // round46: telemetry shared from Core0 to Core1 (CMD_DEBUG_TELEMETRY = 0xC1)
@@ -384,8 +381,7 @@ uint32_t g_loopMinUs = 0xFFFFFFFF, g_loopMaxUs = 0, g_loopSumUs = 0, g_loopCount
 
 // round66: real-time pressure snapshot (0-255 clamped diff per slider lane).
 // Core0 fills this every 5ms while a pressure report session is on; Core1
-// substitutes it into the GET_INPUT 33B frame. Written inside the
-// touchStateGen seqlock section so Core1 gets one coherent state.
+// substitutes the published copy into the GET_INPUT 33B frame.
 // Zero I2C cost while off.
 // round84: rawReportMode (bool) became rawReportLevel (0xC5 session level):
 // 0=off, 1=simulated (round80 report semantics), 2=raw unscaled.
@@ -519,7 +515,7 @@ static bool mbrReadPressureSnap() {
     return allOk;
 }
 
-// round66: called from updateInputState() inside the seqlock writer section.
+// round66: called from updateInputState() before publishing the completed scan.
 // Throttled to every PRESSURE_SNAP_INTERVAL_MS; no-op while no pressure
 // report session is active. round68: also on while cfg2 bit1 game-raw
 // baseline is set.
@@ -1534,18 +1530,32 @@ void updateAir() {
     }
 }
 
+static void publishTouchState() {
+    ++touchStateGen;
+    __dmb();
+    std::memcpy(publishedTouchState.keys, touchData, sizeof(touchData));
+    std::memcpy(publishedTouchState.slider, touchData32, sizeof(touchData32));
+    std::memcpy(publishedTouchState.pressure, pressureSnap, sizeof(pressureSnap));
+    std::memcpy(publishedTouchState.hardware, hwTouch, sizeof(hwTouch));
+    std::memcpy(publishedTouchState.verified, rawTouch, sizeof(rawTouch));
+    publishedTouchState.air = 0;
+    for (uint8_t i = 0; i < 6; ++i) {
+        if (airKeys[i]) publishedTouchState.air |= 1u << i;
+    }
+    __dmb();
+    ++touchStateGen;
+}
+
 void updateInputState() {
     watchdog_update();
     uint32_t loopStartUs = time_us_32();
-    touchStateGen++;
     // Air update first: lower latency for judgment-critical path
     if (usingIR) {
         updateIR();
     } else {
         updateAir();
     }
-    // round66: pressure snapshot (5ms throttle) - inside the seqlock writer
-    // section so Core1's GET_INPUT snapshot gets one coherent state.
+    // Sensor I/O leaves the previous completed frame available to Core1.
     prepareMbrDistanceGate();
     updatePressureSnap();
     if (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2) {
@@ -1554,7 +1564,7 @@ void updateInputState() {
     if (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4) {
         updateTouch_v2();
     }
-    touchStateGen++;
+    publishTouchState();
 
     // Software baseline auto-correction: gradually adjust baseline to match
     // idle filtered data. Fixes baseline stuck too high (e.g., M2E0 baseline=212

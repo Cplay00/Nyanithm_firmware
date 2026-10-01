@@ -72,6 +72,7 @@ HOST = r"""
 #include <iostream>
 #include <vector>
 #include <nyanithm_shared.h>
+#include <touch_snapshot.h>
 
 controller_config ControllerConfig{};
 bool hid_working = true;
@@ -81,6 +82,7 @@ uint8_t pressureSnap[32]{};
 bool airKeys[6]{};
 uint16_t hwTouch[3]{};
 uint16_t rawTouch[3]{};
+TouchInputSnapshot publishedTouchState{};
 uint8_t rawReportLevel = 0;
 bool gameRawEnabled = false;
 volatile uint32_t g_mbrDistanceReadFailures = 0;
@@ -93,12 +95,16 @@ struct FakeGeneration {
     uint32_t value = 2;
     unsigned int reads = 0;
     std::function<void(unsigned int)> onRead;
+    FakeGeneration& operator++() { ++value; return *this; }
     operator uint32_t() {
         assert(++reads < 10000);
         if (onRead) onRead(reads);
         return value;
     }
 } touchStateGen;
+
+std::function<void()> onBarrier;
+void __dmb() { if (onBarrier) onBarrier(); }
 
 uint64_t clockUs = 100000;
 unsigned int clockCalls = 0;
@@ -165,10 +171,7 @@ void paintShared(uint8_t seed) {
 }
 
 uint8_t expectedAir() {
-    uint8_t air = 0;
-    for (unsigned int key = 0; key < 6; ++key)
-        if (airKeys[key]) air |= 1u << key;
-    return air;
+    return publishedTouchState.air;
 }
 
 void beginCase() {
@@ -177,6 +180,7 @@ void beginCase() {
     clockUs = nextStart;
     clockCalls = 0;
     onClock = {};
+    onBarrier = {};
     touchStateGen.value = 2;
     touchStateGen.reads = 0;
     touchStateGen.onRead = {};
@@ -201,6 +205,7 @@ void beginCase() {
     cdcWriteLimit = 0xFFFFFFFFu;
     onCdcWrite = {};
     paintShared(1);
+    publishTouchState();
 }
 
 std::vector<uint8_t> currentInputBytes() {
@@ -211,8 +216,8 @@ std::vector<uint8_t> currentInputBytes() {
 void assertInput(bool pressure = false) {
     assert(cdcBytes.size() == 33);
     for (unsigned int lane = 0; lane < 32; ++lane) {
-        uint8_t expected = pressure && touchData32[lane]
-                               ? pressureSnap[lane] : touchData32[lane];
+        uint8_t expected = pressure && publishedTouchState.slider[lane]
+                               ? publishedTouchState.pressure[lane] : publishedTouchState.slider[lane];
         assert(cdcBytes[lane] == expected);
     }
     assert(cdcBytes[32] == expectedAir());
@@ -223,21 +228,21 @@ void assertInput(bool pressure = false) {
 void assertHid() {
     assert(hidReports == 1 && hidBytes.size() == 15);
     for (unsigned int byte = 0; byte < 4; ++byte)
-        assert(hidBytes[byte + 2] == touchData[byte]);
+        assert(hidBytes[byte + 2] == publishedTouchState.keys[byte]);
     assert(hidBytes[9] == expectedAir());
 }
 
 std::vector<uint8_t> expectedChain() {
     std::vector<uint8_t> bytes{0xAA, 0x55};
-    for (uint16_t word : hwTouch) {
+    for (uint16_t word : publishedTouchState.hardware) {
         bytes.push_back(static_cast<uint8_t>(word));
         bytes.push_back(static_cast<uint8_t>(word >> 8));
     }
-    for (uint16_t word : rawTouch) {
+    for (uint16_t word : publishedTouchState.verified) {
         bytes.push_back(static_cast<uint8_t>(word));
         bytes.push_back(static_cast<uint8_t>(word >> 8));
     }
-    bytes.insert(bytes.end(), touchData32, touchData32 + 32);
+    bytes.insert(bytes.end(), publishedTouchState.slider, publishedTouchState.slider + 32);
     return bytes;
 }
 
@@ -245,7 +250,7 @@ void injectNewGeneration() {
     touchStateGen.onRead = [](unsigned int reads) {
         if (reads == 2) {
             paintShared(7);
-            touchStateGen.value += 2;
+            publishTouchState();
         }
     };
 }
@@ -332,7 +337,8 @@ int main() {
     onClock = [completesAt]() {
         if (clockUs >= completesAt) {
             paintShared(7);
-            touchStateGen.value = 4;
+            touchStateGen.value = 2;
+            publishTouchState();
             onClock = {};
         }
     };
@@ -413,6 +419,66 @@ int main() {
     assert(g_mbrDistanceReadFailures == 0x87654321u);
     pass("TELEMETRY gate counter snapshots once, split TX preserves adjacent fields");
 
+    beginCase();
+    paintShared(9);
+    started = clockUs;
+    readGetInput();
+    assertInput();
+    assert(clockUs - started < 1000 && touchStateGen.reads == 2);
+    assert(std::memcmp(publishedTouchState.slider, touchData32, 32) != 0);
+    pass("GET_INPUT during sensor I/O immediately serves prior completed frame");
+
+    beginCase();
+    paintShared(9);
+    started = clockUs;
+    hid_task_chuni_input();
+    assertHid();
+    assert(clockUs - started < 2000);
+    pass("HID during sensor I/O uses completed keys and air, not working arrays");
+
+    beginCase();
+    paintShared(9);
+    started = clockUs;
+    readDebugChain();
+    assert(cdcBytes == expectedChain() && clockUs - started < 1000);
+    pass("DEBUG_CHAIN during sensor I/O keeps hardware, verified and slider paired");
+
+    beginCase();
+    rawReportLevel = 2;
+    readGetInput();
+    for (unsigned int lane = 0; lane < 32; ++lane)
+        assert(cdcBytes[lane] == publishedTouchState.pressure[lane]);
+    cdcBytes.clear();
+    g_tele.servedCount = g_tele.cdcTxBytes = 0;
+    rawReportLevel = 0;
+    paintShared(9);
+    readGetInput();
+    assertInput();
+    pass("RAW 2 to 0 during long scan immediately restores completed binary frame");
+
+    beginCase();
+    paintShared(9);
+    unsigned int barriers = 0;
+    onBarrier = [&barriers]() {
+        assert(touchStateGen.value & 1u);
+        if (++barriers == 2) {
+            assert(std::memcmp(publishedTouchState.slider, touchData32, 32) == 0);
+            assert(std::memcmp(publishedTouchState.pressure, pressureSnap, 32) == 0);
+            assert(std::memcmp(publishedTouchState.keys, touchData, 4) == 0);
+            assert(std::memcmp(publishedTouchState.hardware, hwTouch, 6) == 0);
+            assert(std::memcmp(publishedTouchState.verified, rawTouch, 6) == 0);
+            uint8_t air = 0;
+            for (unsigned int key = 0; key < 6; ++key) if (airKeys[key]) air |= 1u << key;
+            assert(publishedTouchState.air == air);
+        }
+    };
+    publishTouchState();
+    onBarrier = {};
+    assert(barriers == 2 && !(touchStateGen.value & 1u));
+    readGetInput();
+    assertInput();
+    pass("Production publisher brackets every field with two barriers then exposes new frame");
+
     std::cout << passed << '/' << passed << " production-reader scenarios passed\n";
 }
 """
@@ -441,11 +507,13 @@ def main():
     variant = Path(__file__).resolve().parents[1]
     production = variant / "src" / "chuni_io.cpp"
     source = production.read_text(encoding="utf-8")
+    hardware = (variant / "src" / "hw_devices.cpp").read_text(encoding="utf-8")
     globals_start = source.index("struct NyanithmInput {")
     globals_end = source.index("volatile bool pending_config_mode", globals_start)
     globals_code = source[globals_start:globals_end]
     pieces = [
         HOST,
+        "void publishTouchState() {" + extract_body(hardware, "static void publishTouchState()") + "}\n",
         globals_code,
         "bool rawModeActive() {" + extract_body(source, "bool rawModeActive()") + "}\n",
         "void hid_task_chuni_input() {" + extract_body(source, "void hid_task_chuni_input()") + "}\n",
@@ -463,6 +531,7 @@ def main():
         command = find_compiler(args.compiler) + [
             "-std=c++17", "-Wall", "-Wextra", "-Werror", "-O2",
             "-I", str(temporary), "-I", str(variant / "include" / "share"),
+            "-I", str(variant / "include" / "software"),
             str(harness), "-o", str(binary),
         ]
         result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
