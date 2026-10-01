@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-02",
+  "address": "0x42",
+  "sensor": "CS0/PS0/lane18",
+  "source": "TRM 001-91082 Rev E 1.5.35 and official KBA229990",
+  "baseline_sha256": "6535b3e1886f6359aab7cea09d1b8e2c6867b831ad2a1e4bd122affe8ecdb4e4",
+  "comparison": "Proximity ALP OFF retained; change only output resolution 12 to 16 bits, with native CRC update",
+  "differences_from_alp_off_12": [
+    {
+      "offset": "0x2e",
+      "before": 4,
+      "after": 0
+    },
+    {
+      "offset": "0x7e",
+      "before": 113,
+      "after": 140
+    },
+    {
+      "offset": "0x7f",
+      "before": 9,
+      "after": 101
+    }
+  ],
+  "differences_from_original": [
+    {
+      "offset": "0x26",
+      "before": 0,
+      "after": 1
+    },
+    {
+      "offset": "0x27",
+      "before": 128,
+      "after": 0
+    },
+    {
+      "offset": "0x7e",
+      "before": 196,
+      "after": 140
+    },
+    {
+      "offset": "0x7f",
+      "before": 150,
+      "after": 101
+    }
+  ],
+  "candidate_sha256": "24915d67354e245e0e43067bbf1fb31d15758cd54a84faaa1b66255ac1210107",
+  "candidate_crc_value": "0x658C",
+  "candidate_crc_little_endian_bytes": "8c65",
+  "limits": "Full output precision, not an independent distance measurement; noise scales too. No scan speed or hover suppression improvement established.",
+  "restoration": "Restore original after every job; compare controller and all three tables after reboot before confirmation",
+  "hardware_applied": false,
+  "pose_samples_pending": true
+}
