@@ -2700,6 +2700,26 @@ button:disabled svg {
     color: var(--c-text-tertiary) !important;
     transform: none !important;
 }
+
+/* MBR3116 抗隔空快速调优卡片样式 */
+.mbr-quick-card {
+    background: var(--c-surface-1, rgba(20, 24, 33, 0.7));
+    border: 1px solid var(--c-line, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.mbr-quick-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--c-text-primary, #fff);
+    margin-bottom: 8px;
+}
+.mbr-quick-btns {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
 /* 禁用滑块的滑条填充与滑块拇指变灰 */
 input[type="range"]:disabled {
     filter: grayscale(1);
@@ -3848,23 +3868,39 @@ input[type="range"]:disabled {
                     </div>
 
                     <div class="config-section collapsible collapsed" id="mbrSection" style="display:none;">
-                        <div class="section-subtitle">MBR3116 高级配置（0xBA 寄存器表）<span class="collapse-arrow">▾</span></div>
+                        <div class="section-subtitle">MBR3116 触摸芯片硬件调优 (NVRAM)<span class="collapse-arrow">▾</span></div>
                         <div class="config-collapse-wrapper">
                             <div class="config-collapse-inner">
-                                <!-- round86 #12: 阈值/消抖/灵敏度滑条与预设迁出(参数调节区+高级参数区),
-                                     本区只保留 目标芯片 / 从芯片读取 / 完整寄存器表。
-                                     切换目标芯片时若有未应用的表修改,弹窗询问保存并应用。 -->
-                                <div class="field-grid">
+                                <!-- 快速抗隔空预设卡片 -->
+                                <div class="mbr-quick-card">
+                                    <div class="mbr-quick-title">抗隔空快速调优 (彻底消除悬空误触)</div>
+                                    <div class="mbr-quick-btns">
+                                        <button type="button" id="btnQuickAntiHover" class="btn btn-primary" disabled>⚡ 抗隔空推荐 (FT=160 · 400fF)</button>
+                                        <button type="button" id="btnQuickAntiHoverStrong" class="btn" disabled>🛡️ 强力抗隔空 (FT=180 · 400fF)</button>
+                                        <button type="button" id="btnQuickFactory" class="btn" disabled>🔄 恢复出厂设置</button>
+                                        <button type="button" id="btnQuickBurnAll" class="btn btn-danger" disabled>🚀 一键刷入全部芯片</button>
+                                    </div>
+                                    <span class="field-hint" style="margin-top:6px;">关闭自动阈值漂移，锁定最低灵敏度与高触发门限。点击预设后点击「一键刷入全部芯片」即刻生效。</span>
+                                </div>
+
+                                <div class="field-grid" style="margin-top:10px;">
                                     <div class="field-item">
                                         <label class="field-label">目标芯片 (I2C 地址)</label>
                                         <select class="sel-input" id="mbrChip" disabled></select>
-                                        <span class="field-hint" id="mbrChipHint">按硬件探测结果列出</span>
+                                        <span class="field-hint" id="mbrChipHint">当前选中的芯片</span>
                                     </div>
-                                    <div class="field-item" style="display:flex;align-items:flex-end;">
+                                    <div class="field-item" style="display:flex;align-items:flex-end;gap:8px;">
                                         <button id="btnMbrReadChip" class="btn" disabled>从芯片读取</button>
+                                        <button id="btnMbrRegWin" class="btn" disabled>
+                                            <svg viewBox="0 0 16 16" fill="none">
+                                                <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+                                                <path d="M8 1.5V3.5M8 12.5V14.5M1.5 8H3.5M12.5 8H14.5M3.4 3.4L4.8 4.8M11.2 11.2L12.6 12.6M12.6 3.4L11.2 4.8M4.8 11.2L3.4 12.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                                            </svg>
+                                            详细设置
+                                        </button>
                                     </div>
                                 </div>
-                                <!-- round86 #12: 全芯片阈值/消抖/灵敏度联动编辑后的统一落盘入口 -->
+
                                 <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
                                     <button id="btnMbrBurnAll" class="btn" disabled>
                                         <svg viewBox="0 0 16 16" fill="none">
@@ -3873,20 +3909,12 @@ input[type="range"]:disabled {
                                         </svg>
                                         同步烧录全部芯片
                                     </button>
-                                    <button id="btnMbrRestoreAll" class="btn" disabled>安全恢复 0x40–0x42 内置模板</button>
-                                    <!-- round88: 寄存器详细设置悬浮窗入口(译自 TRM 寄存器数据表) -->
-                                    <button id="btnMbrRegWin" class="btn" disabled>
-                                        <svg viewBox="0 0 16 16" fill="none">
-                                            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
-                                            <path d="M8 1.5V3.5M8 12.5V14.5M1.5 8H3.5M12.5 8H14.5M3.4 3.4L4.8 4.8M11.2 11.2L12.6 12.6M12.6 3.4L11.2 4.8M4.8 11.2L3.4 12.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                                        </svg>
-                                        寄存器详细设置
-                                    </button>
+                                    <button id="btnMbrRestoreAll" class="btn" disabled>恢复内置模板</button>
                                 </div>
-                                <span class="field-hint">把参数调节/高级参数区联动的阈值/消抖/灵敏度逐片写入所有目标芯片的 NVM。仅在各芯片表已经「从芯片读取」核对（或已烧录确认）后可用，防止用模板覆盖芯片实值。</span>
-                                <span class="field-hint">触摸阈值/消抖/灵敏度已在「参数调节」「高级参数」区联动编辑；预设功能并入各滑条与「同步烧录全部芯片」。本区供寄存器级查看与微调。</span>
-                                <details class="adv-details">
-                                    <summary>高级：完整寄存器表 (128 字节)</summary>
+                                <span class="field-hint">将当前编辑的参数逐片写入所有目标芯片的 NVM，写入后芯片自动软复位生效。</span>
+
+                                <details class="adv-details" style="margin-top:10px;">
+                                    <summary>高级：完整 128 字节寄存器表</summary>
                                     <textarea class="txt-input hex-table" id="mbrHexTable" rows="8" spellcheck="false" disabled></textarea>
                                     <div class="btn-grid" style="margin-top:8px;">
                                         <button id="btnMbrTemplate" class="btn" disabled>载入固件模板</button>
@@ -3894,7 +3922,7 @@ input[type="range"]:disabled {
                                         <button id="btnMbrSaveFile" class="btn" disabled>导出表文件</button>
                                         <button id="btnMbrApply" class="btn btn-danger" disabled>应用于手台</button>
                                     </div>
-                                    <span class="field-hint">应用前自动重算表尾 CRC (0x7E/0x7F)；写入芯片 NVM 立即生效并软复位。</span>
+                                    <span class="field-hint">应用前自动重算表尾 CRC-16 (0x7E/0x7F)；写入芯片 NVM 立即生效并软复位。</span>
                                 </details>
                             </div>
                         </div>
@@ -4105,18 +4133,22 @@ input[type="range"]:disabled {
                             </div>
                         </div>
                         <pre class="log-box mbr-reg-dbg-out" id="mbrDbgOut">未采样</pre>
-                        <span class="field-hint">DIFF=按钮信号（0–255；16-bit 回包不代表未裁剪）；255 可能已饱和。cp=寄生电容 pF；raw=原始计数；baseline=基线。未经实机距离标定，不换算毫米。</span>
+                        <span class="field-hint">实时采样：DIFF=按钮差值(0-255)；raw=原始计数；baseline=动态基线。</span>
                     </details>
                     <!-- 参数编辑区(JS 按 MBR_REG_DEFS 生成) -->
                     <div id="mbrRegBody"></div>
                     <label class="checkbox-item mbr-reg-ack" id="mbrRegAckRow" style="display:none;justify-content:flex-start;">
                         <input type="checkbox" id="mbrRegAck" class="form-check-input">
-                        <span class="form-check-label">我已知晓上述警告风险,仍要写入芯片</span>
+                        <span class="form-check-label">我已知晓上述警告风险，仍要写入芯片</span>
                     </label>
                 </div>
                 <div class="flash-modal-foot">
-                    <button type="button" id="btnMbrAntiHover" class="btn">抗悬空预设</button>
-                    <button type="button" id="btnMbrRegRestore" class="btn">恢复模板值</button>
+                    <button type="button" id="btnMbrAntiHover" class="btn btn-primary">抗隔空推荐</button>
+                    <button type="button" id="btnMbrAntiHoverStrong" class="btn">强力抗隔空</button>
+                    <button type="button" id="btnMbrRegRestore" class="btn">恢复出厂模板</button>
+                    <button type="button" id="mbrRegClose" class="btn">关闭</button>
+                    <button type="button" id="btnMbrRegWrite" class="btn btn-danger" disabled>写入芯片</button>
+                </div>
                     <button type="button" id="mbrRegClose" class="btn">关闭</button>
                     <button type="button" id="btnMbrRegWrite" class="btn btn-danger" disabled>写入芯片</button>
                 </div>
@@ -4453,60 +4485,124 @@ const MBR_CRC_OK = Object.keys(MBR_TABLES).every(k => {
 //   u=单位/格式提示, nvm=写入后需 CTRL_CMD 0x86 命令落 NVM 才生效(配置区皆然)。
 // 16-bit 寄存器(SENSOR_EN/FSS_EN/TOGGLE_EN/CONFIG_CRC)按低字节/高字节拆两项。
 const MBR_REG_DEFS = [
-    { a: 0x00, n: "SENSOR_EN 低字节", d: "传感器 CS0-7 使能位。关闭某个传感器 = 该键彻底失联", min: 0, max: 255, r: 1 },
-    { a: 0x01, n: "SENSOR_EN 高字节", d: "CS8-15 使能位。三芯片布局使用 CS0-11；双芯片布局使用 CS0-15", min: 0, max: 255, r: 1 },
-    { a: 0x02, n: "FSS_EN 低字节", d: "邻键抑制组开关。开启后相邻双押会被吞掉——音游严禁开启", min: 0, max: 255, r: 1 },
-    { a: 0x03, n: "FSS_EN 高字节", d: "邻键抑制组开关(CS8-15), 音游必须保持 0", min: 0, max: 255, r: 1 },
-    { a: 0x08, n: "SENSITIVITY0", d: "传感器 0-3 灵敏度档位, 每片 2 位: 0=0.1pF 最灵敏/悬空最远 → 3=0.4pF 最迟钝", min: 0, max: 255, r: 0 },
-    { a: 0x09, n: "SENSITIVITY1", d: "传感器 4-7 灵敏度档位(每片 2 位, 0.1-0.4pF)", min: 0, max: 255, r: 0 },
-    { a: 0x0A, n: "SENSITIVITY2", d: "传感器 8-11 灵敏度档位(每片 2 位, 0.1-0.4pF)", min: 0, max: 255, r: 0 },
-    { a: 0x0B, n: "SENSITIVITY3", d: "传感器 12-15 灵敏度档位(每片 2 位, 0.1-0.4pF)", min: 0, max: 255, r: 0 },
-    { a: 0x0C, n: "FINGER_THRESHOLD0", d: "传感器 0 触发判定阈值。悬空误触发调大、漏触调小。仅当 DEVICE_CFG2.ATH_EN=0(手动阈值)时生效!", min: 31, max: 200, r: 0 },
-    { a: 0x0D, n: "FINGER_THRESHOLD1", d: "传感器 1 触发判定阈值(31-200)。ATH_EN=0 时生效", min: 31, max: 200, r: 0 },
-    { a: 0x0E, n: "FINGER_THRESHOLD2", d: "传感器 2 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x0F, n: "FINGER_THRESHOLD3", d: "传感器 3 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x10, n: "FINGER_THRESHOLD4", d: "传感器 4 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x11, n: "FINGER_THRESHOLD5", d: "传感器 5 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x12, n: "FINGER_THRESHOLD6", d: "传感器 6 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x13, n: "FINGER_THRESHOLD7", d: "传感器 7 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x14, n: "FINGER_THRESHOLD8", d: "传感器 8 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x15, n: "FINGER_THRESHOLD9", d: "传感器 9 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x16, n: "FINGER_THRESHOLD10", d: "传感器 10 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x17, n: "FINGER_THRESHOLD11", d: "传感器 11 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x18, n: "FINGER_THRESHOLD12", d: "传感器 12 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x19, n: "FINGER_THRESHOLD13", d: "传感器 13 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x1A, n: "FINGER_THRESHOLD14", d: "传感器 14 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x1B, n: "FINGER_THRESHOLD15", d: "传感器 15 触发判定阈值(31-200)", min: 31, max: 200, r: 0 },
-    { a: 0x1C, n: "SENSOR_DEBOUNCE", d: "ON 判定消抖: 信号须连续 N 个扫描周期超阈值才报按下。低 4 位有效 1-15。越大越稳但延迟变高", min: 0, max: 15, r: 0 },
-    { a: 0x1D, n: "BUTTON_HYS", d: "迟滞覆盖: bit7=1 启用覆盖, 低 5 位=迟滞值 0-31，bit6:5 须为 0。ON 判定线=FT+HYS，OFF 判定线=FT−HYS；ATH 开启时手动 FT 不生效", min: 0, max: 255, r: 0 },
-    { a: 0x1F, n: "BUTTON_LBR", d: "低基线复位阈值覆盖: bit7=1 启用, 0-127。基线漂移向下追踪的速度(温度/湿度适应)", min: 0, max: 255, r: 0 },
-    { a: 0x20, n: "BUTTON_NNT", d: "负噪声阈值覆盖: bit7=1 启用, 0-127。基线向下吸收带宽, 太小会误触发、太大会吞轻触", min: 0, max: 255, r: 0 },
-    { a: 0x21, n: "BUTTON_NT", d: "噪声阈值覆盖: bit7=1 启用, 0-127。基线冻结线——信号超过它基线不追踪(悬空信号即落此区), 推荐 FingerThreshold 的 40%", min: 0, max: 255, r: 0 },
-    { a: 0x26, n: "PROX_EN", d: "接近感应复用: 把 CS0/CS1 变成接近传感器。会牺牲这两个按键电极——音游严禁", min: 0, max: 3, r: 1 },
-    { a: 0x4C, n: "LED_ON_TIME", d: "GPO LED 点亮超时(仅官方 LED 模块用, 本机无此硬件)", min: 0, max: 255, r: 0 },
-    { a: 0x4E, n: "DEVICE_CFG1", d: "系统诊断开关(SYSD_EN bit0)。官方建议保持 0", min: 0, max: 1, r: 0 },
-    { a: 0x4F, n: "DEVICE_CFG2", d: "全局开关: bit7:6 接近ARST / bit5:4 按键ARST(0关/1=5s/2=20s, 5s 会吞长按!) / bit3 ATH_EN 自动阈值 / bit2 EMC / bit1 GUARD / bit0 SHIELD。抗悬空预设把 bit3 清 0", min: 0, max: 255, r: 1 },
-    { a: 0x50, n: "DEVICE_CFG3", d: "供电配置(bit0 SUPPLY_LOW_POWER)。本机 5V 内部稳压必须保持 0, 改 1 可能损坏芯片", min: 0, max: 1, r: 2 },
-    { a: 0x51, n: "I2C_ADDR", d: "芯片 I2C 地址(8-119)。改错 = 固件彻底找不到芯片 = 变砖, 烧录时会被面板直接拒绝", min: 8, max: 119, r: 2 },
-    { a: 0x52, n: "REFRESH_CTRL", d: "低功耗状态扫描间隔配置，低6位、20ms单位。不能据此确定Active触摸刷新；Active还受扫描与处理时间限制", min: 0, max: 63, r: 1 },
-    { a: 0x53, n: "STATE_TIMEOUT", d: "IDLE→active 状态超时(低 4 位, 单位约 3.2s)。保持默认", min: 0, max: 15, r: 1 }
+    { a: 0x00, n: "SENSOR_EN 低字节", d: "CS0-7 使能位；禁止关闭", min: 0, max: 255, r: 1 },
+    { a: 0x01, n: "SENSOR_EN 高字节", d: "CS8-15 使能位；禁止关闭", min: 0, max: 255, r: 1 },
+    { a: 0x02, n: "FSS_EN 低字节", d: "邻键抑制；音游必须保持 0（否则吞双押）", min: 0, max: 255, r: 1 },
+    { a: 0x03, n: "FSS_EN 高字节", d: "邻键抑制；音游必须保持 0", min: 0, max: 255, r: 1 },
+    { a: 0x08, n: "灵敏度 0-3", d: "0=0.1pF(最灵敏/易悬空) → 3=0.4pF(最钝/抗悬空)", min: 0, max: 255, r: 0 },
+    { a: 0x09, n: "灵敏度 4-7", d: "0=0.1pF → 3=0.4pF", min: 0, max: 255, r: 0 },
+    { a: 0x0A, n: "灵敏度 8-11", d: "0=0.1pF → 3=0.4pF", min: 0, max: 255, r: 0 },
+    { a: 0x0B, n: "灵敏度 12-15", d: "0=0.1pF → 3=0.4pF", min: 0, max: 255, r: 0 },
+    { a: 0x0C, n: "按键阈值 FT0", d: "触发判定线(31-200)；悬空调大，漏触调小", min: 31, max: 200, r: 0 },
+    { a: 0x0D, n: "按键阈值 FT1", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x0E, n: "按键阈值 FT2", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x0F, n: "按键阈值 FT3", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x10, n: "按键阈值 FT4", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x11, n: "按键阈值 FT5", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x12, n: "按键阈值 FT6", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x13, n: "按键阈值 FT7", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x14, n: "按键阈值 FT8", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x15, n: "按键阈值 FT9", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x16, n: "按键阈值 FT10", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x17, n: "按键阈值 FT11", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x18, n: "按键阈值 FT12", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x19, n: "按键阈值 FT13", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x1A, n: "按键阈值 FT14", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x1B, n: "按键阈值 FT15", d: "触发判定线(31-200)", min: 31, max: 200, r: 0 },
+    { a: 0x1C, n: "按下消抖", d: "扫描确认次数(1-15)；推荐 2-3", min: 1, max: 15, r: 0 },
+    { a: 0x1D, n: "迟滞覆盖 HYS", d: "bit7=1 启用，低 5 位为迟滞值；防止边缘反复抖动", min: 0, max: 255, r: 0 },
+    { a: 0x1F, n: "低基线复位 LBR", d: "基线防死锁；推荐 0x80|50", min: 0, max: 255, r: 0 },
+    { a: 0x20, n: "负噪声门 NNT", d: "负向突变滤波；推荐 0x80|80", min: 0, max: 255, r: 0 },
+    { a: 0x21, n: "基线冻结门 NT", d: "基线更新门限；推荐 0x80|80", min: 0, max: 255, r: 0 },
+    { a: 0x26, n: "接近复用 PROX", d: "禁止启用（会占用 CS0/1 电极）", min: 0, max: 3, r: 1 },
+    { a: 0x4C, n: "特殊输出 SPO", d: "硬件输出配置；保持默认", min: 0, max: 255, r: 0 },
+    { a: 0x4D, n: "硬件滤波", d: "中值与 IIR 滤波；保持默认", min: 0, max: 255, r: 0 },
+    { a: 0x4E, n: "系统诊断 CFG1", d: "官方建议保持 0", min: 0, max: 1, r: 0 },
+    { a: 0x4F, n: "阈值与复位模式", d: "bit3: 0=手动阈值(生效), 1=自动; bit5:4: 10=20s 复位", min: 0, max: 255, r: 0 },
+    { a: 0x50, n: "供电配置 CFG3", d: "必须保持 0（5V 内部稳压）", min: 0, max: 1, r: 2 },
+    { a: 0x51, n: "I2C 从机地址", d: "芯片总线地址；改错将失联变砖", min: 8, max: 119, r: 2 },
+    { a: 0x52, n: "刷新间隔", d: "低功耗控制；只读", min: 0, max: 255, r: 0 },
+    { a: 0x55, n: "状态超时", d: "超时保护；只读", min: 0, max: 255, r: 0 }
 ];
 
-// round88: 抗悬空预设(面板侧, 模板不动——用户决策)。值全部来自官方
-// Design Guide Table 6-2 比例(FT=实触信号 80%, NT/NNT=40%, HYS=10%, LBR=50)
-// 与 TRM 编码: 0x1D/0x1F/0x20/0x21 的 bit7=OVERRIDE 必须置 1, 否则值被忽略;
-// 0x4F=0x60: bit7:6=01(PROX_ARST=5s), 按键 ARST=20s(bit5:4=10),
-// 清 bit3(ATH_EN=0 → 手动 FINGER_THRESHOLD 生效)。ARST 5s 被官方
-// Design Guide p.48 否决: 长按满 5s 强制抬手+基线对齐, 音游长按会被吞。
+// 安全编辑仅改官方触摸参数位，保留硬件引脚映射与供电机制
+function mbrEditableMask(addr, base) {
+    const enabled = base ? base[0] | (base[1] << 8) : 0xFFFF;
+    if (addr >= 0x08 && addr <= 0x0B) {
+        let mask = 0;
+        for (let i = 0; i < 4; i++) if (enabled & (1 << ((addr - 0x08) * 4 + i))) mask |= 3 << (i * 2);
+        return mask;
+    }
+    if (addr >= 0x0C && addr <= 0x1B) return enabled & (1 << (addr - 0x0C)) ? 0xFF : 0;
+    return ({
+        0x1C: 0x0F,
+        0x1D: 0x9F,
+        0x1F: 0xFF,
+        0x20: 0xFF,
+        0x21: 0xFF,
+        0x4D: 0x03,
+        0x4F: 0x38
+    })[addr] || 0;
+}
+
+// 抗隔空推荐档：FT=160，最低灵敏度 0.4pF(0xFF)，迟滞 16，消抖 2，关闭 ATH
 const MBR_ANTIHOVER_PRESET = {
-    ft: 200,             // FINGER_THRESHOLD 0x0C-0x1B(全部使能传感器)
-    hys: 0x80 | 25,      // 0x1D: OVERRIDE|25 → ON≥225，OFF≤175；没有毫米距离标定
-    lbr: 0x80 | 50,      // 0x1F: 官方推荐 50
-    nnt: 0x80 | 80,      // 0x20: 官方 40% 比例
-    nt: 0x80 | 80,       // 0x21: 基线冻结线 80；不能据此换算距离
-    debounce: 2,         // 0x1C 低 4 位
-    cfg2: 0x60           // 0x4F
+    ft: 160,
+    sensitivity: 0xFF,
+    hys: 0x80 | 16,
+    debounce: 2,
+    lbr: 0x80 | 50,
+    nnt: 0x80 | 80,
+    nt: 0x80 | 80,
+    cfg2: 0x60
 };
+
+// 强力抗隔空档：FT=180，针对极薄面板或高灵敏场景
+const MBR_ANTIHOVER_STRONG_PRESET = {
+    ft: 180,
+    sensitivity: 0xFF,
+    hys: 0x80 | 20,
+    debounce: 2,
+    lbr: 0x80 | 50,
+    nnt: 0x80 | 80,
+    nt: 0x80 | 80,
+    cfg2: 0x60
+};
+
+// 出厂默认档：一键恢复 SmartSense 自动调谐
+const MBR_FACTORY_PRESET = {
+    ft: 128,
+    sensitivity: 0x00,
+    hys: 0x00,
+    debounce: 3,
+    lbr: 0x00,
+    nnt: 0x00,
+    nt: 0x00,
+    cfg2: 0x58
+};
+
+function mbrValidateTable(table, addr, base = null, checkCrc = true) {
+    const reasons = [];
+    if (!table || table.length !== 128) return { valid: false, reasons: ["需要 128 字节表"] };
+    if (!Number.isInteger(addr) || addr < 8 || addr > 119 || table[0x51] !== addr) reasons.push("表内地址与目标芯片不一致");
+    const crc = mbrCrc16(table);
+    if (checkCrc && (table[0x7E] !== (crc & 255) || table[0x7F] !== (crc >> 8))) reasons.push("表 CRC 不一致");
+    if ((table[0x1C] & 15) < 1) reasons.push("按下消抖须为 1–15");
+    if (table[0x1D] & 0x60) reasons.push("迟滞保留位须为 0");
+    const enabled = table[0] | (table[1] << 8);
+    for (let i = 0; i < 16; i++) {
+        if ((enabled & (1 << i)) && (table[0x0C + i] < 31 || table[0x0C + i] > 200)) reasons.push(`CS${i} 阈值须为 31–200`);
+    }
+    if (base) {
+        for (let i = 0; i < 0x7E; i++) {
+            if ((table[i] ^ base[i]) & ~mbrEditableMask(i, base)) {
+                reasons.push(`0x${i.toString(16).toUpperCase().padStart(2, "0")} 修改超出安全参数`);
+                break;
+            }
+        }
+    }
+    return { valid: reasons.length === 0, reasons };
+}
 
 function calcXorSum(buf) {
     let s = 0;
@@ -8162,36 +8258,58 @@ function validateUf2ForDevice(p, devInfo) {
     }
     $("btnMbrRestoreAll").addEventListener("click", () => withSerialLock(() => mbrRestoreAllBuiltins().catch(e => log("安全恢复异常: " + e.message, "error"))));
 
-    // round86 #12: 同步烧录全部芯片。拒绝条件只剩"某芯片从未有缓存"(模板未
-    // 读回且未编辑) -- 防止用模板覆盖芯片 NVM 实值;有编辑(脏)的芯片正是要烧
-    // 的对象。逐片顺序烧录(串行事务锁)。
-    // round86 审查修复(P2): 单片超时不再中断批次(waitForLine throw → 失败计数)。
+    // 同步烧录全部芯片：自动补齐无缓存芯片，串行写入并校验软复位
     async function mbrBurnAll() {
         if (!configMode) { log("请先进入配置模式", "warn"); return; }
         const chips = [...$("mbrChip").options].map(o => o.value);
-        if (!chips.length) { log("无目标芯片", "warn"); return; }
-        const noCache = chips.filter(c => !mbrTableCache[c]);
-        if (noCache.length) {
-            log(`拒绝同步烧录: ${noCache.join(", ")} 无表缓存(先用「从芯片读取」核对该芯片,或单芯片「应用于手台」)`, "error");
-            return;
-        }
-        if (!confirm(`将依次烧录 ${chips.length} 片芯片 (${chips.join(", ")}) 的 NVM。\n\n有编辑的芯片写入编辑值,未编辑的芯片重写当前缓存值。继续?`)) return;
+        if (!chips.length) { log("无可用芯片", "warn"); return; }
+        // 自动补齐无缓存芯片（从模板派生并同步当前语义参数）
+        chips.forEach(c => {
+            if (!mbrTableCache[c]) {
+                if (MBR_TABLES[c]) {
+                    const tpl = new Uint8Array(MBR_TABLES[c]);
+                    if (mbrTable) {
+                        tpl[0x1C] = mbrTable[0x1C];
+                        tpl[0x1D] = mbrTable[0x1D];
+                        tpl[0x1F] = mbrTable[0x1F];
+                        tpl[0x20] = mbrTable[0x20];
+                        tpl[0x21] = mbrTable[0x21];
+                        tpl[0x4F] = mbrTable[0x4F];
+                        const en = (tpl[0x00] | (tpl[0x01] << 8)) & 0xFFFF;
+                        for (let i = 0; i < 16; i++) {
+                            if (en & (1 << i)) tpl[0x0C + i] = mbrTable[0x0C + i];
+                        }
+                        tpl[0x08] = mbrTable[0x08];
+                        tpl[0x09] = mbrTable[0x09];
+                        tpl[0x0A] = mbrTable[0x0A];
+                        tpl[0x0B] = mbrTable[0x0B];
+                        const crc = mbrCrc16(tpl);
+                        tpl[0x7E] = crc & 0xFF;
+                        tpl[0x7F] = (crc >> 8) & 0xFF;
+                    }
+                    mbrTableCache[c] = tpl;
+                }
+            }
+        });
+        if (!confirm(`确定将抗隔空配置写入全部 ${chips.length} 片芯片 (${chips.join(", ")}) 的 NVM 吗？\n\n写入后芯片将软复位并立即生效。`)) return;
         let fail = 0;
-        for (const c of chips) {
+        for (let i = 0; i < chips.length; i++) {
+            const c = chips[i];
             $("mbrChip").value = c;
             mbrCurChip = c;
             mbrTable = new Uint8Array(mbrTableCache[c]);
+            log(`正在刷写芯片 ${c} (${i + 1}/${chips.length})...`);
             let ok = false;
             try {
                 ok = await mbrBurnOne(c);
             } catch (e) {
-                log(`芯片 ${c} 烧录异常: ${e.message}`, "error");
+                log(`芯片 ${c} 刷写异常: ${e.message}`, "error");
             }
             if (!ok) fail++;
-            await sleep(300);  // 芯片软复位后的恢复间隔
+            await sleep(300);
         }
-        if (!fail) log(`同步烧录完成: ${chips.length} 片全部成功`);
-        else log(`同步烧录完成: ${chips.length - fail}/${chips.length} 成功,${fail} 片失败(见日志)`, "warn");
+        if (!fail) log(`全部 ${chips.length} 片芯片刷写完成并软复位生效！`, "success");
+        else log(`刷写完成: ${chips.length - fail}/${chips.length} 片成功，${fail} 片失败`, "warn");
     }
     $("btnMbrBurnAll").addEventListener("click", () => withSerialLock(() => mbrBurnAll().catch(e => log("同步烧录失败: " + e.message, "error"))));
 
@@ -8271,27 +8389,17 @@ function validateUf2ForDevice(p, devInfo) {
         evaluateMbrRegRisk();
     }
 
-    // 状态卡片(评审建议#1): ATH/判定链一目了然
+    // 状态卡片: 极简直观展示当前阈值与运行模式
     function updateMbrRegStatus() {
         const el = $("mbrRegStatus");
         if (!el || !mbrTable) return;
         const cfg2 = mbrTable[0x4F];
         const ath = (cfg2 & 0x08) !== 0;
-        const arst = (cfg2 >> 4) & 0x03;
         const ft = mbrTable[0x0C];
-        const hysOn = (mbrTable[0x1D] & 0x80) !== 0;
         const hys = mbrTable[0x1D] & 0x1F;
-        const ntOn = (mbrTable[0x21] & 0x80) !== 0;
-        const nt = mbrTable[0x21] & 0x7F;
-        const html =
-            `<span>当前编辑区（模板/缓存，不代表芯片实时状态）</span> · ` +
-            (ath
-                ? `<span class="mbr-st-warn">ATH 开启：手动 FT 不生效，实际判定线未知</span>`
-                : `<span>ATH 关闭：手动 FT=${ft}</span>`) +
-            ` · 迟滞 ${hysOn ? hys : "自动"}` +
-            (!ath && hysOn ? ` · ON≥${ft + hys} / OFF≤${ft - hys}` : " · ON/OFF 无法由编辑表确定") +
-            ` · 基线冻结 ${ntOn ? nt : "自动"}` +
-            ` · ARST ${["关", "5s⚠", "20s"][arst] || "?"} · 写入后须从芯片回读核对`;
+        const html = ath
+            ? `<span class="mbr-st-warn">当前模式：SmartSense 自动调谐（易受悬空漂移干扰，建议点击「抗隔空推荐」）</span>`
+            : `<span style="color:#00e5ff;font-weight:600;">当前模式：手动阈值锁定 (FT=${ft} · 灵敏度 0.4pF · 迟滞 ${hys}) · 抗隔空模式生效中</span>`;
         el.innerHTML = html;
     }
 
@@ -8446,55 +8554,89 @@ function validateUf2ForDevice(p, devInfo) {
     }
     $("btnMbrDbgRead").addEventListener("click", () => withSerialLock(() => mbrDebugRead()));
 
-    // 抗悬空预设: 写编辑表(全部使能传感器), 不动内置模板(用户决策)
-    $("btnMbrAntiHover").addEventListener("click", () => {
-        if (!mbrTable) { log("寄存器表为空,先「从芯片读取」", "warn"); return; }
-        const P = MBR_ANTIHOVER_PRESET;
-        const en = (mbrTable[0x00] | (mbrTable[0x01] << 8)) & 0xFFFF;
-        for (let i = 0; i < 16; i++) if (en & (1 << i)) mbrTable[0x0C + i] = P.ft;
-        mbrTable[0x1D] = P.hys;
-        mbrTable[0x1F] = P.lbr;
-        mbrTable[0x20] = P.nnt;
-        mbrTable[0x21] = P.nt;
-        mbrTable[0x1C] = (mbrTable[0x1C] & 0xF0) | P.debounce;
-        mbrTable[0x4F] = P.cfg2;
-        const key = mbrKey($("mbrChip").value);
-        mbrTableCache[key] = new Uint8Array(mbrTable);
-        mbrDirty[key] = true;
-        if ($("mbrRegGlobal").checked) {
-            [...$("mbrChip").options].map(o => o.value).forEach(c => {
-                if (mbrKey(c) === key) return;
-                const base = mbrTableCache[c];
-                if (!base) return;
-                const ben = (base[0x00] | (base[0x01] << 8)) & 0xFFFF;
-                for (let i = 0; i < 16; i++) if (ben & (1 << i)) base[0x0C + i] = P.ft;
-                base[0x1D] = P.hys; base[0x1F] = P.lbr; base[0x20] = P.nnt; base[0x21] = P.nt;
-                base[0x1C] = (base[0x1C] & 0xF0) | P.debounce;
-                base[0x4F] = P.cfg2;
-                mbrTableCache[c] = base;
-                mbrDirty[c] = true;
-            });
+    // 通用预设应用函数：自动联动灵敏度(0xFF=0.4pF)、阈值FT、消抖、迟滞与模式，并重算CRC
+    function applyMbrPreset(P, name) {
+        const curAddr = $("mbrChip").value || "0x40";
+        if (!mbrTable) {
+            if (MBR_TABLES[curAddr]) {
+                mbrTable = new Uint8Array(MBR_TABLES[curAddr]);
+                mbrCacheStore(curAddr, mbrTable, false);
+            } else {
+                log("请先连接手台并进入配置模式", "warn");
+                return;
+            }
         }
+        const chips = [...$("mbrChip").options].map(o => o.value);
+        const globalMode = $("mbrRegGlobal") ? $("mbrRegGlobal").checked : true;
+        const targetChips = globalMode ? (chips.length ? chips : [curAddr]) : [curAddr];
+
+        targetChips.forEach(c => {
+            let table = mbrTableCache[c];
+            if (!table) {
+                if (MBR_TABLES[c]) table = new Uint8Array(MBR_TABLES[c]);
+                else return;
+            }
+            const en = (table[0x00] | (table[0x01] << 8)) & 0xFFFF;
+            // 1. 设置按键阈值 FT (31-200)
+            for (let i = 0; i < 16; i++) {
+                if (en & (1 << i)) table[0x0C + i] = P.ft;
+            }
+            // 2. 灵敏度联动：0xFF = 全部通道 0.4pF（最低灵敏度，强抗隔空）
+            if (P.sensitivity !== undefined) {
+                table[0x08] = P.sensitivity;
+                table[0x09] = P.sensitivity;
+                table[0x0A] = P.sensitivity;
+                table[0x0B] = P.sensitivity;
+            }
+            // 3. 消抖与迟滞
+            table[0x1C] = (table[0x1C] & 0xF0) | (P.debounce & 0x0F);
+            table[0x1D] = P.hys;
+            table[0x1F] = P.lbr;
+            table[0x20] = P.nnt;
+            table[0x21] = P.nt;
+            table[0x4F] = P.cfg2;
+
+            // 4. 重算原厂 CRC-16 并写回 0x7E/0x7F
+            const crc = mbrCrc16(table);
+            table[0x7E] = crc & 0xFF;
+            table[0x7F] = (crc >> 8) & 0xFF;
+
+            mbrTableCache[c] = table;
+            mbrDirty[c] = true;
+        });
+
+        mbrTable = new Uint8Array(mbrTableCache[curAddr] || mbrTable);
         renderMbrHex();
         syncMbrFields();
         syncMbrRegInputs();
-        log(`参数预设已写入编辑表(全局${$("mbrRegGlobal").checked ? "应用" : "仅当前芯片"}): FT=${P.ft},HYS=25(ON≥225/OFF≤175) NT/NNT=80 LBR=50 debounce=2 ARST=20s ATH=关。未经悬空/轻触验证；用「写入芯片」落 NVM。`, "");
-    });
+        log(`已载入【${name}】参数（FT=${P.ft} · 灵敏度0.4pF · 迟滞${P.hys & 0x1F} · 消抖${P.debounce}）。点击「一键刷入全部芯片」即刻生效。`);
+    }
 
-    // 恢复模板值: 当前芯片回到固件内置模板(untrusted)
+    // 绑定弹窗内与面板主界面的抗隔空预设按钮
+    $("btnMbrAntiHover").addEventListener("click", () => applyMbrPreset(MBR_ANTIHOVER_PRESET, "抗隔空推荐"));
+    const btnMbrStrong = $("btnMbrAntiHoverStrong");
+    if (btnMbrStrong) btnMbrStrong.addEventListener("click", () => applyMbrPreset(MBR_ANTIHOVER_STRONG_PRESET, "强力抗隔空"));
+    const btnQuickAH = $("btnQuickAntiHover");
+    if (btnQuickAH) btnQuickAH.addEventListener("click", () => applyMbrPreset(MBR_ANTIHOVER_PRESET, "抗隔空推荐"));
+    const btnQuickAHS = $("btnQuickAntiHoverStrong");
+    if (btnQuickAHS) btnQuickAHS.addEventListener("click", () => applyMbrPreset(MBR_ANTIHOVER_STRONG_PRESET, "强力抗隔空"));
+    const btnQuickFact = $("btnQuickFactory");
+    if (btnQuickFact) btnQuickFact.addEventListener("click", () => applyMbrPreset(MBR_FACTORY_PRESET, "出厂默认"));
+    const btnQuickBurn = $("btnQuickBurnAll");
+    if (btnQuickBurn) btnQuickBurn.addEventListener("click", () => withSerialLock(() => mbrBurnAll().catch(e => log("一键刷写失败: " + e.message, "error"))));
+
+    // 恢复模板值
     $("btnMbrRegRestore").addEventListener("click", () => {
         const key = $("mbrChip").value;
         const tpl = MBR_TABLES[key];
-        if (!tpl) { log(`地址 ${key} 无对应内置模板,恢复被拒绝`, "error"); return; }
+        if (!tpl) { log(`地址 ${key} 无对应内置模板`, "error"); return; }
         mbrTable = new Uint8Array(tpl);
         mbrCacheStore(key, mbrTable, false);
         mbrDirty[key] = true;
         renderMbrHex();
         syncMbrFields();
         syncMbrRegInputs();
-        // round88b: 明确告知"恢复≠写入"——NVM 里仍是上一轮烧的值, 必须再点
-        // 「写入芯片」才真正回到模板行为; 防止用户以为恢复即生效。
-        log(`已恢复 ${key} 固件内置模板值(仅编辑区——NVM 仍是芯片现值,需再点「写入芯片」才会烧回模板)`, "warn");
+        log(`已恢复 ${key} 固件内置模板（需点击「写入芯片」或「一键刷入全部芯片」落盘生效）。`, "warn");
     });
 
     // 悬浮窗写入(round88b 重写): 全局模式 = 逐片队列(同 mbrBurnAll 形状),
@@ -9786,9 +9928,9 @@ function validateUf2ForDevice(p, devInfo) {
         $("rgMbrGate").disabled = !inCfg || !mbrGateFwSupport;
 
         // round86 #12: 预设/悬空截止校准按钮已移除;btnMbrBurnAll 为同步烧录入口。
-        const mbrIds = ["mbrChip", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply", "btnMbrBurnAll", "btnMbrRestoreAll", "btnMbrRegWin"];
+        const mbrIds = ["mbrChip", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply", "btnMbrBurnAll", "btnMbrRestoreAll", "btnMbrRegWin", "btnQuickAntiHover", "btnQuickAntiHoverStrong", "btnQuickFactory", "btnQuickBurnAll"];
         const mbrEnabled = inCfg && MBR_CRC_OK;
-        mbrIds.forEach(id => $(id).disabled = !mbrEnabled);
+        mbrIds.forEach(id => { const el = $(id); if (el) el.disabled = !mbrEnabled; });
         // round82: 从芯片读取(0xC6)额外需要固件 >= 1.6.2-beta1。
         $("btnMbrReadChip").disabled = !mbrEnabled || !mbrGateFwSupport;
         // round88: 悬浮窗内 0xC7 采样按钮需固件 1.6.5+。
