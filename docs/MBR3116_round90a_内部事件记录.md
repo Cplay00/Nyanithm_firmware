@@ -2,7 +2,7 @@
 
 2026-10-02。基底5224311；实际设备HW:v2、三片MBR3116，USB序列号5303284739002C9C。
 
-本轮实现已备份、测试、编译并刷入。保留round89y触摸判定，未新增抗悬空门控、I2C事务、NVRAM或ToF配置变更。新动作采样仍待用户完成；不能宣称隔空问题已改善。
+本轮实现已备份、测试、编译并刷入。保留round89y触摸判定，未新增抗悬空门控、I2C事务、NVRAM或ToF配置变更。用户已完成三组九次并确认动作；后续发现记录器错误解释rangeMask，九次均为手动末尾窗口，不能用于上升时序比较。问题及修复见`MBR3116_round90b_记录边沿修复.md`，不能宣称隔空问题已改善。
 
 ## 记录方式
 
@@ -49,6 +49,6 @@ TX不足返回单字节0，FIFO完全满可无回复；CB不消耗记录，控�
 
 - `_dev_archive/round90a_before_20261002_215553/`：5224311 source.zip、round89y.uf2及设备原配置；旧UF2 SHA256 `f9ea5d85ff7b4a0a702180a8c20f9c731ff203d63e25a507d5b04e7f01eab3b3`。
 - `_dev_tools/round90a_flash_20261002/`、`round90a_preflight_20261002/`、`round90a_pipeline_tests/`、`round90a_ui_check.json`及对应构建/迁移/记录器日志。
-- `_dev_tools/round90a_events_20261002/`：待用户采样及标注。
+- `_dev_tools/round90a_events_20261002/`：已完成三组动作及独立确认、864帧原始末尾窗口；另存采集审计及恢复核对。原始三组未改写，全部排除上升时序分析。
 
 本地提交，不push；新版本尚未由用户完成HID游戏回归。

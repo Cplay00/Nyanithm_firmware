@@ -4,6 +4,7 @@
 Only clocks and hardware locks are replaced for the host; no device is accessed.
 """
 import os
+import argparse
 from pathlib import Path
 import subprocess
 import tempfile
@@ -50,6 +51,7 @@ HOST = r'''
 #include <pico/util/queue.h>
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <thread>
@@ -67,16 +69,40 @@ unsigned tud_cdc_write(const void* source, unsigned count) {
 void tud_cdc_write_flush() {}
 '''
 
+PRODUCER = r'''
+struct MbrDistanceSample { uint16_t counts[16]{}; bool valid{}; MbrTraceChip quality{}; };
+MbrDistanceSample mbrDistanceSamples[3];
+int16_t laneTable[3][16];
+uint8_t pressureSnap[32];
+uint32_t producerMs = 100;
+uint32_t get_absolute_time() { return producerMs; }
+uint32_t to_ms_since_boot(uint32_t value) { return value; }
+struct CY8CMBR3116 {
+    struct DifferenceReadInfo { uint32_t ioFailures{}, syncMismatches{}; uint8_t sync{}; };
+    uint16_t native[16]{};
+    bool readDifferenceCounts(uint16_t* out, DifferenceReadInfo* info, bool) {
+        std::memcpy(out, native, sizeof(native)); info->sync = 1; return true;
+    }
+};
+'''
+
 CASES = r'''
 unsigned checks = 0;
-void check(bool condition) { assert(condition); ++checks; }
+void checkAt(bool condition, const char* expression, unsigned line) {
+    ++checks;
+    if (!condition) { std::cerr << "FAIL " << line << ": " << expression << '\n'; std::abort(); }
+}
+#define check(expression) checkAt(bool(expression), #expression, __LINE__)
 MbrTouchTrace frame(uint32_t ms, uint32_t id, uint16_t mask = 0) {
     MbrTouchTrace t{};
     t.tag = CMD_MBR_TOUCH_TRACE; t.version = MBR_TRACE_VERSION;
     t.flags = MBR_TRACE_PROFILE; t.chipCount = 3;
     t.publishedMs = ms; t.frameId = id; t.hardware[0] = t.verified[0] = mask;
     t.slider[0] = mask ? 128 : 0;
-    for (unsigned i = 0; i < 3; ++i) t.chips[i].flags = MBR_TRACE_VALID | MBR_TRACE_COHERENT | MBR_TRACE_BUTTON_VALID | MBR_TRACE_READ_THIS_FRAME;
+    for (unsigned i = 0; i < 3; ++i) {
+        t.chips[i].flags = MBR_TRACE_VALID | MBR_TRACE_HAS_GOOD | MBR_TRACE_COHERENT | MBR_TRACE_BUTTON_VALID | MBR_TRACE_READ_THIS_FRAME;
+        t.chips[i].rangeMask = 0xffff;
+    }
     for (unsigned i = 0; i < 32; ++i) t.counts[i] = uint16_t(id + i);
     return t;
 }
@@ -90,6 +116,18 @@ void arm(uint32_t ms, uint32_t id = 1) {
 }
 void command(uint8_t cmd, unsigned space = 256) { available = space; tx.clear(); runCommand(cmd); }
 int main() {
+    for (auto& chip : laneTable) for (auto& lane : chip) lane = -1;
+    laneTable[0][7] = 16;
+    CY8CMBR3116 chip{};
+    mbrDistanceReadAttempt(0, &chip);
+    check(mbrDistanceSamples[0].quality.rangeMask == 0xffff);
+    chip.native[7] = 256;
+    mbrDistanceReadAttempt(0, &chip);
+    check(mbrDistanceSamples[0].quality.rangeMask == 0xff7f);
+    check(mbrDistanceSamples[0].counts[7] == 256);
+    chip.native[7] = 255;
+    mbrDistanceReadAttempt(0, &chip);
+    check(mbrDistanceSamples[0].quality.rangeMask == 0xffff);
     initMbrHistory();
     recordMbrHistory(frame(0, 0, 1));
     check(getMbrHistoryStatus().state == MBR_HISTORY_OFF);
@@ -165,13 +203,30 @@ int main() {
     arm(1000);
     auto invalid = frame(1200, 2, 1); invalid.chips[2].flags = 0;
     recordMbrHistory(invalid);
-    check(getMbrHistoryStatus().state == MBR_HISTORY_ARMED);
+    check(getMbrHistoryStatus().state == MBR_HISTORY_POST && getMbrHistoryStatus().triggerFrame == 2);
     recordMbrHistory(frame(1210, 3, 1));
-    check(getMbrHistoryStatus().state == MBR_HISTORY_ARMED);
+    check(getMbrHistoryStatus().state == MBR_HISTORY_POST);
     recordMbrHistory(frame(1220, 4, 0));
-    check(getMbrHistoryStatus().triggerFrame == 4);
+    check(getMbrHistoryStatus().triggerFrame == 2);
     requestMbrHistory(CMD_MBR_HISTORY_FREEZE); recordMbrHistory(frame(1230, 5));
     check(readMbrHistory(f)); check(readMbrHistory(f) && f.trace.chips[2].flags == 0);
+    arm(2000);
+    auto produced = frame(2200, 2, 1);
+    produced.chips[0] = mbrDistanceSamples[0].quality;
+    produced.chips[0].flags |= MBR_TRACE_BUTTON_VALID;
+    recordMbrHistory(produced);
+    check(getMbrHistoryStatus().state == MBR_HISTORY_POST);
+    recordMbrHistory(frame(2360, 3, 1));
+    check(getMbrHistoryStatus().state == MBR_HISTORY_FROZEN);
+    check(readMbrHistory(f));
+    check(readMbrHistory(f) && f.trace.chips[0].rangeMask == 0xffff);
+    arm(3000);
+    auto cached = frame(3200, 2, 1);
+    for (auto& q : cached.chips) q.flags &= ~MBR_TRACE_READ_THIS_FRAME;
+    recordMbrHistory(cached);
+    check(getMbrHistoryStatus().state == MBR_HISTORY_POST);
+    recordMbrHistory(frame(3360, 3, 1));
+    check(getMbrHistoryStatus().state == MBR_HISTORY_FROZEN);
     std::atomic<bool> stop{false};
     std::thread producer([&] {
         for (uint32_t id = 1; !stop; ++id) recordMbrHistory(frame(id * 5, id));
@@ -197,8 +252,12 @@ int main() {
 
 def main():
     repo = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--recorder-source', type=Path, default=repo / 'src/mbr_history.cpp')
+    args = parser.parse_args()
     sdk = Path('D:/pico-sdk')
     body = extract_body((repo / 'src/chuni_io.cpp').read_text(encoding='utf-8'), 'if (cmd == CMD_MBR_HISTORY_ARM ||')
+    producer = extract_body((repo / 'src/hw_devices.cpp').read_text(encoding='utf-8'), 'static bool mbrDistanceReadAttempt(')
     with tempfile.TemporaryDirectory(prefix='mbr_history_') as directory:
         tmp = Path(directory)
         for name, data in STUBS.items():
@@ -206,11 +265,11 @@ def main():
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(data, encoding='utf-8')
         harness = tmp / 'host.cpp'
-        harness.write_text(HOST + '\nvoid runCommand(uint8_t cmd) {' + body + '}\n' + CASES, encoding='utf-8')
+        harness.write_text(HOST + PRODUCER + '\nbool mbrDistanceReadAttempt(uint8_t m, CY8CMBR3116* chip) {' + producer + '}\nvoid runCommand(uint8_t cmd) {' + body + '}\n' + CASES, encoding='utf-8')
         binary = tmp / ('test.exe' if os.name == 'nt' else 'test')
         cmd = find_compiler(None) + ['-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror', '-x', 'c++',
             '-I', str(tmp), '-I', str(repo / 'include/software'), '-I', str(repo / 'include/share'),
-            '-I', str(sdk / 'src/common/pico_util/include'), str(repo / 'src/mbr_history.cpp'),
+            '-I', str(sdk / 'src/common/pico_util/include'), str(args.recorder_source),
             str(sdk / 'src/common/pico_util/queue.c'), str(harness), '-o', str(binary)]
         built = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if built.returncode:

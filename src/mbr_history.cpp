@@ -14,7 +14,7 @@ MbrHistoryState state = MBR_HISTORY_OFF; // Core0 only.
 uint32_t startMs, triggerMs, previousSlider;
 uint16_t previousHardware[3], previousVerified[3];
 uint8_t chipCount;
-bool previousValid = false;
+bool havePrevious = false;
 bool allocated = false;
 bool disconnected = false; // Guard-protected cancellation survives ARM setup.
 
@@ -95,7 +95,7 @@ void recordMbrHistory(const MbrTouchTrace& trace) {
         startMs = trace.publishedMs;
         triggerMs = 0;
         chipCount = trace.chipCount;
-        previousValid = false;
+        havePrevious = false;
         state = (trace.flags & MBR_TRACE_PROFILE) && chipCount >= 2 && chipCount <= 3
             ? MBR_HISTORY_ARMED : MBR_HISTORY_UNSUPPORTED;
         critical_section_enter_blocking(&guard);
@@ -135,13 +135,8 @@ void recordMbrHistory(const MbrTouchTrace& trace) {
     }
     uint32_t slider = 0;
     for (uint8_t i = 0; i < 32; ++i) if (trace.slider[i]) slider |= uint32_t(1) << i;
-    bool valid = true;
-    const uint8_t required = MBR_TRACE_VALID | MBR_TRACE_COHERENT |
-        MBR_TRACE_BUTTON_VALID | MBR_TRACE_READ_THIS_FRAME;
-    for (uint8_t i = 0; i < chipCount; ++i) {
-        if ((trace.chips[i].flags & required) != required || trace.chips[i].rangeMask) valid = false;
-    }
-    bool edge = valid && previousValid &&
+    // Capture changes even on failed reads; quality stays in the recorded frame.
+    bool edge = havePrevious &&
         (slider != previousSlider || std::memcmp(trace.hardware, previousHardware, 6) ||
          std::memcmp(trace.verified, previousVerified, 6));
     if (state == MBR_HISTORY_ARMED && edge && uint32_t(trace.publishedMs - startMs) >= MBR_HISTORY_PRE_MS) {
@@ -157,7 +152,7 @@ void recordMbrHistory(const MbrTouchTrace& trace) {
     previousSlider = slider;
     std::memcpy(previousHardware, trace.hardware, 6);
     std::memcpy(previousVerified, trace.verified, 6);
-    previousValid = valid;
+    havePrevious = true;
     const uint32_t hookUs = time_us_32() - hookStart;
     critical_section_enter_blocking(&guard);
     ++status.stored;

@@ -18,8 +18,8 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.6-beta7"
-#define NYANITHM_BUILD_ID "round90a"
+#define NYANITHM_FW_VERSION "1.6.6-beta8"
+#define NYANITHM_BUILD_ID "round90b"
 
 const uint8_t MBR_TRACE_VERSION = 1;
 const uint8_t MBR_TRACE_BUSY = 0;
@@ -44,7 +44,7 @@ struct MbrTraceChip {
     uint32_t goodEndMs;
     uint32_t buttonStartMs;
     uint32_t buttonEndMs;
-    uint16_t rangeMask;
+    uint16_t rangeMask; // 1 = count <=255 per electrode.
     uint8_t flags;
     uint8_t sync;
 };
