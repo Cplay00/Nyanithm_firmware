@@ -16,6 +16,7 @@
 #include <hardware/sync.h>
 #include <hardware/watchdog.h>
 #include <hw_devices.h>
+#include <mbr_history.h>
 #include <nyanithm_shared.h>
 #include <tusb.h>
 #include <usb_device.h>
@@ -565,6 +566,31 @@ void cdc_respond() {
         } else {
             const uint8_t busy = MBR_TRACE_BUSY;
             if (tud_cdc_write_available()) g_tele.cdcTxBytes += tud_cdc_write(&busy, 1);
+        }
+        tud_cdc_write_flush();
+    }
+    if (cmd == CMD_MBR_HISTORY_ARM || cmd == CMD_MBR_HISTORY_FREEZE ||
+        cmd == CMD_MBR_HISTORY_READ || cmd == CMD_MBR_HISTORY_STATUS) {
+        static_assert(CFG_TUD_CDC_TX_BUFSIZE >= sizeof(MbrHistoryFrame), "history needs full TX capacity");
+        const uint32_t available = tud_cdc_write_available();
+        const uint32_t required = cmd == CMD_MBR_HISTORY_READ ? sizeof(MbrHistoryFrame) :
+            cmd == CMD_MBR_HISTORY_STATUS ? sizeof(MbrHistoryStatus) : 2;
+        if (available < required) {
+            const uint8_t busy = MBR_TRACE_BUSY;
+            if (available) g_tele.cdcTxBytes += tud_cdc_write(&busy, 1);
+        } else if (cmd == CMD_MBR_HISTORY_READ) {
+            MbrHistoryFrame frame{};
+            if (readMbrHistory(frame)) g_tele.cdcTxBytes += tud_cdc_write(&frame, sizeof(frame));
+            else {
+                const uint8_t busy = MBR_TRACE_BUSY;
+                g_tele.cdcTxBytes += tud_cdc_write(&busy, 1);
+            }
+        } else if (cmd == CMD_MBR_HISTORY_STATUS) {
+            const MbrHistoryStatus status = getMbrHistoryStatus();
+            g_tele.cdcTxBytes += tud_cdc_write(&status, sizeof(status));
+        } else {
+            const uint8_t reply[2] = {cmd, uint8_t(requestMbrHistory(cmd))};
+            g_tele.cdcTxBytes += tud_cdc_write(reply, sizeof(reply));
         }
         tud_cdc_write_flush();
     }

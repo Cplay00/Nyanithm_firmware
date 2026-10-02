@@ -84,6 +84,7 @@ uint16_t hwTouch[3]{};
 uint16_t rawTouch[3]{};
 TouchInputSnapshot publishedTouchState{};
 MbrTouchTrace publishedMbrTrace{};
+void recordMbrHistory(const MbrTouchTrace&) {}
 MbrTouchTrace buildMbrTouchTrace() {
     MbrTouchTrace trace{};
     trace.tag = CMD_MBR_TOUCH_TRACE;

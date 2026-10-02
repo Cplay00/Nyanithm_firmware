@@ -18,8 +18,8 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.6-beta6"
-#define NYANITHM_BUILD_ID "round89y"
+#define NYANITHM_FW_VERSION "1.6.6-beta7"
+#define NYANITHM_BUILD_ID "round90a"
 
 const uint8_t MBR_TRACE_VERSION = 1;
 const uint8_t MBR_TRACE_BUSY = 0;
@@ -65,6 +65,33 @@ static_assert(sizeof(MbrTraceChip) == 40, "trace chip layout");
 static_assert(offsetof(MbrTouchTrace, counts) == 12, "trace counts offset");
 static_assert(offsetof(MbrTouchTrace, chips) == 120, "trace quality offset");
 static_assert(sizeof(MbrTouchTrace) == 240, "trace wire length");
+
+const uint8_t MBR_HISTORY_VERSION = 1;
+const uint16_t MBR_HISTORY_CAPACITY = 96;
+const uint16_t MBR_HISTORY_PRE_MS = 180;
+const uint16_t MBR_HISTORY_POST_MS = 160;
+enum MbrHistoryState : uint8_t {
+    MBR_HISTORY_OFF, MBR_HISTORY_ARMED, MBR_HISTORY_POST,
+    MBR_HISTORY_FROZEN, MBR_HISTORY_FAILED, MBR_HISTORY_UNSUPPORTED
+};
+const uint8_t MBR_HISTORY_EDGE = 1;
+const uint8_t MBR_HISTORY_MANUAL = 2;
+const uint8_t MBR_HISTORY_TIMEOUT = 4;
+const uint8_t MBR_HISTORY_PROFILE_CHANGED = 8;
+struct MbrHistoryStatus {
+    uint8_t tag, version, state, pending;
+    uint32_t session, triggerFrame, triggerMs, startedMs, endedMs;
+    uint32_t stored, overwritten, hookCount, hookSumUs, hookMaxUs;
+    uint16_t capacity, queued, preMs, postMs;
+    uint8_t reason, reserved[3];
+};
+struct MbrHistoryFrame {
+    uint8_t tag, version, reserved[2];
+    uint32_t session;
+    MbrTouchTrace trace;
+};
+static_assert(sizeof(MbrHistoryStatus) == 56, "history status wire length");
+static_assert(sizeof(MbrHistoryFrame) == 248, "history frame wire length");
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -216,6 +243,10 @@ typedef enum {
     // 单位不同，不能把16位容器或未标定信号换算为毫米距离。
     CMD_MBR3116_DEBUG = 0xC7,
     CMD_MBR_TOUCH_TRACE = 0xC8, // round89x: 240B frame, BUSY=0, or timeout if TX full.
+    CMD_MBR_HISTORY_ARM = 0xC9,
+    CMD_MBR_HISTORY_FREEZE = 0xCA,
+    CMD_MBR_HISTORY_READ = 0xCB,
+    CMD_MBR_HISTORY_STATUS = 0xCC,
 } NyanithmCmd;
 
 #endif

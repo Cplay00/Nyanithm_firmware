@@ -39,6 +39,7 @@
 #include <chuni_io.h>
 #include <controller_config.h>
 #include <hw_devices.h>
+#include <mbr_history.h>
 #include <lamp_array.h>
 #include <usb_device.h>
 
@@ -65,6 +66,10 @@ void multicore_entry() {
             continue;
         }
         tud_task();
+        static bool historyConnected = false;
+        const bool connected = tud_cdc_n_connected(0);
+        if (historyConnected && !connected) disconnectMbrHistory();
+        historyConnected = connected;
         // round66: raw pressure report is a host-session feature - auto-clear
         // when the CDC host disconnects so it never survives into the next
         // session (e.g. game DLL start over a fresh port).
@@ -95,6 +100,7 @@ void initUSBDevice(void) {
         board_init_after_tusb();
     }
 
+    initMbrHistory();
     multicore_launch_core1(multicore_entry);
 }
 

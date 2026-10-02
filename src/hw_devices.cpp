@@ -7,6 +7,7 @@
 
 #include <controller_config.h>
 #include <hw_devices.h>
+#include <mbr_history.h>
 #include <mbr_distance_gate.h>
 #include <tca9539.h>
 #include <hardware/sync.h>
@@ -1633,6 +1634,7 @@ static void publishTouchState() {
     }
     __dmb();
     ++touchStateGen;
+    recordMbrHistory(trace);
 }
 
 void updateInputState() {
