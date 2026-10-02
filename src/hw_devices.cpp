@@ -373,6 +373,7 @@ uint16_t hwTouch[3] = {0, 0, 0};   // round45p: pre-verification hardware touch 
 uint32_t lastTouchedMs[3][12] = {0};  // round45m: last touch timestamp per electrode (baseline correction skips recently-touched)
 
 TouchInputSnapshot publishedTouchState{};
+MbrTouchTrace publishedMbrTrace{};
 volatile uint32_t touchStateGen = 0;
 
 // round46: telemetry shared from Core0 to Core1 (CMD_DEBUG_TELEMETRY = 0xC1)
@@ -402,11 +403,14 @@ struct MbrDistanceSample {
     uint32_t readStartedMs = 0;
     bool attempted = false;
     bool valid = false;
+    MbrTraceChip quality{};
 };
 static MbrDistanceSample mbrDistanceSamples[3];
 static MbrDistanceGateState mbrDistanceStates[3][16];
 static bool mbrDistanceEnabledForFrame = false;
 static bool mbrDistanceResetForFrame = false;
+static bool mbrButtonValid[3] = {};
+static uint32_t mbrButtonStartMs[3] = {}, mbrButtonEndMs[3] = {};
 
 static void prepareMbrDistanceGate() {
     static uint8_t previousProfile[8] = {0};
@@ -428,6 +432,11 @@ static void prepareMbrDistanceGate() {
         previousLayout = ControllerConfig.hwVer;
     }
     mbrDistanceEnabledForFrame = enabled;
+    for (uint8_t m = 0; m < 3; ++m) {
+        mbrDistanceSamples[m].quality.flags &= ~MBR_TRACE_READ_THIS_FRAME;
+        mbrButtonValid[m] = false;
+        mbrButtonStartMs[m] = mbrButtonEndMs[m] = 0;
+    }
 }
 
 static void mbrDistanceReadSample(uint8_t m, CY8CMBR3116* chip) {
@@ -436,15 +445,40 @@ static void mbrDistanceReadSample(uint8_t m, CY8CMBR3116* chip) {
     if (!sample.attempted || now - sample.readStartedMs >= MBR_DISTANCE_POLL_MS) {
         sample.readStartedMs = now;
         sample.attempted = true;
-        sample.valid = chip->readDifferenceCounts(sample.counts);
+        CY8CMBR3116::DifferenceReadInfo info{};
+        sample.valid = chip->readDifferenceCounts(sample.counts, &info);
+        MbrTraceChip& quality = sample.quality;
+        ++quality.readCalls;
+        quality.ioFailures += info.ioFailures;
+        quality.syncMismatches += info.syncMismatches;
+        quality.attemptStartMs = now;
+        quality.attemptEndMs = to_ms_since_boot(get_absolute_time());
+        quality.flags |= MBR_TRACE_ATTEMPTED | MBR_TRACE_READ_THIS_FRAME;
+        quality.flags &= ~MBR_TRACE_VALID;
         if (!sample.valid) ++g_mbrDistanceReadFailures;
         if (sample.valid) {
+            quality.flags |= MBR_TRACE_VALID | MBR_TRACE_HAS_GOOD | MBR_TRACE_COHERENT;
+            quality.goodStartMs = quality.attemptStartMs;
+            quality.goodEndMs = quality.attemptEndMs;
+            quality.sync = info.sync;
+            quality.rangeMask = 0;
+            for (uint8_t e = 0; e < 16; ++e) {
+                if (sample.counts[e] <= 255) quality.rangeMask |= 1u << e;
+            }
             for (uint8_t e = 0; e < 16; e++) {
                 int16_t lane = laneTable[m][e];
                 if (lane >= 0) pressureSnap[lane] = sample.counts[e] > 255 ? 255 : sample.counts[e];
             }
         }
     }
+}
+
+static uint16_t readMbrButtons(uint8_t m, CY8CMBR3116* chip) {
+    uint16_t value = 0;
+    mbrButtonStartMs[m] = to_ms_since_boot(get_absolute_time());
+    mbrButtonValid[m] = chip->get_BUTTON_STAT((uint8_t*)&value) == 0;
+    mbrButtonEndMs[m] = to_ms_since_boot(get_absolute_time());
+    return mbrButtonValid[m] ? value : 0;
 }
 
 // All chip reads finish before masks are formed at one common host time. A
@@ -542,8 +576,8 @@ bool touchData6k[6];
 void updateTouch_v2() {
     // round50: full optimization pipeline migrated from updateTouch_v1/MPR121
     uint16_t t0 = 0, t1 = 0;
-    if (MBR3116D.get_BUTTON_STAT((uint8_t*)&t0) != 0) t0 = 0;  // round50: I2C error -> no touch
-    if (MBR3116E.get_BUTTON_STAT((uint8_t*)&t1) != 0) t1 = 0;
+    t0 = readMbrButtons(0, &MBR3116D);
+    t1 = readMbrButtons(1, &MBR3116E);
 
     hwTouch[0] = t0; hwTouch[1] = t1; hwTouch[2] = 0;  // round50: pre-verification snapshot
 
@@ -875,9 +909,9 @@ void updateTouch_v1() {
 
     uint16_t t0 = 0, t1 = 0, t2 = 0;  // round50: init to 0 for I2C error safety
     if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
-        if (MBR3116A.get_BUTTON_STAT((uint8_t*)&t0) != 0) t0 = 0;  // round50: I2C error -> no touch
-        if (MBR3116B.get_BUTTON_STAT((uint8_t*)&t1) != 0) t1 = 0;
-        if (MBR3116C.get_BUTTON_STAT((uint8_t*)&t2) != 0) t2 = 0;
+        t0 = readMbrButtons(0, &MBR3116A);
+        t1 = readMbrButtons(1, &MBR3116B);
+        t2 = readMbrButtons(2, &MBR3116C);
     } else {
         t0 = mpr0.touched();
         t1 = mpr1.touched();
@@ -1530,7 +1564,38 @@ void updateAir() {
     }
 }
 
+static MbrTouchTrace buildMbrTouchTrace() {
+    MbrTouchTrace trace{};
+    trace.tag = CMD_MBR_TOUCH_TRACE;
+    trace.version = MBR_TRACE_VERSION;
+    trace.frameId = (touchStateGen + 2u) / 2u;
+    trace.publishedMs = to_ms_since_boot(get_absolute_time());
+    std::memcpy(trace.slider, touchData32, sizeof(touchData32));
+    std::memcpy(trace.hardware, hwTouch, sizeof(hwTouch));
+    std::memcpy(trace.verified, rawTouch, sizeof(rawTouch));
+    bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) ||
+                  ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4;
+    if (useMbr) {
+        trace.chipCount = (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4) ? 2 : 3;
+        if (mbrDistanceEnabledForFrame) trace.flags |= MBR_TRACE_PROFILE;
+        for (uint8_t m = 0; m < trace.chipCount; ++m) {
+            if (mbrDistanceEnabledForFrame) {
+                trace.chips[m] = mbrDistanceSamples[m].quality;
+                for (uint8_t e = 0; e < 16; ++e) {
+                    int16_t lane = laneTable[m][e];
+                    if (lane >= 0) trace.counts[lane] = mbrDistanceSamples[m].counts[e];
+                }
+            }
+            trace.chips[m].buttonStartMs = mbrButtonStartMs[m];
+            trace.chips[m].buttonEndMs = mbrButtonEndMs[m];
+            if (mbrButtonValid[m]) trace.chips[m].flags |= MBR_TRACE_BUTTON_VALID;
+        }
+    }
+    return trace;
+}
+
 static void publishTouchState() {
+    const MbrTouchTrace trace = buildMbrTouchTrace();
     ++touchStateGen;
     __dmb();
     std::memcpy(publishedTouchState.keys, touchData, sizeof(touchData));
@@ -1538,6 +1603,7 @@ static void publishTouchState() {
     std::memcpy(publishedTouchState.pressure, pressureSnap, sizeof(pressureSnap));
     std::memcpy(publishedTouchState.hardware, hwTouch, sizeof(hwTouch));
     std::memcpy(publishedTouchState.verified, rawTouch, sizeof(rawTouch));
+    std::memcpy(&publishedMbrTrace, &trace, sizeof(trace));
     publishedTouchState.air = 0;
     for (uint8_t i = 0; i < 6; ++i) {
         if (airKeys[i]) publishedTouchState.air |= 1u << i;

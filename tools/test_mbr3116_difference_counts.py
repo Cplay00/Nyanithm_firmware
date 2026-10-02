@@ -187,7 +187,35 @@ int main() {
     assert(chip.get_BUTTON_STAT(bits.data() + 1) == 0);
     assert(reads == 2 && bits[0] == 0xBE && bits[1] == 0x81 && bits[2] == 0x04 && bits[3] == 0xEF);
     std::puts("PASS native BUTTON_STAT uses bounded wake retry");
-    std::puts("14/14 production driver tests passed");
+    CY8CMBR3116::DifferenceReadInfo info{};
+    info.ioFailures = 9; info.syncMismatches = 9; info.sync = 9;
+    prepare({frame(first, 3, 3)});
+    assert(chip.readDifferenceCounts(output.data() + 1, &info));
+    assert(info.ioFailures == 0 && info.syncMismatches == 0 && info.sync == 3);
+    std::puts("PASS read metadata resets and reports the accepted SYNC value");
+
+    prepare({frame(first, 15, 0), frame(second, 0, 0)});
+    assert(chip.readDifferenceCounts(output.data() + 1, &info));
+    assert(info.ioFailures == 0 && info.syncMismatches == 1 && info.sync == 0);
+    std::puts("PASS one torn burst followed by valid metadata");
+
+    output = unchanged;
+    prepare({frame(first, 1, 2), frame(second, 2, 3)});
+    assert(!chip.readDifferenceCounts(output.data() + 1, &info));
+    assert(info.ioFailures == 0 && info.syncMismatches == 2 && output == unchanged);
+    std::puts("PASS repeated SYNC failure distinguished from I2C failure");
+
+    prepare({frame(first, 3, 3, PICO_ERROR_GENERIC), frame(first, 3, 3, PICO_ERROR_GENERIC),
+             frame(first, 3, 3, PICO_ERROR_GENERIC)});
+    assert(!chip.readDifferenceCounts(output.data() + 1, &info));
+    assert(info.ioFailures == 1 && info.syncMismatches == 0 && reads == 3);
+    std::puts("PASS final I2C API failure counted once after unchanged native retries");
+
+    prepare({frame(first, 3, 3, PICO_ERROR_GENERIC), frame(second, 4, 4)});
+    assert(chip.readDifferenceCounts(output.data() + 1, &info));
+    assert(info.ioFailures == 0 && info.syncMismatches == 0 && info.sync == 4);
+    std::puts("PASS recovered wake retry is a valid logical read");
+    std::puts("19/19 production driver tests passed");
 }
 """
 

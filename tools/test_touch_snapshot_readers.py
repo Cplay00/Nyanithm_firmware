@@ -83,6 +83,18 @@ bool airKeys[6]{};
 uint16_t hwTouch[3]{};
 uint16_t rawTouch[3]{};
 TouchInputSnapshot publishedTouchState{};
+MbrTouchTrace publishedMbrTrace{};
+MbrTouchTrace buildMbrTouchTrace() {
+    MbrTouchTrace trace{};
+    trace.tag = CMD_MBR_TOUCH_TRACE;
+    trace.version = MBR_TRACE_VERSION;
+    trace.frameId = 1234;
+    for (unsigned i = 0; i < 32; ++i) trace.counts[i] = 0x1234 + i;
+    std::memcpy(trace.slider, touchData32, 32);
+    std::memcpy(trace.hardware, hwTouch, 6);
+    std::memcpy(trace.verified, rawTouch, 6);
+    return trace;
+}
 uint8_t rawReportLevel = 0;
 bool gameRawEnabled = false;
 volatile uint32_t g_mbrDistanceReadFailures = 0;
@@ -123,6 +135,9 @@ std::vector<uint8_t> cdcBytes;
 std::vector<uint8_t> hidBytes;
 unsigned int hidReports = 0;
 uint32_t cdcWriteLimit = 0xFFFFFFFFu;
+uint32_t cdcAvailable = 256;
+#define CFG_TUD_CDC_TX_BUFSIZE 256
+uint32_t tud_cdc_write_available() { return cdcAvailable; }
 std::function<void()> onCdcWrite;
 uint32_t tud_cdc_write(const void* data, uint32_t length) {
     if (onCdcWrite) onCdcWrite();
@@ -203,6 +218,7 @@ void beginCase() {
     g_loopMinUs = g_loopMaxUs = g_loopSumUs = g_loopCount = 0;
     std::memset(g_verifyFail, 0, sizeof(g_verifyFail));
     cdcWriteLimit = 0xFFFFFFFFu;
+    cdcAvailable = 256;
     onCdcWrite = {};
     paintShared(1);
     publishTouchState();
@@ -479,6 +495,45 @@ int main() {
     assertInput();
     pass("Production publisher brackets every field with two barriers then exposes new frame");
 
+    beginCase();
+    paintShared(9);
+    readMbrTrace();
+    assert(cdcBytes.size() == 240 && cdcBytes[0] == CMD_MBR_TOUCH_TRACE && cdcBytes[1] == 1);
+    assert(cdcBytes[12] == 0x34 && cdcBytes[13] == 0x12);
+    assert(std::memcmp(cdcBytes.data() + 76, publishedTouchState.slider, 32) == 0);
+    assert(g_tele.cdcTxBytes == 240);
+    pass("C8 reads the completed full-width frame and native LE counts");
+
+    beginCase();
+    touchStateGen.value |= 1u;
+    readMbrTrace();
+    assert(cdcBytes.size() == 240 && cdcBytes[3] == MBR_TRACE_COPY_FAILED);
+    assert(touchStateGen.reads == 3 && clockCalls < 10);
+    for (unsigned i = 4; i < 240; ++i) assert(cdcBytes[i] == 0);
+    pass("C8 odd writer produces explicit invalid frame in three bounded attempts");
+
+    beginCase();
+    touchStateGen.onRead = [](unsigned int read) {
+        if (read == 2) { paintShared(9); publishTouchState(); }
+    };
+    readMbrTrace();
+    assert(cdcBytes.size() == 240 && cdcBytes[3] == 0);
+    assert(std::memcmp(cdcBytes.data() + 76, publishedTouchState.slider, 32) == 0);
+    pass("C8 retries a concurrent publication without mixing fields");
+
+    beginCase();
+    cdcAvailable = 239;
+    readMbrTrace();
+    assert(cdcBytes.size() == 1 && cdcBytes[0] == MBR_TRACE_BUSY);
+    assert(g_tele.cdcTxBytes == 1 && clockCalls < 10);
+    pass("C8 insufficient TX space sends only BUSY without waiting");
+
+    beginCase();
+    cdcAvailable = 0;
+    readMbrTrace();
+    assert(cdcBytes.empty() && g_tele.cdcTxBytes == 0 && clockCalls < 10);
+    pass("C8 full TX FIFO returns without blocking HID");
+
     std::cout << passed << '/' << passed << " production-reader scenarios passed\n";
 }
 """
@@ -519,6 +574,7 @@ def main():
         "void hid_task_chuni_input() {" + extract_body(source, "void hid_task_chuni_input()") + "}\n",
         "void readGetInput() {" + extract_body(source, "if (cmd == CMD_GET_INPUT)") + "}\n",
         "void readDebugChain() {" + extract_body(source, "if (cmd == CMD_DEBUG_CHAIN)") + "}\n",
+        "void readMbrTrace() {" + extract_body(source, "if (cmd == CMD_MBR_TOUCH_TRACE)") + "}\n",
         "void readTelemetry() {" + extract_body(source, "if (cmd == CMD_DEBUG_TELEMETRY)") + "}\n",
         CASES,
     ]

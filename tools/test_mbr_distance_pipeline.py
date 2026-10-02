@@ -170,7 +170,8 @@ public:
         return count;
     }
     uint8_t requestDataFromAddress(uint8_t address, uint8_t count, uint8_t* result);
-    bool readDifferenceCounts(uint16_t result[16]);
+    struct DifferenceReadInfo { uint8_t ioFailures = 0, syncMismatches = 0, sync = 0; };
+    bool readDifferenceCounts(uint16_t result[16], DifferenceReadInfo* info = nullptr);
 };
 class MPR121 {
 public:
@@ -246,6 +247,31 @@ static void frame(uint32_t elapsed = 5) {
     fakeNow += elapsed;
     prepareMbrDistanceGate();
     if (isV2()) updateTouch_v2(); else updateTouch_v1();
+    MbrTouchTrace trace = buildMbrTouchTrace();
+    CHECK(trace.tag == CMD_MBR_TOUCH_TRACE && trace.version == MBR_TRACE_VERSION);
+    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116) && !isV2()) {
+        CHECK(trace.chipCount == 0 && trace.flags == 0);
+        return;
+    }
+    CHECK(trace.chipCount == chipCount());
+    CHECK((trace.flags & MBR_TRACE_PROFILE) == (mbrDistanceEnabledForFrame ? MBR_TRACE_PROFILE : 0));
+    for (unsigned m = 0; m < chipCount(); ++m) {
+        CHECK(trace.hardware[m] == hwTouch[m] && trace.verified[m] == rawTouch[m]);
+        CHECK((trace.chips[m].flags & MBR_TRACE_BUTTON_VALID) == (chip(m).statusFails ? 0 : MBR_TRACE_BUTTON_VALID));
+        if (mbrDistanceEnabledForFrame) {
+            const MbrDistanceSample& sample = mbrDistanceSamples[m];
+            CHECK(trace.chips[m].goodStartMs == sample.quality.goodStartMs);
+            CHECK((trace.chips[m].flags & MBR_TRACE_VALID) == (sample.valid ? MBR_TRACE_VALID : 0));
+            for (unsigned e = 0; e < 16; ++e) {
+                int lane = laneTable[m][e];
+                if (lane >= 0) CHECK(trace.counts[lane] == sample.counts[e]);
+            }
+        } else {
+            CHECK(!(trace.chips[m].flags & MBR_TRACE_HAS_GOOD));
+            CHECK(trace.chips[m].readCalls == 0);
+        }
+    }
+    for (unsigned lane = 0; lane < 32; ++lane) CHECK(trace.slider[lane] == touchData32[lane]);
 }
 static void output(unsigned lane, bool active) { CHECK((touchData32[lane] != 0) == active); }
 static unsigned coherentReads() {
@@ -404,20 +430,28 @@ static void runScenario(unsigned scenario, bool v2) {
         break;
     case 12: {  // Exercise the actual driver SYNC check and its bounded retry.
         held(); CY8CMBR3116& device = chip(laneChip(0));
+        const uint32_t goodTime = mbrDistanceSamples[laneChip(0)].quality.goodStartMs;
         unsigned previousReads = device.coherentReads;
         device.tornReadsRemaining = 2;
         frame(); output(0, false); CHECK(device.coherentReads == previousReads + 2);
         CHECK(g_mbrDistanceReadFailures == 1);
+        const MbrTraceChip& failed = mbrDistanceSamples[laneChip(0)].quality;
+        CHECK(failed.goodStartMs == goodTime && failed.syncMismatches == 2 && failed.ioFailures == 0);
+        CHECK(!(failed.flags & MBR_TRACE_VALID) && (failed.flags & MBR_TRACE_HAS_GOOD));
         previousReads = device.coherentReads; device.tornReadsRemaining = 1;
         frame(); output(0, true); CHECK(device.coherentReads == previousReads + 2);
         CHECK(g_mbrDistanceReadFailures == 1);
         CHECK(device.tornReadsRemaining == 0);
+        CHECK(mbrDistanceSamples[laneChip(0)].quality.syncMismatches == 3);
+        CHECK(mbrDistanceSamples[laneChip(0)].quality.flags & MBR_TRACE_VALID);
         CHECK(!device.readDifferenceCounts(nullptr));
         break;
     }
     case 13:  // A non-button-scale count above 255 is rejected, although display clamps.
         held(); setLane(0, 256); frame(); output(0, false);
         CHECK(pressureSnap[0] == 255);
+        CHECK(buildMbrTouchTrace().counts[0] == 256);
+        CHECK(!(mbrDistanceSamples[laneChip(0)].quality.rangeMask & (1u << laneElectrode(0))));
         reConfirm();
         break;
     case 14:  // BUTTON_STAT transport failure is native OFF despite a valid count sample.
@@ -514,9 +548,11 @@ def main() -> int:
     parts.extend((source_path, name, extract_function(source, signature)) for name, signature in [
         ("prepareMbrDistanceGate", "static void prepareMbrDistanceGate()"),
         ("mbrDistanceReadSample", "static void mbrDistanceReadSample("),
+        ("readMbrButtons", "static uint16_t readMbrButtons("),
         ("mbrDistanceAllowedMask", "static uint16_t mbrDistanceAllowedMask("),
         ("updateTouch_v2", "void updateTouch_v2()"),
         ("updateTouch_v1", "void updateTouch_v1()"),
+        ("buildMbrTouchTrace", "static MbrTouchTrace buildMbrTouchTrace()"),
     ])
     chunks = ['#include <touch_snapshot.h>', definitions, PRELUDE]
     manifest = {"kind": "production-source host integration; fake devices, not real hardware", "fragments": []}

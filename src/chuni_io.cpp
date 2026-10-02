@@ -6,6 +6,7 @@
  */
 
 #include <app_link.h>
+#include <cstring>
 #include <button.h>
 
 #include <boot_mode.h>
@@ -540,6 +541,32 @@ void cdc_respond() {
         tud_cdc_write(td, 32);
         tud_cdc_write_flush();
         g_tele.cdcTxBytes += 46;
+    }
+    if (cmd == CMD_MBR_TOUCH_TRACE) {
+        static_assert(CFG_TUD_CDC_TX_BUFSIZE >= sizeof(MbrTouchTrace), "trace needs full TX capacity");
+        MbrTouchTrace trace{};
+        bool coherent = false;
+        for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+            uint32_t generation = touchStateGen;
+            if (generation & 1u) continue;
+            __dmb();
+            std::memcpy(&trace, &publishedMbrTrace, sizeof(trace));
+            __dmb();
+            if (generation == touchStateGen) { coherent = true; break; }
+        }
+        if (!coherent) {
+            trace = MbrTouchTrace{};
+            trace.tag = CMD_MBR_TOUCH_TRACE;
+            trace.version = MBR_TRACE_VERSION;
+            trace.flags = MBR_TRACE_COPY_FAILED;
+        }
+        if (tud_cdc_write_available() >= sizeof(trace)) {
+            g_tele.cdcTxBytes += tud_cdc_write(&trace, sizeof(trace));
+        } else {
+            const uint8_t busy = MBR_TRACE_BUSY;
+            if (tud_cdc_write_available()) g_tele.cdcTxBytes += tud_cdc_write(&busy, 1);
+        }
+        tud_cdc_write_flush();
     }
     if (cmd == CMD_DEBUG_TELEMETRY) {
         // round46: game-session telemetry report.

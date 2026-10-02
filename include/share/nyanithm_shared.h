@@ -18,8 +18,53 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.6-beta4"
-#define NYANITHM_BUILD_ID "round89g"
+#define NYANITHM_FW_VERSION "1.6.6-beta5"
+#define NYANITHM_BUILD_ID "round89x"
+
+const uint8_t MBR_TRACE_VERSION = 1;
+const uint8_t MBR_TRACE_BUSY = 0;
+const uint8_t MBR_TRACE_PROFILE = 0x01;
+const uint8_t MBR_TRACE_COPY_FAILED = 0x80;
+const uint8_t MBR_TRACE_ATTEMPTED = 0x01;
+const uint8_t MBR_TRACE_VALID = 0x02;
+const uint8_t MBR_TRACE_HAS_GOOD = 0x04;
+const uint8_t MBR_TRACE_COHERENT = 0x08;
+const uint8_t MBR_TRACE_BUTTON_VALID = 0x10;
+const uint8_t MBR_TRACE_READ_THIS_FRAME = 0x20;
+
+// RP2040 LE wire layout; times/IDs describe host reads, not chip scans.
+// VALID: last attempt; COHERENT: retained counts. Counters reset with profile/layout.
+struct MbrTraceChip {
+    uint32_t readCalls;
+    uint32_t ioFailures;
+    uint32_t syncMismatches;
+    uint32_t attemptStartMs;
+    uint32_t attemptEndMs;
+    uint32_t goodStartMs;
+    uint32_t goodEndMs;
+    uint32_t buttonStartMs;
+    uint32_t buttonEndMs;
+    uint16_t rangeMask;
+    uint8_t flags;
+    uint8_t sync;
+};
+struct MbrTouchTrace {
+    uint8_t tag;
+    uint8_t version;
+    uint8_t chipCount;
+    uint8_t flags;
+    uint32_t frameId;
+    uint32_t publishedMs;
+    uint16_t counts[32];
+    uint8_t slider[32];
+    uint16_t hardware[3];
+    uint16_t verified[3];
+    MbrTraceChip chips[3];
+};
+static_assert(sizeof(MbrTraceChip) == 40, "trace chip layout");
+static_assert(offsetof(MbrTouchTrace, counts) == 12, "trace counts offset");
+static_assert(offsetof(MbrTouchTrace, chips) == 120, "trace quality offset");
+static_assert(sizeof(MbrTouchTrace) == 240, "trace wire length");
 
 
 const uint8_t CFG0_BIT_FORCE16LEDS = 0b00000001;
@@ -170,6 +215,7 @@ typedef enum {
     // 用途: 指定电极的信号观察与研究；按钮 DIFF 为0..255，RAW/BASELINE
     // 单位不同，不能把16位容器或未标定信号换算为毫米距离。
     CMD_MBR3116_DEBUG = 0xC7,
+    CMD_MBR_TOUCH_TRACE = 0xC8, // round89x: 240B frame, BUSY=0, or timeout if TX full.
 } NyanithmCmd;
 
 #endif

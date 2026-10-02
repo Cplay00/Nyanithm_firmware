@@ -14,6 +14,7 @@
 #include <mpr121.h>
 #include <pca954x.h>
 #include <touch_snapshot.h>
+#include <nyanithm_shared.h>
 #include <vl53l0x.h>
 
 extern VL53L0X tof0;
@@ -57,6 +58,7 @@ extern uint8_t touchData32[32];
 
 // Core0 publishes a completed scan; the seqlock covers only this short copy.
 extern TouchInputSnapshot publishedTouchState;
+extern MbrTouchTrace publishedMbrTrace;
 extern volatile uint32_t touchStateGen;
 
 // round46: diagnostics shared from Core0 to Core1 (telemetry command 0xC1)

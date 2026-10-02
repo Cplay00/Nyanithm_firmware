@@ -384,7 +384,12 @@ public:
     // Reads one coherent 0xB9..0xDB snapshot through the existing STOP-read
     // transport. False leaves all 16 output values unchanged. Sync equality
     // validates the snapshot, but does not imply a new sensor refresh.
-    bool readDifferenceCounts(uint16_t resultBuffer[16]);
+    struct DifferenceReadInfo {
+        uint8_t ioFailures = 0;
+        uint8_t syncMismatches = 0;
+        uint8_t sync = 0;
+    };
+    bool readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info = nullptr);
 
     uint8_t get_GPO_DATA(uint8_t* resultBuffer);
 

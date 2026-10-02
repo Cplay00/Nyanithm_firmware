@@ -533,7 +533,10 @@ uint8_t CY8CMBR3116::get_DIFFERENCE_COUNT_SENSOR(uint16_t* resultBuffer) {
     return error;
 }
 
-bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16]) {
+bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info) {
+    DifferenceReadInfo local{};
+    if (!info) info = &local;
+    *info = DifferenceReadInfo{};
     if (resultBuffer == nullptr) return false;
 
     // Infineon CY8CMBR3xxx_ReadDiffCounts: SYNC0, 16 little-endian
@@ -543,9 +546,13 @@ bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16]) {
     uint8_t snapshot[SNAPSHOT_SIZE];
     for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (requestDataFromAddress(SYNC_COUNTER0_ADDRESS, SNAPSHOT_SIZE, snapshot) != 0) {
+            ++info->ioFailures;
             return false;
         }
-        if (snapshot[0] != snapshot[SNAPSHOT_SIZE - 1]) continue;
+        if (snapshot[0] != snapshot[SNAPSHOT_SIZE - 1]) {
+            ++info->syncMismatches;
+            continue;
+        }
 
         // Publish only after the whole transfer and both sync bytes validate.
         // Disabled sensors have undefined values; callers filter their mapping.
@@ -553,6 +560,7 @@ bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16]) {
             resultBuffer[sensor] = (uint16_t)snapshot[1 + sensor * 2]
                 | ((uint16_t)snapshot[2 + sensor * 2] << 8);
         }
+        info->sync = snapshot[0];
         return true;
     }
     return false;
