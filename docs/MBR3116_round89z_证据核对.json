@@ -1,8 +1,8 @@
 {
   "archive": "MBR3116_round89z_空间对照证据包.zip",
-  "bytes": 1645974,
-  "sha256": "279c49840c798794a8d6433cf97f70a5d601b9e913f98ea4235f1d42d1b0b34f",
-  "files": 84,
+  "bytes": 1646932,
+  "sha256": "a854d55dfcab467a80e910822ef8ed51766b5258b978496912d0e74672237a98",
+  "files": 85,
   "zip_integrity": true,
   "all_file_sha256_verified": true,
   "production_base": "d145468 / BID round89y",
@@ -10,5 +10,9 @@
   "nvram_changes": false,
   "controller_changes": false,
   "gesture_groups": 5,
-  "palm_contact_repeat2_excluded": true
+  "palm_contact_repeat2_excluded": true,
+  "gameplay_feedback_received": true,
+  "hover_still_present": true,
+  "other_performance_issues_reported": false,
+  "gameplay_basis": "subjective gameplay feedback, not a new latency measurement"
 }
