@@ -389,7 +389,8 @@ public:
         uint8_t syncMismatches = 0;
         uint8_t sync = 0;
     };
-    bool readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info = nullptr);
+    bool readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info = nullptr,
+                              bool singleAttempt = false);
 
     uint8_t get_GPO_DATA(uint8_t* resultBuffer);
 

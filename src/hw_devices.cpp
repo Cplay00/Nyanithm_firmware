@@ -399,6 +399,7 @@ static const uint32_t MBR_DISTANCE_POLL_MS = 5;
 static const uint32_t MBR_DISTANCE_MAX_READ_AGE_MS = 15;
 volatile uint32_t g_mbrDistanceReadFailures = 0;
 struct MbrDistanceSample {
+    bool retryNeeded = false;
     uint16_t counts[16] = {0};
     uint32_t readStartedMs = 0;
     bool attempted = false;
@@ -439,38 +440,55 @@ static void prepareMbrDistanceGate() {
     }
 }
 
+static bool mbrDistanceReadAttempt(uint8_t m, CY8CMBR3116* chip) {
+    MbrDistanceSample& sample = mbrDistanceSamples[m];
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    CY8CMBR3116::DifferenceReadInfo info{};
+    sample.valid = chip->readDifferenceCounts(sample.counts, &info, true);
+    MbrTraceChip& quality = sample.quality;
+    quality.ioFailures += info.ioFailures;
+    quality.syncMismatches += info.syncMismatches;
+    quality.attemptEndMs = to_ms_since_boot(get_absolute_time());
+    quality.flags |= MBR_TRACE_ATTEMPTED | MBR_TRACE_READ_THIS_FRAME;
+    quality.flags &= ~MBR_TRACE_VALID;
+    if (sample.valid) {
+        quality.flags |= MBR_TRACE_VALID | MBR_TRACE_HAS_GOOD | MBR_TRACE_COHERENT;
+        quality.goodStartMs = now;
+        quality.goodEndMs = quality.attemptEndMs;
+        quality.sync = info.sync;
+        quality.rangeMask = 0;
+        for (uint8_t e = 0; e < 16; ++e) {
+            if (sample.counts[e] <= 255) quality.rangeMask |= 1u << e;
+        }
+        for (uint8_t e = 0; e < 16; e++) {
+            int16_t lane = laneTable[m][e];
+            if (lane >= 0) pressureSnap[lane] = sample.counts[e] > 255 ? 255 : sample.counts[e];
+        }
+    }
+    return !sample.valid && info.ioFailures == 0 && info.syncMismatches == 1;
+}
+
 static void mbrDistanceReadSample(uint8_t m, CY8CMBR3116* chip) {
     MbrDistanceSample& sample = mbrDistanceSamples[m];
+    sample.retryNeeded = false;
     uint32_t now = to_ms_since_boot(get_absolute_time());
     if (!sample.attempted || now - sample.readStartedMs >= MBR_DISTANCE_POLL_MS) {
         sample.readStartedMs = now;
         sample.attempted = true;
-        CY8CMBR3116::DifferenceReadInfo info{};
-        sample.valid = chip->readDifferenceCounts(sample.counts, &info);
-        MbrTraceChip& quality = sample.quality;
-        ++quality.readCalls;
-        quality.ioFailures += info.ioFailures;
-        quality.syncMismatches += info.syncMismatches;
-        quality.attemptStartMs = now;
-        quality.attemptEndMs = to_ms_since_boot(get_absolute_time());
-        quality.flags |= MBR_TRACE_ATTEMPTED | MBR_TRACE_READ_THIS_FRAME;
-        quality.flags &= ~MBR_TRACE_VALID;
-        if (!sample.valid) ++g_mbrDistanceReadFailures;
-        if (sample.valid) {
-            quality.flags |= MBR_TRACE_VALID | MBR_TRACE_HAS_GOOD | MBR_TRACE_COHERENT;
-            quality.goodStartMs = quality.attemptStartMs;
-            quality.goodEndMs = quality.attemptEndMs;
-            quality.sync = info.sync;
-            quality.rangeMask = 0;
-            for (uint8_t e = 0; e < 16; ++e) {
-                if (sample.counts[e] <= 255) quality.rangeMask |= 1u << e;
-            }
-            for (uint8_t e = 0; e < 16; e++) {
-                int16_t lane = laneTable[m][e];
-                if (lane >= 0) pressureSnap[lane] = sample.counts[e] > 255 ? 255 : sample.counts[e];
-            }
-        }
+        ++sample.quality.readCalls;
+        sample.quality.attemptStartMs = now;
+        sample.retryNeeded = mbrDistanceReadAttempt(m, chip);
+        if (!sample.valid && !sample.retryNeeded) ++g_mbrDistanceReadFailures;
     }
+}
+
+// Retry a torn group after the other chips, within the same two-burst budget.
+static void mbrDistanceRetrySample(uint8_t m, CY8CMBR3116* chip) {
+    MbrDistanceSample& sample = mbrDistanceSamples[m];
+    if (!sample.retryNeeded) return;
+    sample.retryNeeded = false;
+    mbrDistanceReadAttempt(m, chip);
+    if (!sample.valid) ++g_mbrDistanceReadFailures;
 }
 
 static uint16_t readMbrButtons(uint8_t m, CY8CMBR3116* chip) {
@@ -585,6 +603,8 @@ void updateTouch_v2() {
     if (mbrDistanceEnabledForFrame) {
         mbrDistanceReadSample(0, &MBR3116D);
         mbrDistanceReadSample(1, &MBR3116E);
+        mbrDistanceRetrySample(0, &MBR3116D);
+        mbrDistanceRetrySample(1, &MBR3116E);
         uint32_t sampledAt = to_ms_since_boot(get_absolute_time());
         distanceAllowed[0] = mbrDistanceAllowedMask(0, t0, sampledAt);
         distanceAllowed[1] = mbrDistanceAllowedMask(1, t1, sampledAt);
@@ -926,6 +946,9 @@ void updateTouch_v1() {
         mbrDistanceReadSample(0, &MBR3116A);
         mbrDistanceReadSample(1, &MBR3116B);
         mbrDistanceReadSample(2, &MBR3116C);
+        mbrDistanceRetrySample(0, &MBR3116A);
+        mbrDistanceRetrySample(1, &MBR3116B);
+        mbrDistanceRetrySample(2, &MBR3116C);
         uint32_t sampledAt = to_ms_since_boot(get_absolute_time());
         distanceAllowed[0] = mbrDistanceAllowedMask(0, t0, sampledAt);
         distanceAllowed[1] = mbrDistanceAllowedMask(1, t1, sampledAt);

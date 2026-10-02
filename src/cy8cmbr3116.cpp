@@ -533,7 +533,8 @@ uint8_t CY8CMBR3116::get_DIFFERENCE_COUNT_SENSOR(uint16_t* resultBuffer) {
     return error;
 }
 
-bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info) {
+bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info,
+                                     bool singleAttempt) {
     DifferenceReadInfo local{};
     if (!info) info = &local;
     *info = DifferenceReadInfo{};
@@ -542,9 +543,9 @@ bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16], DifferenceRead
     // Infineon CY8CMBR3xxx_ReadDiffCounts: SYNC0, 16 little-endian
     // differences, GPO_DATA, SYNC1. Bound retries to limit scan-loop latency.
     constexpr uint8_t SNAPSHOT_SIZE = SYNC_COUNTER1_ADDRESS - SYNC_COUNTER0_ADDRESS + 1;
-    constexpr uint8_t MAX_ATTEMPTS = 2;
+    const uint8_t maxAttempts = singleAttempt ? 1 : 2;
     uint8_t snapshot[SNAPSHOT_SIZE];
-    for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    for (uint8_t attempt = 0; attempt < maxAttempts; attempt++) {
         if (requestDataFromAddress(SYNC_COUNTER0_ADDRESS, SNAPSHOT_SIZE, snapshot) != 0) {
             ++info->ioFailures;
             return false;

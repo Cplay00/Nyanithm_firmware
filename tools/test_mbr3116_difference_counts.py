@@ -116,6 +116,18 @@ int main() {
     assert(reads == 2 && output == unchanged);
     std::puts("PASS persistent torn bursts bounded to two attempts, no publication");
 
+    prepare({frame(first, 1, 2)});
+    CY8CMBR3116::DifferenceReadInfo one{};
+    assert(!chip.readDifferenceCounts(output.data() + 1, &one, true));
+    assert(reads == 1 && output == unchanged && one.syncMismatches == 1);
+    std::puts("PASS single-attempt mode stops on SYNC mismatch without publication");
+
+    prepare({frame(first, 1, 1, PICO_ERROR_GENERIC), frame(second, 2, 2)});
+    assert(chip.readDifferenceCounts(output.data() + 1, &one, true));
+    assert(reads == 2 && one.ioFailures == 0 && one.syncMismatches == 0);
+    expectValues(output, second);
+    std::puts("PASS single-attempt mode retains native wake NACK retry");
+
     output = unchanged;
     prepare({frame(first, 3, 3, 12)});
     assert(!chip.readDifferenceCounts(output.data() + 1));
@@ -215,7 +227,7 @@ int main() {
     assert(chip.readDifferenceCounts(output.data() + 1, &info));
     assert(info.ioFailures == 0 && info.syncMismatches == 0 && info.sync == 4);
     std::puts("PASS recovered wake retry is a valid logical read");
-    std::puts("19/19 production driver tests passed");
+    std::puts("21/21 production driver tests passed");
 }
 """
 

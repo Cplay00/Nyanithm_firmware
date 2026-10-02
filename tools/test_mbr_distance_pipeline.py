@@ -126,6 +126,8 @@ static void check(bool condition, const char* expression, unsigned line) {
 }
 #define CHECK(expression) check((expression), #expression, __LINE__)
 static uint32_t fakeNow = 100;
+static uint8_t readOrder[64];
+static unsigned readOrderCount = 0;
 static uint32_t get_absolute_time() { return fakeNow; }
 static uint32_t to_ms_since_boot(uint32_t time) { return time; }
 
@@ -156,6 +158,8 @@ public:
         CHECK(address == SYNC_COUNTER0_ADDRESS);
         CHECK(count == SYNC_COUNTER1_ADDRESS - SYNC_COUNTER0_ADDRESS + 1);
         ++coherentReads;
+        CHECK(readOrderCount < 64);
+        readOrder[readOrderCount++] = DEVICE_I2C_ADDRESS;
         fakeNow += delayMs;
         if (readFails) return PICO_ERROR_TIMEOUT;
         if (genericFailuresRemaining) { --genericFailuresRemaining; return PICO_ERROR_GENERIC; }
@@ -171,7 +175,8 @@ public:
     }
     uint8_t requestDataFromAddress(uint8_t address, uint8_t count, uint8_t* result);
     struct DifferenceReadInfo { uint8_t ioFailures = 0, syncMismatches = 0, sync = 0; };
-    bool readDifferenceCounts(uint16_t result[16], DifferenceReadInfo* info = nullptr);
+    bool readDifferenceCounts(uint16_t result[16], DifferenceReadInfo* info = nullptr,
+                              bool singleAttempt = false);
 };
 class MPR121 {
 public:
@@ -244,6 +249,7 @@ static void initialize(bool v2, bool enabled = true) {
     buildLaneTable();
 }
 static void frame(uint32_t elapsed = 5) {
+    readOrderCount = 0;
     fakeNow += elapsed;
     prepareMbrDistanceGate();
     if (isV2()) updateTouch_v2(); else updateTouch_v1();
@@ -467,9 +473,63 @@ static void runScenario(unsigned scenario, bool v2) {
         ControllerConfig.mbrTouchGate = 130; profile();
         reConfirm();
         break;
+    case 16: {  // Each chip gets its first burst before any deferred SYNC retry.
+        setLane(0, 250);
+        for (unsigned m = 0; m < chipCount(); ++m) {
+            chip(m).tornReadsRemaining = 1;
+            chip(m).delayMs = 1;
+        }
+        frame(); output(0, true);
+        CHECK(readOrderCount == 2 * chipCount());
+        for (unsigned m = 0; m < chipCount(); ++m) {
+            CHECK(readOrder[m] == chip(m).DEVICE_I2C_ADDRESS);
+            CHECK(readOrder[m + chipCount()] == chip(m).DEVICE_I2C_ADDRESS);
+            const MbrTraceChip& q = mbrDistanceSamples[m].quality;
+            CHECK(q.readCalls == 1 && q.syncMismatches == 1 && q.ioFailures == 0);
+            CHECK(q.goodStartMs > q.attemptStartMs && q.goodEndMs == q.attemptEndMs);
+            CHECK(q.flags & MBR_TRACE_VALID);
+            CHECK(!mbrDistanceSamples[m].retryNeeded);
+        }
+        break;
+    }
+    case 17: {  // All second bursts torn: no third burst, stale good data never permits ON.
+        held();
+        for (unsigned m = 0; m < chipCount(); ++m) chip(m).tornReadsRemaining = 2;
+        frame(); output(0, false);
+        CHECK(readOrderCount == 2 * chipCount());
+        CHECK(g_mbrDistanceReadFailures == chipCount());
+        for (unsigned m = 0; m < chipCount(); ++m) {
+            CHECK(!mbrDistanceSamples[m].valid && !mbrDistanceSamples[m].retryNeeded);
+            CHECK(mbrDistanceSamples[m].quality.syncMismatches == 2);
+        }
+        break;
+    }
+    case 18: {  // Transport failures do not enter deferred SYNC retries.
+        setLane(0, 250);
+        chip(0).readFails = true;
+        chip(1).tornReadsRemaining = 1;
+        frame();
+        CHECK(readOrderCount == chipCount() + 1);
+        CHECK(chip(0).coherentReads == 1 && chip(1).coherentReads == 2);
+        CHECK(g_mbrDistanceReadFailures == 1);
+        CHECK(mbrDistanceSamples[0].quality.ioFailures == 1);
+        CHECK(!mbrDistanceSamples[0].valid && mbrDistanceSamples[1].valid);
+        break;
+    }
+    case 19: {  // Successful late retry does not bypass the whole-poll 15ms age budget.
+        unsigned lane = v2 ? 16 : 30;
+        CHECK(laneChip(lane) == 0);
+        setLane(lane, 250);
+        chip(0).tornReadsRemaining = 1; chip(1).delayMs = 17;
+        frame(); output(lane, false);
+        CHECK(mbrDistanceSamples[0].valid);
+        CHECK(mbrDistanceSamples[0].quality.goodStartMs == fakeNow);
+        CHECK(fakeNow - mbrDistanceSamples[0].readStartedMs == 17);
+        break;
+    }
     default: CHECK(false);
     }
-    if (scenario != 3 && scenario != 12) CHECK(g_mbrDistanceReadFailures == 0);
+    if (scenario != 3 && scenario != 12 && scenario != 17 && scenario != 18) CHECK(g_mbrDistanceReadFailures == 0);
 }
 static void runMpr(bool withProfile) {
     initialize(false, withProfile); ControllerConfig.cfg0 = 0;
@@ -494,8 +554,8 @@ extern "C" void mbrPipelineTestEntry() {
             break;
         }
     }
-    if (number < 32) runScenario(number / 2, (number & 1) != 0);
-    else if (number < 34) runMpr(number == 33);
+    if (number < 40) runScenario(number / 2, (number & 1) != 0);
+    else if (number < 42) runMpr(number == 41);
     else CHECK(false);
     writeText("PASS checks="); writeNumber(checks); writeText("\n");
     ExitProcess(0);
@@ -510,6 +570,8 @@ SCENARIOS = [
     "legacy-zero-profile-and-stray-enable", "valid-disabled-profile-legacy",
     "all-32-lane-mappings-and-unmapped-bits", "actual-driver-SYNC-bounded-retry",
     "above-255-count-fails-closed", "BUTTON_STAT-failure", "disable-enable-clears-retention",
+    "deferred-retry-order-and-metadata", "all-retries-torn-no-third-burst",
+    "transport-failure-not-deferred", "late-retry-keeps-whole-poll-age-limit",
 ]
 
 
@@ -519,12 +581,12 @@ def main() -> int:
     parser.add_argument("--kernel32", type=Path, default=KERNEL32)
     parser.add_argument("--sdk", type=Path, default=Path(r"D:\pico-sdk"))
     parser.add_argument("--output", type=Path, default=WORKSPACE / "_dev_tools" / "mbr_distance_pipeline_host")
-    parser.add_argument("--case", type=int, help="Run just one numbered scenario (0..33)")
+    parser.add_argument("--case", type=int, help="Run just one numbered scenario (0..41)")
     args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("This runner currently targets the installed Windows LLVM/SDK toolchain.")
-    if args.case is not None and not 0 <= args.case < 34:
-        parser.error("--case must be 0..33")
+    if args.case is not None and not 0 <= args.case < 42:
+        parser.error("--case must be 0..41")
     for dependency in (args.clang, args.kernel32):
         if not dependency.is_file():
             parser.error(f"Missing compiler dependency: {dependency}")
@@ -547,7 +609,9 @@ def main() -> int:
     ]
     parts.extend((source_path, name, extract_function(source, signature)) for name, signature in [
         ("prepareMbrDistanceGate", "static void prepareMbrDistanceGate()"),
+        ("mbrDistanceReadAttempt", "static bool mbrDistanceReadAttempt("),
         ("mbrDistanceReadSample", "static void mbrDistanceReadSample("),
+        ("mbrDistanceRetrySample", "static void mbrDistanceRetrySample("),
         ("readMbrButtons", "static uint16_t readMbrButtons("),
         ("mbrDistanceAllowedMask", "static uint16_t mbrDistanceAllowedMask("),
         ("updateTouch_v2", "void updateTouch_v2()"),
@@ -580,10 +644,10 @@ def main() -> int:
         print(compiled.stdout + compiled.stderr, end="")
         return compiled.returncode
     results = []
-    numbers = [args.case] if args.case is not None else range(34)
+    numbers = [args.case] if args.case is not None else range(42)
     for number in numbers:
         name = (("v2" if number & 1 else "v1") + ":" + SCENARIOS[number // 2]
-                if number < 32 else "MPR:" + ("signed-enabled-profile-ignored" if number == 33 else "legacy-zero-profile"))
+                if number < 40 else "MPR:" + ("signed-enabled-profile-ignored" if number == 41 else "legacy-zero-profile"))
         result = subprocess.run([str(executable), f"--case={number}"], capture_output=True, text=True, timeout=15)
         match = re.search(r"PASS checks=(\d+)", result.stdout)
         passed = result.returncode == 0 and match is not None
