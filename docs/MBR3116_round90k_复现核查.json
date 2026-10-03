@@ -1,0 +1,68 @@
+{
+  "date_local": "2026-10-04",
+  "scope": "offline frozen data and source review; no serial/device access or firmware changes",
+  "source_commit_before_analysis": "6c6c272f13942dc31d9697a136eed9d58839674a",
+  "source_sha256": {
+    "src/mpr121.cpp": "75329076b479c2f919908ca5e0fa2f1fa2a6d651f8e331df5159d2d1893bd48c",
+    "src/hw_devices.cpp": "78a21b2dddc3db49ca52d2c8b0032fa437fb44335224f8ce0f2fcfa4f7cf8143",
+    "src/chuni_io.cpp": "eb61a82372971d8a040c5eab6554dcdfda0c4d36168b55e229d3a655a2f93d34",
+    "src/i2c_port.cpp": "29afdc5f499f57c6920739855dbaa3a8d2adb9358794a94c6587a804012671a6",
+    "src/app_link.cpp": "d02d8851fd9812fe46e9373234b5d49fc0452132860bc145a682d9d548b57e38",
+    "include/device/mpr121.h": "e99331760414b7731fae8ddf4ce1c436cd823b8888270412dd0992599ac00a7f",
+    "include/share/nyanithm_shared.h": "7d38f0294fd0c6fbcd811e80c3bf4f18438e83e3c0e4d244024e63cc9ae5fdd2",
+    "src/controller_config.cpp": "0d0dffdc14265744c5ac1b781494f2fbc1e7b6fa9abfdcbdc29bf0ffbcd29b7b"
+  },
+  "hw_devices_and_chuni_io_match_round90j_snapshot": {
+    "src/hw_devices.cpp": true,
+    "src/chuni_io.cpp": true
+  },
+  "input_sha256": {
+    "normal": "da34280e77d351ee0920614c523c4330bf976f3e212daf3a69273f13038b82d4",
+    "native": "b9228525840d1da1572df78cce5eda01642f6e607588a6f487079e7e28f26324"
+  },
+  "analysis_sha256": "17a50525dc9a40988ff0c6dd85d11893ffa233a002859044210de1dade494c50",
+  "observations": {
+    "normal": {
+      "total_rows": 5784,
+      "confirmed_rows": 5784,
+      "confirmed_jobs": 3,
+      "discarded_jobs": 0
+    },
+    "native": {
+      "total_rows": 2194,
+      "confirmed_rows": 1462,
+      "confirmed_jobs": 6,
+      "discarded_jobs": 3
+    }
+  },
+  "user_position_answer": "落点或数格起点可能有变化",
+  "independent_old_native_windows_reproduced": {
+    "jobs": 9,
+    "windows_per_job": 4,
+    "lanes_per_window": 32,
+    "includes_discarded_for_audit_only": true
+  },
+  "regression_tests": {
+    "passed": 9,
+    "local_log": "test_bad_member_hash_is_rejected (__main__.ReferenceAnalysisTests.test_bad_member_hash_is_rejected) ... ok\ntest_bad_raw_frames_and_unverified_native_bits_are_rejected (__main__.ReferenceAnalysisTests.test_bad_raw_frames_and_unverified_native_bits_are_rejected) ... ok\ntest_changed_input_packet_is_rejected (__main__.ReferenceAnalysisTests.test_changed_input_packet_is_rejected) ... ok\ntest_duplicate_member_is_rejected (__main__.ReferenceAnalysisTests.test_duplicate_member_is_rejected) ... ok\ntest_labels_and_mapping_do_not_merge_discarded_jobs (__main__.ReferenceAnalysisTests.test_labels_and_mapping_do_not_merge_discarded_jobs) ... ok\ntest_missing_manifest_map_is_rejected (__main__.ReferenceAnalysisTests.test_missing_manifest_map_is_rejected) ... ok\ntest_native_fault_is_not_treated_as_good_capacitance (__main__.ReferenceAnalysisTests.test_native_fault_is_not_treated_as_good_capacitance) ... ok\ntest_native_windows_match_earlier_frozen_analysis (__main__.ReferenceAnalysisTests.test_native_windows_match_earlier_frozen_analysis) ... ok\ntest_normal_observations_and_independent_telemetry (__main__.ReferenceAnalysisTests.test_normal_observations_and_independent_telemetry) ... ok\n\n----------------------------------------------------------------------\nRan 9 tests in 0.399s\n\nOK\n",
+    "isolated_log": "test_bad_member_hash_is_rejected (__main__.ReferenceAnalysisTests.test_bad_member_hash_is_rejected) ... ok\ntest_bad_raw_frames_and_unverified_native_bits_are_rejected (__main__.ReferenceAnalysisTests.test_bad_raw_frames_and_unverified_native_bits_are_rejected) ... ok\ntest_changed_input_packet_is_rejected (__main__.ReferenceAnalysisTests.test_changed_input_packet_is_rejected) ... ok\ntest_duplicate_member_is_rejected (__main__.ReferenceAnalysisTests.test_duplicate_member_is_rejected) ... ok\ntest_labels_and_mapping_do_not_merge_discarded_jobs (__main__.ReferenceAnalysisTests.test_labels_and_mapping_do_not_merge_discarded_jobs) ... ok\ntest_missing_manifest_map_is_rejected (__main__.ReferenceAnalysisTests.test_missing_manifest_map_is_rejected) ... ok\ntest_native_fault_is_not_treated_as_good_capacitance (__main__.ReferenceAnalysisTests.test_native_fault_is_not_treated_as_good_capacitance) ... ok\ntest_native_windows_match_earlier_frozen_analysis (__main__.ReferenceAnalysisTests.test_native_windows_match_earlier_frozen_analysis) ... ok\ntest_normal_observations_and_independent_telemetry (__main__.ReferenceAnalysisTests.test_normal_observations_and_independent_telemetry) ... ok\n\n----------------------------------------------------------------------\nRan 9 tests in 0.393s\n\nOK\n"
+  },
+  "archive": {
+    "name": "MBR3116_round90k_参考链分析证据.zip",
+    "members": 17,
+    "size": 96312,
+    "sha256": "ef7811b747fd981354e2c25ec782370ee22e8b57103e7ea2d821a874f6234efa",
+    "CRC_and_all_member_hashes_passed": true
+  },
+  "isolated_replay": {
+    "byte_equal": true,
+    "output_log": "finger_contact late 219 {'native': {'14': 219}, 'verified': {'14': 219}, 'final': {'14': 219}, 'game': {'14': 219}} all stage differences {'native_verified': 0, 'native_final': 2, 'final_game': 0} telemetry {'served_delta': 1928, 'edge_delta_including_air': 244, 'ring_capacity': 32, 'ring_cannot_cover_whole_job': True, 'rise_delta': {'14': 1}, 'fall_delta': {'14': 1, '17': 1}, 'verify_fail_counter_changed_indices': [], 'scope': 'this host B1 responses; saturated verify counters do not expose failures; not direct HID'}\nslow_contact late 219 {'native': {'14': 199}, 'verified': {'14': 199}, 'final': {'14': 199}, 'game': {'14': 199}} all stage differences {'native_verified': 0, 'native_final': 12, 'final_game': 0} telemetry {'served_delta': 1929, 'edge_delta_including_air': 107, 'ring_capacity': 32, 'ring_cannot_cover_whole_job': True, 'rise_delta': {'14': 5}, 'fall_delta': {'14': 5}, 'verify_fail_counter_changed_indices': [], 'scope': 'this host B1 responses; saturated verify counters do not expose failures; not direct HID'}\nfour_contact late 219 {'native': {}, 'verified': {}, 'final': {}, 'game': {}} all stage differences {'native_verified': 0, 'native_final': 0, 'final_game': 0} telemetry {'served_delta': 1927, 'edge_delta_including_air': 53, 'ring_capacity': 32, 'ring_cannot_cover_whole_job': True, 'rise_delta': {}, 'fall_delta': {}, 'verify_fail_counter_changed_indices': [], 'scope': 'this host B1 responses; saturated verify counters do not expose failures; not direct HID'}\nValidated 5784 normal pairs and 2194 native cycles\n",
+    "dependencies": "stdlib and the exact two frozen input zip packets; no live workspace source or serial"
+  },
+  "firmware_checks_exempt_reason": "host-only offline analysis plus documentation; no firmware, touch pipeline or protocol edits",
+  "official_sources_reviewed": [
+    "https://www.nxp.com/docs/en/data-sheet/MPR121.pdf",
+    "https://www.nxp.com/docs/en/application-note/AN3891.pdf",
+    "https://www.nxp.com/docs/en/application-note/AN3890.pdf"
+  ]
+}
