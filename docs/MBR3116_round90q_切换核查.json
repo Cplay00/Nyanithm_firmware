@@ -1,0 +1,20 @@
+{
+  "zip_members": 23,
+  "member_hashes_verified": 22,
+  "zip_crc_verified": true,
+  "controller_config_equal_bytes": 128,
+  "controller_config_sha256": "d2b2cbe5ecb3f6dc625ed1c17e0e1672ebf688a2e5d5be7db2d08209c1f05596",
+  "final_signature": "NYANFW1;1.6.6-beta10;hw_v1;BID=round90e",
+  "native_mpr_C6_sent_after_flash": false,
+  "after_native_register_snapshot_available": false,
+  "normal_idle_zero_frames": 30,
+  "serial_closed": true,
+  "baseline_source_files_git_equal": 6,
+  "source_archive_sha256": "0bec68a40905b9ff6bcdbd2908285079974057edf82c28c38e8ebdcff88005b1",
+  "successful_backup_hashes_verified": 11,
+  "first_attempt_before_device_command_failure_preserved": true,
+  "action_retest": "pending",
+  "package_sha256": "69f0af4587d08df250cc5f1109a10b5036dbd916ac976addf55939ba5d762cd5",
+  "package_bytes": 177595,
+  "independent_stdlib_package_check_passed": true
+}
