@@ -227,7 +227,39 @@ int main() {
     assert(chip.readDifferenceCounts(output.data() + 1, &info));
     assert(info.ioFailures == 0 && info.syncMismatches == 0 && info.sync == 4);
     std::puts("PASS recovered wake retry is a valid logical read");
-    std::puts("21/21 production driver tests passed");
+    output = unchanged;
+    prepare({frame(first, 7, 7)});
+    assert(chip.get_DIFFERENCE_COUNT_SENSOR(output.data() + 1) == 0);
+    assert(reads == 1);
+    expectValues(output, first);
+    std::puts("PASS legacy entry uses native coherent group and retains status convention");
+
+    output = unchanged;
+    prepare({frame(first, 7, 8)});
+    assert(chip.get_DIFFERENCE_COUNT_SENSOR(output.data() + 1) != 0);
+    assert(reads == 1 && output == unchanged);
+    std::puts("PASS legacy torn group fails without publishing or hidden group retry");
+
+    prepare({frame(first, 7, 7, 34)});
+    assert(chip.get_DIFFERENCE_COUNT_SENSOR(output.data() + 1) != 0);
+    assert(reads == 1 && output == unchanged);
+    std::puts("PASS legacy short transfer preserves caller buffer");
+
+    prepare({frame(first, 7, 7, PICO_ERROR_TIMEOUT)});
+    assert(chip.get_DIFFERENCE_COUNT_SENSOR(output.data() + 1) != 0);
+    assert(reads == 1 && output == unchanged);
+    std::puts("PASS legacy timeout never decodes a partial receive buffer");
+
+    prepare({frame(first, 7, 7, PICO_ERROR_GENERIC), frame(first, 7, 7, PICO_ERROR_GENERIC),
+             frame(first, 7, 7, PICO_ERROR_GENERIC)});
+    assert(chip.get_DIFFERENCE_COUNT_SENSOR(output.data() + 1) != 0);
+    assert(reads == 3 && output == unchanged);
+    std::puts("PASS legacy wake retries remain bounded without publishing failure data");
+
+    prepare({});
+    assert(chip.get_DIFFERENCE_COUNT_SENSOR(nullptr) != 0 && reads == 0);
+    std::puts("PASS legacy null destination returns failure without I2C");
+    std::puts("27/27 production driver tests passed");
 }
 """
 

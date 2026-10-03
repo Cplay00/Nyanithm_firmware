@@ -521,16 +521,10 @@ uint8_t CY8CMBR3116::get_SYNC_COUNTER2(uint8_t* resultBuffer) {
 
 // Differences for Each Sensor Counter
 uint8_t CY8CMBR3116::get_DIFFERENCE_COUNT_SENSOR(uint16_t* resultBuffer) {
-    uint8_t tmp[32];
-    uint8_t error = requestDataFromAddress(DIFFERENCE_COUNT_SENSOR_ADDRESS, 32, tmp);
-    // Convert the 32*uint8_t buffer to 1 16*uint16_t buffer
-    for (uint8_t i = 0; i < 16; i++) {
-        uint8_t msb = tmp[i * 2 + 1];
-        uint8_t lsb = tmp[i * 2];
-        resultBuffer[i] = msb << 8 | lsb;
-    }
-
-    return error;
+    // The legacy entry is also used by game verification with the profile off.
+    // Use the native SYNC0..SYNC1 group and publish only a complete coherent read.
+    // Callers already retry failed groups; do not add another group retry here.
+    return readDifferenceCounts(resultBuffer, nullptr, true) ? 0 : 1;
 }
 
 bool CY8CMBR3116::readDifferenceCounts(uint16_t resultBuffer[16], DifferenceReadInfo* info,
