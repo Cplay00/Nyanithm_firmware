@@ -1,0 +1,66 @@
+{
+  "members": 22,
+  "bytes": 288658,
+  "sha256": "da34280e77d351ee0920614c523c4330bf976f3e212daf3a69273f13038b82d4",
+  "zip_and_member_hashes_verified": true,
+  "isolated_stdlib_replay_byte_equal": true,
+  "completion": {
+    "scope": "integrity only; mechanism/outcome analysis deferred",
+    "jobs": [
+      {
+        "id": "1791053113380170200_finger_contact",
+        "mode": "finger_contact",
+        "user_confirmed": true,
+        "rows": 1928,
+        "valid_phase_rows": 1859,
+        "errors": 0,
+        "mock": false
+      },
+      {
+        "id": "1791053148486782300_slow_contact",
+        "mode": "slow_contact",
+        "user_confirmed": true,
+        "rows": 1929,
+        "valid_phase_rows": 1859,
+        "errors": 0,
+        "mock": false
+      },
+      {
+        "id": "1791053186076070100_four_contact",
+        "mode": "four_contact",
+        "user_confirmed": true,
+        "rows": 1927,
+        "valid_phase_rows": 1859,
+        "errors": 0,
+        "mock": false
+      }
+    ],
+    "total_pairs": 5784,
+    "valid_phase_pairs": 5577,
+    "identity_checked_each_job": true,
+    "serial_released": true,
+    "live_access_this_finalization": false,
+    "config_live_read": false,
+    "direct_HID": false,
+    "telemetry_integrity": [
+      {
+        "mode": "finger_contact",
+        "telemetry_exact_528_bytes": true,
+        "uptime_and_loop_counters_progressed": true,
+        "served_delta_equals_host_B1_rows": true
+      },
+      {
+        "mode": "slow_contact",
+        "telemetry_exact_528_bytes": true,
+        "uptime_and_loop_counters_progressed": true,
+        "served_delta_equals_host_B1_rows": true
+      },
+      {
+        "mode": "four_contact",
+        "telemetry_exact_528_bytes": true,
+        "uptime_and_loop_counters_progressed": true,
+        "served_delta_equals_host_B1_rows": true
+      }
+    ]
+  }
+}
