@@ -1765,61 +1765,10 @@ void updateInputState() {
     }
     publishTouchState();
 
-    // Software baseline auto-correction: gradually adjust baseline to match
-    // idle filtered data. Fixes baseline stuck too high (e.g., M2E0 baseline=212
-    // vs idle filt=207, diff=5 causes false touches). Runs every 2s when idle.
-    // round50: MBR3116 does NOT need this - the chip manages its own baseline
-    // internally (configurable baseline tracking rate via BUTTON_LBR/NNT/NT
-    // registers). The software verification layer (round50) compensates for any
-    // residual baseline drift by rejecting touches with insufficient diff count.
-    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116) &&
-        (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2)) {
-        // round47: idle baseline auto-correction (single software baseline writer).
-        // MPR121 hardware now freezes baseline during touch (FDLT=0xFF), so no
-        // anti-collapse / release-recovery writes are needed. This correction only
-        // nudges idle baseline down when it drifts high (prevents false touches).
-        // Uses writeBaselineRun() - direct I2C write without Stop->Run, so it never
-        // interrupts touch measurement. Per-electrode 2s cooldown avoids re-writes.
-        static uint32_t lastBaselineAdjust = 0;
-        static uint32_t blWriteMs[3][12] = {0};
-        uint32_t nowMs = to_ms_since_boot(get_absolute_time());
-        if (nowMs - lastBaselineAdjust > 500 && lastBaselineAdjust > 0) {
-            lastBaselineAdjust = nowMs;
-            MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
-            static uint8_t correctionIndex = 0;
-            // 8 electrodes per cycle, 500ms interval (2.25s rotation for all 36: 36/8*0.5s)
-            for (uint8_t i = 0; i < 8; i++) {
-                uint8_t idx = (correctionIndex + i) % 36;
-                uint8_t m = idx / 12;
-                uint8_t e = idx % 12;
-                if ((rawTouch[m] & (1 << e)) || (nowMs - lastTouchedMs[m][e] < 2000)) continue;  // not idle
-                if (nowMs - blWriteMs[m][e] < 2000) continue;  // round47: 2s cooldown per electrode
-                uint16_t filt = mprs[m]->filteredData(e);
-                uint16_t base = mprs[m]->baselineData(e);
-                int16_t diff = (int16_t)base - (int16_t)filt;
-                if (diff > 3 && filt > 0 && diff < 50) {
-                    uint8_t bl_reg = mprs[m]->readRegister8(MPR121_BASELINE_0 + e);
-                    uint8_t adj = (diff > 6) ? 2 : 1;
-                    if (bl_reg > adj) bl_reg -= adj;
-                    else bl_reg = 0;
-                    if (bl_reg == 0) continue;  // round47-review: read failure guard (baseline 0 -> 2-3s fake touch)
-                    // round47b: sanity check - bl_reg must be near filt>>2 (same electrode).
-                    // Corrupted I2C reads (observed in snapshot bursts: base=8/44/64 vs ~712)
-                    // would otherwise write a nonsense baseline. Allow +/-15 LSB tolerance.
-                    {
-                        uint16_t expected = (filt > 3) ? (uint16_t)(filt >> 2) : 0;
-                        int16_t blDiff = (int16_t)bl_reg - (int16_t)expected;
-                        if (blDiff > 15 || blDiff < -15) continue;  // corrupted read - skip write
-                    }
-                    mprs[m]->writeBaselineRun(e, bl_reg);  // round47: no Stop->Run
-                    blWriteMs[m][e] = nowMs;
-                }
-            }
-            correctionIndex = (correctionIndex + 8) % 36;
-        } else if (lastBaselineAdjust == 0) {
-            lastBaselineAdjust = nowMs;
-        }
-    }
+    // round90m: native MPR121 baseline writes require Stop Mode (datasheet
+    // section 5.1). Remove periodic Run-mode correction; do not replace it
+    // with Stop/Run cycles, which pause every electrode and may reseed CL.
+    // Startup calibration remains a separate maintenance operation.
 
     // round46: Core0 loop cycle timing (diagnostic telemetry, Core1 reads via 0xC1)
     {

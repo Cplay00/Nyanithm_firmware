@@ -18,8 +18,8 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.6-beta11"
-#define NYANITHM_BUILD_ID "round90g"
+#define NYANITHM_FW_VERSION "1.6.6-beta12"
+#define NYANITHM_BUILD_ID "round90m"
 
 const uint8_t MBR_TRACE_VERSION = 1;
 const uint8_t MBR_TRACE_BUSY = 0;

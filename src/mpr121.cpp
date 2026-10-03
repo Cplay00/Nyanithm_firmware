@@ -83,37 +83,35 @@ void MPR121::init(uint8_t touchThreshold, uint8_t releaseThreshold, bool autocon
     setThresholds(touchThreshold, releaseThreshold);
     writeRegister(MPR121_MHDR, 0x01);  // round4: revert to round1 (MHDR too large dragged baseline down during touch => stickier)
     writeRegister(MPR121_NHDR, 0x01);
-    writeRegister(MPR121_NCLR, 0x1F);  // round47b: 14->31, 恢复 round34 已验证值. NCLR=14 使 idle 噪声尖峰
-    // 14ms 即可推高 baseline, NCLF=127 下降极慢构成棘轮 -> M2 芯片静置突发触发
-    // (round47 实测 20min 5 次 RAW: M2E0 x3/M2E3/M2E4). FDLT=0xFF 冻结已保证触摸期
-    // baseline 不塌陷, "释放后回升快"需求不存在, NCLR=31 抑制噪声推高且无副作用.
+    // Preserve the accepted rising-filter setting. NCL is a sample count,
+    // not milliseconds; FDLT below slows tracking and does not freeze it.
+    writeRegister(MPR121_NCLR, 0x1F);
     writeRegister(MPR121_FDLR, 0x00);
 
     writeRegister(MPR121_MHDF, 0x01);
     // falling baseline tracking slowed: fix slow-swipe / light-press missed trigger
-    // NCLF 1->63 (need 63 consecutive samples before baseline follows touch),
-    // NHDF 2->1 (smaller noise-step), FDLF 0->4 (small-delta delay)
+    // Preserve the accepted falling-filter settings. See NXP AN3891 for
+    // sample-count and filter-delay semantics; neither is a wall-clock time.
     writeRegister(MPR121_NHDF, 0x01);
-    writeRegister(MPR121_NCLF, 0x7F);  // round45k: 63->127 slower downward. round32 lowered to 63 to fix baseline-too-high (idle false touch), but 63 too fast: during touch filt drops, baseline tracks it down -> diff shrinks -> sudden release + cannot retrigger for seconds (baseline too low). 127 needs 127ms sustained low filt before baseline drops 1, so short/medium touches dont collapse baseline. Idle baseline drift now handled by software baseline correction (round45i) instead of aggressive NCLF.
+    writeRegister(MPR121_NCLF, 0x7F);
     writeRegister(MPR121_FDLF, 0x04);
 
-    // round47: 触摸期(touched filter)baseline 冻结 —— 修复长按塌陷
-    // 此前 NHDT/NCLT/FDLT 全为 0x00,触摸期间 baseline 继续跟踪(NCLF 塌陷);
-    // AN3891/esp-idf 驱动确认 FDLT=0xFF 可在触摸期间禁用 baseline 跟踪。
-    writeRegister(MPR121_NHDT, 0x01);  // round47: 0->1, 触摸期噪声半增量阈值
-    writeRegister(MPR121_NCLT, 0x10);  // round47: 0->16, 触摸期噪声计数限制
-    writeRegister(MPR121_FDLT, 0xFF);  // round47: 0->255, 触摸期禁用 baseline 跟踪(冻结)
+    // Touched-state baseline filter: FDLT=255 slows tracking (AN3891),
+    // it does not disable tracking. Values stay unchanged in round90m.
+    writeRegister(MPR121_NHDT, 0x01);
+    writeRegister(MPR121_NCLT, 0x10);
+    writeRegister(MPR121_FDLT, 0xFF);
 
     writeRegister(MPR121_DEBOUNCE, 0);
     // CONFIG1: original 0x10 (FFI=6, CDC=16uA) - unchanged
     writeRegister(MPR121_CONFIG1, 0x10);
-    // phase2: SFI 4->2 (0x20->0x28). ESI kept at 1ms (0x29 caused delay/missed keys).
-    writeRegister(MPR121_CONFIG2, 0x28);  // CDT=0.5us, SFI=2, ESI=1ms
+    // SFI encoding 01 means 6 samples; ESI=1ms, nominal output period=6ms.
+    writeRegister(MPR121_CONFIG2, 0x28);  // CDT=0.5us, SFI=6, ESI=1ms
 
     setAutoconfig(autoconfig);
 
     // enable X electrodes = start MPR121
-    // CL Calibration Lock: B10 = 5 bits for baseline tracking
+    // CL=10: enable tracking and seed from the first electrode data's high 5 bits.
     // ELEPROX_EN  proximity: disabled
     // ELE_EN Electrode Enable:  amount of electrodes running (12)
     uint8_t ECR_SETTING = 0b10000000 + 12;
@@ -273,8 +271,10 @@ void MPR121::calibrateBaseline(bool force) {
         valid[i] = true;
     }
 
-    // Stage 5: CL-seeded baseline (method 2)
-    // 5.1 temporarily disable autoconfig BVA so Stop->Run won't override baseline
+    // Stage 5: legacy startup policy retained for a separate controlled change.
+    // NOTE: 0x30 addresses RETRY, not BVA (bits 3:2). The CL=11 resume below
+    // loads the first electrode data, so these manual writes do not establish
+    // a persistent manual seed. Do not infer the effective baseline from bl[].
     uint8_t autoconfig0_backup = readRegister8(MPR121_AUTOCONFIG0);
     writeRegister(MPR121_AUTOCONFIG0, autoconfig0_backup & ~0x30);
 
@@ -299,12 +299,8 @@ void MPR121::calibrateBaseline(bool force) {
     data[1] = 0x00;
     i2c_write(port, addr, data, 2, false);
 
-    // 5.5 Set ECR with CL=11 (load baseline from registers AND enable tracking).
-    // Single Stop->Run transition: loads written baseline values immediately
-    // and enables baseline tracking in one atomic operation.
-    // This replaces the fragile two-step approach (CL=01 then CL=10) where
-    // the second write was silently lost because the MPR121 was still
-    // processing the first Stop->Run transition. CL=11 does both in one step.
+    // 5.5 CL=11 enables tracking and seeds all 10 bits from the first
+    // electrode data (datasheet 5.11), not from the baseline registers.
     // ECR = 0xCC: CL=11, ELEPROX=00, ELE_EN=12
     data[0] = MPR121_ECR;
     data[1] = (ecr_backup & 0x0F) | 0xC0;  // CL=11, ELEPROX=00, ELE_EN preserved
@@ -461,26 +457,11 @@ void MPR121::writeRegister(uint8_t reg, uint8_t value) {
         // ecr_reg.write(ecr_backup);
         data[0] = MPR121_ECR;
         data[1] = ecr_backup;
-        // If CL=11 (load+track from calibrateBaseline), switch to CL=10 (track only).
-        // This prevents baseline reload on every subsequent Stop->Run cycle.
+        // Legacy CL=11 -> CL=10 policy retained. Both modes reload from the
+        // first electrode data on Stop/Run (all 10 bits vs the high 5 bits).
         if ((ecr_backup & 0xC0) == 0xC0) {
             data[1] = (ecr_backup & 0x0F) | 0x80;  // CL=10
         }
         i2c_write(port, addr, data, 2, false);
     }
-}
-
-/*!
-    @brief  Run 模式下直写 baseline 寄存器(0x1E+e),不做 Stop->Run 切换。
-    @param  e    电极索引(0-11),寄存器地址 = MPR121_BASELINE_0 + e
-    @param  val  8 位 baseline 值
-    @note   round47: 与 writeRegister() 的区别 —— writeRegister 会先 Stop
-            再 Run 整个芯片(全局中断、ECR 恢复);writeBaselineRun 只写
-            0x1E+e 一个寄存器,可在触摸检测运行中单独更新某个电极的
-            baseline,不打扰其他电极的跟踪。
-*/
-void MPR121::writeBaselineRun(uint8_t e, uint8_t val) {
-    if (e > 11) return;  // round47-review: guard against out-of-range electrode (0x2B+ would hit filter regs)
-    uint8_t data[2] = { (uint8_t)(MPR121_BASELINE_0 + e), val };
-    i2c_write(port, addr, data, 2, false);
 }
