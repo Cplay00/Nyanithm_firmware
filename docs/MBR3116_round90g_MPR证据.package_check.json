@@ -1,0 +1,26 @@
+{
+  "zip": "MBR3116_round90g_MPR证据.zip",
+  "size": 1478037,
+  "sha256": "4d4341ec2645dc1248f421d1a79e120fcbd383bbfee2f8c810941cb9fa9f6197",
+  "payload_hashes_verified": 71,
+  "zip_crc_ok": true,
+  "offline_replay": [
+    {
+      "script": "round90g_analyze_mpr.py",
+      "returncode": 0,
+      "output_byte_equal": true,
+      "output_sha256": "6f392823717a8ef0896527f58ef8c6eb8737a23d2c446c36e412e91add66c01b"
+    },
+    {
+      "script": "round90g_analyze_page.py",
+      "returncode": 0,
+      "output_byte_equal": true,
+      "output_sha256": "d4b494594342e978eee26abf299b6f201cb8407005d4bef4b28bfc57dcdfeee9"
+    }
+  ],
+  "fresh_extracted_production_c6_test": {
+    "returncode": 0,
+    "stdout": "Compiled production C6 branch from: D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90g_package_verify\\Nyanithm_firmware_hw_v1\\src\\app_link.cpp\nPASS MPR coherent signal bank + independent controls, unchanged byte order\nPASS MPR coherent signal bank + independent controls, unchanged byte order\nPASS MPR coherent signal bank + independent controls, unchanged byte order\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS negative, zero and short native reads discard entire image\nPASS legacy MBR address routes through unchanged driver\nPASS legacy MBR address routes through unchanged driver\nPASS legacy MBR address routes through unchanged driver\nPASS legacy MBR read failure unchanged\nPASS unlisted address never reaches I2C\nPASS unlisted address never reaches I2C\nPASS unlisted address never reaches I2C\nPASS unlisted address never reaches I2C\nPASS unlisted address never reaches I2C\nPASS unlisted address never reaches I2C\nPASS missing CDC payload cannot reuse stale address\nPASS partial successful USB writes advance exact payload offset\nPASS stalled TX is bounded to 250ms and pumps watchdog\nPASS partial binary timeout appends no misleading error bytes\nPASS disconnected host sends no binary reply\nPASS disconnect after first packet terminates without a suffix\nPASS unsigned timeout remains bounded across uptime wrap\n28/28 native-register scenarios passed\n",
+    "stderr": ""
+  }
+}

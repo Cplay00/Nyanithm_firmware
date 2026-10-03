@@ -244,6 +244,42 @@ void handleCommand() {
                     } else {
                         printf("3116 read fail\n");
                     }
+                } else if (address >= 0x5A && address <= 0x5C) {
+                    // round90g: read-only MPR register image, not a config to
+                    // burn. NXP MPR121 Rev.4 sections 5.1/5.3 and AN3895:
+                    // repeated START; one 43B 0x00..0x2A signal snapshot, then
+                    // the 85B control window. The windows / chips are NOT
+                    // simultaneous. Do not Stop, calibrate, or write registers.
+                    // Check byte counts using the existing native bus wrapper;
+                    // the legacy MPR bool helper only rejects negative returns.
+                    uint8_t regs[128] = {};
+                    uint8_t offset = 0x00;
+                    bool ok = i2c_write_read(0, address, &offset, 1, regs, 43) == 43;
+                    if (ok) {
+                        tud_task();
+                        watchdog_update();
+                        offset = 0x2B;
+                        ok = i2c_write_read(0, address, &offset, 1, regs + 43, 85) == 85;
+                    }
+                    if (!ok) {
+                        printf("mpr read fail\n");
+                    } else {
+                        // Config-mode Core0 owns USB. Bound a stalled / closed
+                        // host without appending text to a partial binary reply.
+                        uint32_t total = 0;
+                        uint32_t started = to_ms_since_boot(get_absolute_time());
+                        while (total < sizeof(regs) && tud_cdc_connected() &&
+                               to_ms_since_boot(get_absolute_time()) - started < 250) {
+                            tud_task();
+                            watchdog_update();
+                            uint32_t sent = tud_cdc_write(regs + total, sizeof(regs) - total);
+                            total += sent;
+                            tud_cdc_write_flush();
+                            if (sent == 0) sleep_ms(1);
+                        }
+                        tud_task();
+                        tud_cdc_write_flush();
+                    }
                 } else {
                     printf("read3116: address 0x%02X not allowed.\n", address);
                 }

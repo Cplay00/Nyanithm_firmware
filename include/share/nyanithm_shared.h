@@ -18,8 +18,8 @@
 #define CONTROLLER_CONFIG_MAGIC 0x88
 #define CONTROLLER_CONFIG_VERSION 0x02
 #define NYANITHM_API_LEVEL 0x10
-#define NYANITHM_FW_VERSION "1.6.6-beta10"
-#define NYANITHM_BUILD_ID "round90e"
+#define NYANITHM_FW_VERSION "1.6.6-beta11"
+#define NYANITHM_BUILD_ID "round90g"
 
 const uint8_t MBR_TRACE_VERSION = 1;
 const uint8_t MBR_TRACE_BUSY = 0;
@@ -225,6 +225,12 @@ typedef enum {
                                 // 原值, 0x7E/0x7F CRC 不重算);失败回文本行
                                 // "3116 read fail\n"。仅配置模式受理, 需固件
                                 // >= 1.6.2-beta1。
+                                // round90g / beta11 起额外受理 MPR 0x5A-0x5C:
+                                // 成功回128B只读寄存器图像0x00-0x7F(不是烧录表)。
+                                // 前43B是一次0x00-0x2A一致信号读组，后85B是独立
+                                // 控制寄存器读组；各片不同时。不切Stop/校准/写值。
+                                // 任一短读/失败回"mpr read fail\n"；TX超时或断连
+                                // 可能收到不足128B，主机必须整体作废。仅配置模式。
     CMD_FLASH_DIAG = 0xCD,      // round78c: 刷写结局诊断,回 [0xCD][code][rc][gap u32 LE];仅事后查询
     // round88: MBR3116 单传感器调试数据读取(仅配置模式受理)。需固件 >= 1.6.5。
     // 主机必须分两次 write -- 先 [0xC7], 再 2B 载荷 [addr][sensor](与 CFG_SET /
