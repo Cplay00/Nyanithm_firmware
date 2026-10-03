@@ -1,0 +1,2498 @@
+{
+  "source_base": "9649267",
+  "serial_session_opened": false,
+  "hardware_commands_sent": false,
+  "passive_usb_enumeration": {
+    "port": "COM6",
+    "vid": "0xcafe",
+    "pid": "0x4009",
+    "serial": "5303284739002C9C"
+  },
+  "deployed": false,
+  "build": {
+    "sdk": "2.2.0",
+    "uf2": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\build_round90n\\Nyanithm.uf2",
+    "bytes": 201728,
+    "sha256": "29de446eb2ff04f6b86f78633986a5332504e7cc542fbc1e2144970211e5854e",
+    "signature_verified": true
+  },
+  "unchanged_production_checks_after_equivalent_rename": {
+    "void updateTouch_v2()": true,
+    "static bool mbrLegacyFaultHold(": true,
+    "static void publishTouchState()": true,
+    "void updateInputState()": true
+  },
+  "migration_before": 153,
+  "migration_after": 164,
+  "snapshot_readers": 28,
+  "native_C6": 28,
+  "baseline_policy": 6,
+  "independent_review": {
+    "agent": "review_round90d",
+    "initial_blocker": "P1 missing per-key/global threshold initialization",
+    "resolved": true,
+    "defective_draft_built": false,
+    "defective_draft_deployed": false,
+    "new_blockers": 0,
+    "independent_driver_scenarios": 24,
+    "independent_driver_checks": 328,
+    "pipeline_run_by": "primary agent"
+  },
+  "tests": {
+    "driver_before": {
+      "kind": "exact native MPR class/reads; fake I2C, no hardware",
+      "fragments": [
+        {
+          "signature": "MPR121::MPR121(",
+          "line": 55,
+          "sha256": "78e4e0efd942dfe443df5f4e6ef1f6cd91be9b8947c91f338b5de36d2fbd5cc7"
+        },
+        {
+          "signature": "uint16_t MPR121::filteredData(",
+          "line": 328,
+          "sha256": "6b5c8eb556df4c58b51f61e174f4336f95086953443fbf43692b836be227444e"
+        },
+        {
+          "signature": "uint16_t MPR121::baselineData(",
+          "line": 342,
+          "sha256": "8a253928f960f7764732de9dbfcaa999f5cd59a29cbde2adb238892d57453160"
+        },
+        {
+          "signature": "bool MPR121::readRegisters(",
+          "line": 354,
+          "sha256": "d6482ef7580cea64529941147a0b680621d16421842b18faf8c5cedc6c3aad1f"
+        },
+        {
+          "signature": "uint16_t MPR121::touched(",
+          "line": 371,
+          "sha256": "0bbfa5fefe48162bd748ae22691f42a948a33a0b028ccdd778bb3954b6ff7c5f"
+        },
+        {
+          "signature": "uint8_t MPR121::readRegister8(",
+          "line": 391,
+          "sha256": "f685857e3a6cc87eca60c5652b54be83213245a2eb276f19627366fadb6f462b"
+        },
+        {
+          "signature": "uint16_t MPR121::readRegister16(",
+          "line": 406,
+          "sha256": "af7f42ecd40920690e65003bab509e3cfa7d13c1103c3f0882038deb20ab358f"
+        }
+      ],
+      "checked_api_available": false,
+      "source_sha256": "a4c7b15bba19f9a59eee5acbee09af654d3ae60a32043b8dad80f915eee654fb",
+      "header_sha256": "48da5fdce5e90dccc65b54b3ff5a3f0762665ac8cf742827aeec21b46af70dd0",
+      "compile_command": [
+        "C:\\Program Files\\LLVM\\bin\\clang++.exe",
+        "-std=c++11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+        "-Wno-unused-private-field",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fuse-ld=lld",
+        "-nostdlib",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software",
+        "-ID:/pico-sdk/src/common/pico_base_headers/include",
+        "..\\_dev_tools\\round90n_mpr_read_before\\mpr_read.cpp",
+        "-Wl,/entry:mprReadEntry",
+        "-Wl,/subsystem:console",
+        "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+        "-o",
+        "..\\_dev_tools\\round90n_mpr_read_before\\mpr_read.exe"
+      ],
+      "results": [
+        {
+          "case": 0,
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "case": 1,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 429: !device.readRegisters(4, output, n)\n"
+        },
+        {
+          "case": 2,
+          "passed": true,
+          "checks": 14,
+          "output": "PASS checks=14\n"
+        },
+        {
+          "case": 3,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 429: !device.readRegisters(4, output, n)\n"
+        },
+        {
+          "case": 4,
+          "passed": true,
+          "checks": 24,
+          "output": "PASS checks=24\n"
+        },
+        {
+          "case": 5,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 429: !device.readRegisters(4, output, n)\n"
+        },
+        {
+          "case": 6,
+          "passed": true,
+          "checks": 36,
+          "output": "PASS checks=36\n"
+        },
+        {
+          "case": 7,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 429: !device.readRegisters(4, output, n)\n"
+        },
+        {
+          "case": 8,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 9,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 435: device.touched() == 0\n"
+        },
+        {
+          "case": 10,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 435: device.touched() == 0\n"
+        },
+        {
+          "case": 11,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 435: device.touched() == 0\n"
+        },
+        {
+          "case": 12,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 438: device.readRegister8(0x1e) == 0\n"
+        },
+        {
+          "case": 13,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 438: device.readRegister8(0x1e) == 0\n"
+        },
+        {
+          "case": 14,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 441: device.readRegister16(4) == 0\n"
+        },
+        {
+          "case": 15,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 441: device.readRegister16(4) == 0\n"
+        },
+        {
+          "case": 16,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 17,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 444: device.readRegister16(4) == 0x1234\n"
+        },
+        {
+          "case": 18,
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "case": 19,
+          "passed": true,
+          "checks": 6,
+          "output": "PASS checks=6\n"
+        },
+        {
+          "case": 20,
+          "passed": true,
+          "checks": 4,
+          "output": "PASS checks=4\n"
+        },
+        {
+          "case": 21,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 22,
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 468: device.filteredData(7) == 0\n"
+        },
+        {
+          "case": 23,
+          "passed": true,
+          "checks": 10,
+          "output": "PASS checks=10\n"
+        }
+      ]
+    },
+    "driver_after": {
+      "kind": "exact native MPR class/reads; fake I2C, no hardware",
+      "fragments": [
+        {
+          "signature": "MPR121::MPR121(",
+          "line": 55,
+          "sha256": "78e4e0efd942dfe443df5f4e6ef1f6cd91be9b8947c91f338b5de36d2fbd5cc7"
+        },
+        {
+          "signature": "uint16_t MPR121::filteredData(",
+          "line": 328,
+          "sha256": "c27e663055b12842dddee39d8ca390daffe7ec7ad102c91a191a7c9dced5fa05"
+        },
+        {
+          "signature": "uint16_t MPR121::baselineData(",
+          "line": 342,
+          "sha256": "61e215929f1f594b3e3c89a61210863c648bf7ce2a6961daccf06873190c7f07"
+        },
+        {
+          "signature": "bool MPR121::readRegisters(",
+          "line": 353,
+          "sha256": "44c2ed90747016791d1fa669fac6aeca22615584b64be77616909a86cda593ef"
+        },
+        {
+          "signature": "uint16_t MPR121::touched(",
+          "line": 371,
+          "sha256": "5d7f348928e3802308dd993fbd02ba04833c5715398c585c8823651116b29903"
+        },
+        {
+          "signature": "uint8_t MPR121::readRegister8(",
+          "line": 420,
+          "sha256": "549a265a24aaeeeb8bdcf514233d84fb3b66d3cfb0befc688284b27df966ad01"
+        },
+        {
+          "signature": "uint16_t MPR121::readRegister16(",
+          "line": 431,
+          "sha256": "184baa52510644fc958932cb6e9d85ad566cbce1a5c9794733055c3e8d297fac"
+        },
+        {
+          "signature": "bool MPR121::readRegisterChecked(",
+          "line": 377,
+          "sha256": "3c247ad42f8b6f2d795c40658d14356ddf2d1c0c5a586422bcb0c77375e868a1"
+        },
+        {
+          "signature": "bool MPR121::readTouchStatus(",
+          "line": 385,
+          "sha256": "675aef92c865d40cf0a838c7542cf2a60051fb85f10739653ca493c4f63b892a"
+        },
+        {
+          "signature": "bool MPR121::readFilteredData(",
+          "line": 393,
+          "sha256": "b731e6cbf66882ff8709775a3abd33955ed925951f8ad1c020dec71d2489bbe1"
+        },
+        {
+          "signature": "bool MPR121::readBaselineData(",
+          "line": 405,
+          "sha256": "cb71516a77692d4cafe11064f27c8df736e8c867db0a1fa9742d246754b5d6f2"
+        }
+      ],
+      "checked_api_available": true,
+      "source_sha256": "e1fdb59b5b80caca179b12526db78c27e236fd7ef538691301e8945a744913f1",
+      "header_sha256": "988defe7668e7b4c2a24e0580d4bf9ef7830086579dd893734c8261437b4afc1",
+      "compile_command": [
+        "C:\\Program Files\\LLVM\\bin\\clang++.exe",
+        "-std=c++11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+        "-Wno-unused-private-field",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fuse-ld=lld",
+        "-nostdlib",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software",
+        "-ID:/pico-sdk/src/common/pico_base_headers/include",
+        "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_mpr_read_host\\mpr_read.cpp",
+        "-Wl,/entry:mprReadEntry",
+        "-Wl,/subsystem:console",
+        "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+        "-o",
+        "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_mpr_read_host\\mpr_read.exe"
+      ],
+      "results": [
+        {
+          "case": 0,
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "case": 1,
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "case": 2,
+          "passed": true,
+          "checks": 14,
+          "output": "PASS checks=14\n"
+        },
+        {
+          "case": 3,
+          "passed": true,
+          "checks": 14,
+          "output": "PASS checks=14\n"
+        },
+        {
+          "case": 4,
+          "passed": true,
+          "checks": 24,
+          "output": "PASS checks=24\n"
+        },
+        {
+          "case": 5,
+          "passed": true,
+          "checks": 24,
+          "output": "PASS checks=24\n"
+        },
+        {
+          "case": 6,
+          "passed": true,
+          "checks": 36,
+          "output": "PASS checks=36\n"
+        },
+        {
+          "case": 7,
+          "passed": true,
+          "checks": 36,
+          "output": "PASS checks=36\n"
+        },
+        {
+          "case": 8,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 9,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 10,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 11,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 12,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 13,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 14,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 15,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 16,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 17,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 18,
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "case": 19,
+          "passed": true,
+          "checks": 6,
+          "output": "PASS checks=6\n"
+        },
+        {
+          "case": 20,
+          "passed": true,
+          "checks": 4,
+          "output": "PASS checks=4\n"
+        },
+        {
+          "case": 21,
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "case": 22,
+          "passed": true,
+          "checks": 6,
+          "output": "PASS checks=6\n"
+        },
+        {
+          "case": 23,
+          "passed": true,
+          "checks": 10,
+          "output": "PASS checks=10\n"
+        }
+      ]
+    },
+    "pipeline_before": {
+      "kind": "production-source host integration; fake devices, not real hardware",
+      "fragments": [
+        {
+          "name": "requestDataFromAddress",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\cy8cmbr3116.cpp",
+          "line": 648,
+          "sha256": "6c3cefcca84ea5ab40bed38f27dce451ce43781a5e562e42d3fb415ab3e684bc"
+        },
+        {
+          "name": "readDifferenceCounts",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\cy8cmbr3116.cpp",
+          "line": 530,
+          "sha256": "0578b3516bb50a3ea7454c1df9f3a0dd49da916c35b225b63e05a7c264d38fc4"
+        },
+        {
+          "name": "legacyDifferenceCounts",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\cy8cmbr3116.cpp",
+          "line": 523,
+          "sha256": "947e017cd7e3c4180fd8929554a7d12b2c7049772e6eed7d03394a82b07bba1c"
+        },
+        {
+          "name": "lane-tables-and-helpers",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 166,
+          "sha256": "d30d1635650407aeaab0ac0421c0439f13d167df27fce11c2c107468d49a0886"
+        },
+        {
+          "name": "touch-globals",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 370,
+          "sha256": "a7e0967e9dd2e7eefefca8cd034592760271208b2ffb458c02305df5ddfc9c4d"
+        },
+        {
+          "name": "distance-globals",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 399,
+          "sha256": "1607a282a588494e1ffb52955328879d27143da8f4091f826ae2bb7b90ac948e"
+        },
+        {
+          "name": "prepareMbrDistanceGate",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 425,
+          "sha256": "c65a1b3c47cdadf51dfe4a5697bf9cd9ad70ed4a3f8c6583eab3355c7931e6cc"
+        },
+        {
+          "name": "mbrDistanceReadAttempt",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 452,
+          "sha256": "bd3de13d0afc6978bf3d163311d6459c14f92b45dec74d490e8e2b6648f8cb4b"
+        },
+        {
+          "name": "mbrDistanceReadSample",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 480,
+          "sha256": "8f5a34a5a846c320b7cad756e6a31a37ae6768a66626c1901b1aa079e59305e1"
+        },
+        {
+          "name": "mbrDistanceRetrySample",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 495,
+          "sha256": "6a2ae2be6de054e566d24a060028072603eb60b6c589d5acb1155ec17397e9d6"
+        },
+        {
+          "name": "readMbrButtons",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 503,
+          "sha256": "564cfd59fdee93831e82f7315f731dfc46efc262b3bf64602e827b8d19eccbb4"
+        },
+        {
+          "name": "touchReadFaultHold",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 511,
+          "sha256": "1f568d5bdf00dcea7c297dc0335f23b0208b3fea78d4f74c3e6b450c16e4fe0c"
+        },
+        {
+          "name": "mbrDistanceAllowedMask",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 526,
+          "sha256": "f1675034eb53887f395767e3d70b44e834b6a6edfcf8cbe36a3348ab4643087a"
+        },
+        {
+          "name": "updateTouch_v2",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 616,
+          "sha256": "4acb478a77456d7bca824450651707a2d7ff8ea030bd570b03e3bcbc2c44cceb"
+        },
+        {
+          "name": "updateTouch_v1",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 993,
+          "sha256": "d5d814b989177b06acf10500c2d3f9cf560d4113cf04f63901b8f3bec294b3a3"
+        },
+        {
+          "name": "buildMbrTouchTrace",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_tools\\round90n_source_before\\hw_devices.cpp",
+          "line": 1699,
+          "sha256": "5f5957c8ac69382de37ac816953f2638d2026593be4501c40db4020b73a59641"
+        }
+      ],
+      "compile_command": [
+        "C:\\Program Files\\LLVM\\bin\\clang++.exe",
+        "-std=c++11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-function",
+        "-Wno-missing-braces",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fuse-ld=lld",
+        "-nostdlib",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software",
+        "-ID:\\pico-sdk\\src\\common\\pico_base_headers\\include",
+        "..\\_dev_tools\\round90n_pipeline_frozen_before\\test_mbr_distance_pipeline_generated.cpp",
+        "-Wl,/entry:mbrPipelineTestEntry",
+        "-Wl,/subsystem:console",
+        "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+        "-o",
+        "..\\_dev_tools\\round90n_pipeline_frozen_before\\test_mbr_distance_pipeline.exe"
+      ],
+      "results": [
+        {
+          "number": 0,
+          "name": "v1:sustained-OFF-clears-all-retention",
+          "passed": true,
+          "checks": 2302,
+          "output": "PASS checks=2302\n"
+        },
+        {
+          "number": 1,
+          "name": "v2:sustained-OFF-clears-all-retention",
+          "passed": true,
+          "checks": 2102,
+          "output": "PASS checks=2102\n"
+        },
+        {
+          "number": 2,
+          "name": "v1:neighbour-cannot-relax-strict-ON",
+          "passed": true,
+          "checks": 2399,
+          "output": "PASS checks=2399\n"
+        },
+        {
+          "number": 3,
+          "name": "v2:neighbour-cannot-relax-strict-ON",
+          "passed": true,
+          "checks": 2191,
+          "output": "PASS checks=2191\n"
+        },
+        {
+          "number": 4,
+          "name": "v1:native-OFF-with-cached-high-count",
+          "passed": true,
+          "checks": 2197,
+          "output": "PASS checks=2197\n"
+        },
+        {
+          "number": 5,
+          "name": "v2:native-OFF-with-cached-high-count",
+          "passed": true,
+          "checks": 2009,
+          "output": "PASS checks=2009\n"
+        },
+        {
+          "number": 6,
+          "name": "v1:count-I2C-failure-and-reconfirmation",
+          "passed": true,
+          "checks": 2828,
+          "output": "PASS checks=2828\n"
+        },
+        {
+          "number": 7,
+          "name": "v2:count-I2C-failure-and-reconfirmation",
+          "passed": true,
+          "checks": 2588,
+          "output": "PASS checks=2588\n"
+        },
+        {
+          "number": 8,
+          "name": "v1:5ms-cache-and-due-refresh",
+          "passed": true,
+          "checks": 268,
+          "output": "PASS checks=268\n"
+        },
+        {
+          "number": 9,
+          "name": "v2:5ms-cache-and-due-refresh",
+          "passed": true,
+          "checks": 248,
+          "output": "PASS checks=248\n"
+        },
+        {
+          "number": 10,
+          "name": "v1:15ms-inclusive-host-age",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 11,
+          "name": "v2:15ms-inclusive-host-age",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 12,
+          "name": "v1:later-chip-17ms-stall",
+          "passed": true,
+          "checks": 189,
+          "output": "PASS checks=189\n"
+        },
+        {
+          "number": 13,
+          "name": "v2:later-chip-17ms-stall",
+          "passed": true,
+          "checks": 173,
+          "output": "PASS checks=173\n"
+        },
+        {
+          "number": 14,
+          "name": "v1:profile-change-in-new-hysteresis-band",
+          "passed": true,
+          "checks": 2119,
+          "output": "PASS checks=2119\n"
+        },
+        {
+          "number": 15,
+          "name": "v2:profile-change-in-new-hysteresis-band",
+          "passed": true,
+          "checks": 1935,
+          "output": "PASS checks=1935\n"
+        },
+        {
+          "number": 16,
+          "name": "v1:layout-change-clears-held-state",
+          "passed": true,
+          "checks": 2371,
+          "output": "PASS checks=2371\n"
+        },
+        {
+          "number": 17,
+          "name": "v2:layout-change-clears-held-state",
+          "passed": true,
+          "checks": 2211,
+          "output": "PASS checks=2211\n"
+        },
+        {
+          "number": 18,
+          "name": "v1:legacy-zero-profile-and-stray-enable",
+          "passed": true,
+          "checks": 1219,
+          "output": "PASS checks=1219\n"
+        },
+        {
+          "number": 19,
+          "name": "v2:legacy-zero-profile-and-stray-enable",
+          "passed": true,
+          "checks": 1119,
+          "output": "PASS checks=1119\n"
+        },
+        {
+          "number": 20,
+          "name": "v1:valid-disabled-profile-legacy",
+          "passed": true,
+          "checks": 1218,
+          "output": "PASS checks=1218\n"
+        },
+        {
+          "number": 21,
+          "name": "v2:valid-disabled-profile-legacy",
+          "passed": true,
+          "checks": 1118,
+          "output": "PASS checks=1118\n"
+        },
+        {
+          "number": 22,
+          "name": "v1:all-32-lane-mappings-and-unmapped-bits",
+          "passed": true,
+          "checks": 9982,
+          "output": "PASS checks=9982\n"
+        },
+        {
+          "number": 23,
+          "name": "v2:all-32-lane-mappings-and-unmapped-bits",
+          "passed": true,
+          "checks": 9090,
+          "output": "PASS checks=9090\n"
+        },
+        {
+          "number": 24,
+          "name": "v1:actual-driver-SYNC-bounded-retry",
+          "passed": true,
+          "checks": 2042,
+          "output": "PASS checks=2042\n"
+        },
+        {
+          "number": 25,
+          "name": "v2:actual-driver-SYNC-bounded-retry",
+          "passed": true,
+          "checks": 1866,
+          "output": "PASS checks=1866\n"
+        },
+        {
+          "number": 26,
+          "name": "v1:above-255-count-fails-closed",
+          "passed": true,
+          "checks": 2212,
+          "output": "PASS checks=2212\n"
+        },
+        {
+          "number": 27,
+          "name": "v2:above-255-count-fails-closed",
+          "passed": true,
+          "checks": 2020,
+          "output": "PASS checks=2020\n"
+        },
+        {
+          "number": 28,
+          "name": "v1:BUTTON_STAT-failure",
+          "passed": true,
+          "checks": 2198,
+          "output": "PASS checks=2198\n"
+        },
+        {
+          "number": 29,
+          "name": "v2:BUTTON_STAT-failure",
+          "passed": true,
+          "checks": 2010,
+          "output": "PASS checks=2010\n"
+        },
+        {
+          "number": 30,
+          "name": "v1:disable-enable-clears-retention",
+          "passed": true,
+          "checks": 2170,
+          "output": "PASS checks=2170\n"
+        },
+        {
+          "number": 31,
+          "name": "v2:disable-enable-clears-retention",
+          "passed": true,
+          "checks": 1982,
+          "output": "PASS checks=1982\n"
+        },
+        {
+          "number": 32,
+          "name": "v1:deferred-retry-order-and-metadata",
+          "passed": true,
+          "checks": 124,
+          "output": "PASS checks=124\n"
+        },
+        {
+          "number": 33,
+          "name": "v2:deferred-retry-order-and-metadata",
+          "passed": true,
+          "checks": 106,
+          "output": "PASS checks=106\n"
+        },
+        {
+          "number": 34,
+          "name": "v1:all-retries-torn-no-third-burst",
+          "passed": true,
+          "checks": 1952,
+          "output": "PASS checks=1952\n"
+        },
+        {
+          "number": 35,
+          "name": "v2:all-retries-torn-no-third-burst",
+          "passed": true,
+          "checks": 1778,
+          "output": "PASS checks=1778\n"
+        },
+        {
+          "number": 36,
+          "name": "v1:transport-failure-not-deferred",
+          "passed": true,
+          "checks": 100,
+          "output": "PASS checks=100\n"
+        },
+        {
+          "number": 37,
+          "name": "v2:transport-failure-not-deferred",
+          "passed": true,
+          "checks": 92,
+          "output": "PASS checks=92\n"
+        },
+        {
+          "number": 38,
+          "name": "v1:late-retry-keeps-whole-poll-age-limit",
+          "passed": true,
+          "checks": 101,
+          "output": "PASS checks=101\n"
+        },
+        {
+          "number": 39,
+          "name": "v2:late-retry-keeps-whole-poll-age-limit",
+          "passed": true,
+          "checks": 93,
+          "output": "PASS checks=93\n"
+        },
+        {
+          "number": 40,
+          "name": "MPR:legacy-zero-profile",
+          "passed": true,
+          "checks": 71,
+          "output": "PASS checks=71\n"
+        },
+        {
+          "number": 41,
+          "name": "MPR:signed-enabled-profile-ignored",
+          "passed": true,
+          "checks": 71,
+          "output": "PASS checks=71\n"
+        },
+        {
+          "number": 42,
+          "name": "v1:legacy-failed-new-ON",
+          "passed": true,
+          "checks": 1194,
+          "output": "PASS checks=1194\n"
+        },
+        {
+          "number": 43,
+          "name": "v2:legacy-failed-new-ON",
+          "passed": true,
+          "checks": 1110,
+          "output": "PASS checks=1110\n"
+        },
+        {
+          "number": 44,
+          "name": "v1:legacy-partial-confirmation-then-fault",
+          "passed": true,
+          "checks": 665,
+          "output": "PASS checks=665\n"
+        },
+        {
+          "number": 45,
+          "name": "v2:legacy-partial-confirmation-then-fault",
+          "passed": true,
+          "checks": 617,
+          "output": "PASS checks=617\n"
+        },
+        {
+          "number": 46,
+          "name": "v1:legacy-neighbour-cannot-authorize-fault",
+          "passed": true,
+          "checks": 2106,
+          "output": "PASS checks=2106\n"
+        },
+        {
+          "number": 47,
+          "name": "v2:legacy-neighbour-cannot-authorize-fault",
+          "passed": true,
+          "checks": 1946,
+          "output": "PASS checks=1946\n"
+        },
+        {
+          "number": 48,
+          "name": "v1:legacy-native-button-range",
+          "passed": true,
+          "checks": 1093,
+          "output": "PASS checks=1093\n"
+        },
+        {
+          "number": 49,
+          "name": "v2:legacy-native-button-range",
+          "passed": true,
+          "checks": 1009,
+          "output": "PASS checks=1009\n"
+        },
+        {
+          "number": 50,
+          "name": "v1:legacy-held-status-fault-50ms",
+          "passed": true,
+          "checks": 1109,
+          "output": "PASS checks=1109\n"
+        },
+        {
+          "number": 51,
+          "name": "v2:legacy-held-status-fault-50ms",
+          "passed": true,
+          "checks": 1017,
+          "output": "PASS checks=1017\n"
+        },
+        {
+          "number": 52,
+          "name": "v1:legacy-expired-no-resurrection",
+          "passed": true,
+          "checks": 1161,
+          "output": "PASS checks=1161\n"
+        },
+        {
+          "number": 53,
+          "name": "v2:legacy-expired-no-resurrection",
+          "passed": true,
+          "checks": 1065,
+          "output": "PASS checks=1065\n"
+        },
+        {
+          "number": 54,
+          "name": "v1:legacy-short-status-recovery",
+          "passed": true,
+          "checks": 1062,
+          "output": "PASS checks=1062\n"
+        },
+        {
+          "number": 55,
+          "name": "v2:legacy-short-status-recovery",
+          "passed": true,
+          "checks": 974,
+          "output": "PASS checks=974\n"
+        },
+        {
+          "number": 56,
+          "name": "v1:legacy-fault-clock-wrap",
+          "passed": true,
+          "checks": 1109,
+          "output": "PASS checks=1109\n"
+        },
+        {
+          "number": 57,
+          "name": "v2:legacy-fault-clock-wrap",
+          "passed": true,
+          "checks": 1017,
+          "output": "PASS checks=1017\n"
+        },
+        {
+          "number": 58,
+          "name": "v1:legacy-fault-start-zero",
+          "passed": true,
+          "checks": 1111,
+          "output": "PASS checks=1111\n"
+        },
+        {
+          "number": 59,
+          "name": "v2:legacy-fault-start-zero",
+          "passed": true,
+          "checks": 1019,
+          "output": "PASS checks=1019\n"
+        },
+        {
+          "number": 60,
+          "name": "v1:legacy-profile-transition",
+          "passed": true,
+          "checks": 1249,
+          "output": "PASS checks=1249\n"
+        },
+        {
+          "number": 61,
+          "name": "v2:legacy-profile-transition",
+          "passed": true,
+          "checks": 1145,
+          "output": "PASS checks=1145\n"
+        },
+        {
+          "number": 62,
+          "name": "v1:legacy-retained-verification-after-real-OFF",
+          "passed": true,
+          "checks": 2187,
+          "output": "PASS checks=2187\n"
+        },
+        {
+          "number": 63,
+          "name": "v2:legacy-retained-verification-after-real-OFF",
+          "passed": true,
+          "checks": 2007,
+          "output": "PASS checks=2007\n"
+        },
+        {
+          "number": 64,
+          "name": "v1:legacy-healthy-fast-recontact-cadence",
+          "passed": true,
+          "checks": 2010,
+          "output": "PASS checks=2010\n"
+        },
+        {
+          "number": 65,
+          "name": "v2:legacy-healthy-fast-recontact-cadence",
+          "passed": true,
+          "checks": 1842,
+          "output": "PASS checks=1842\n"
+        },
+        {
+          "number": 66,
+          "name": "v1:legacy-held-read-optimization",
+          "passed": true,
+          "checks": 1926,
+          "output": "PASS checks=1926\n"
+        },
+        {
+          "number": 67,
+          "name": "v2:legacy-held-read-optimization",
+          "passed": true,
+          "checks": 1766,
+          "output": "PASS checks=1766\n"
+        },
+        {
+          "number": 68,
+          "name": "v1:legacy-healthy-medium-cadence",
+          "passed": true,
+          "checks": 157,
+          "output": "PASS checks=157\n"
+        },
+        {
+          "number": 69,
+          "name": "v2:legacy-healthy-medium-cadence",
+          "passed": true,
+          "checks": 145,
+          "output": "PASS checks=145\n"
+        },
+        {
+          "number": 70,
+          "name": "v1:legacy-cross-chip-fault",
+          "passed": true,
+          "checks": 2106,
+          "output": "PASS checks=2106\n"
+        },
+        {
+          "number": 71,
+          "name": "v2:legacy-cross-chip-fault",
+          "passed": true,
+          "checks": 1946,
+          "output": "PASS checks=1946\n"
+        },
+        {
+          "number": 72,
+          "name": "v1:legacy-recovered-wake-NACK",
+          "passed": true,
+          "checks": 62,
+          "output": "PASS checks=62\n"
+        },
+        {
+          "number": 73,
+          "name": "v2:legacy-recovered-wake-NACK",
+          "passed": true,
+          "checks": 58,
+          "output": "PASS checks=58\n"
+        },
+        {
+          "number": 74,
+          "name": "v1:legacy-torn-then-good-group",
+          "passed": true,
+          "checks": 110,
+          "output": "PASS checks=110\n"
+        },
+        {
+          "number": 75,
+          "name": "v2:legacy-torn-then-good-group",
+          "passed": true,
+          "checks": 102,
+          "output": "PASS checks=102\n"
+        },
+        {
+          "number": 76,
+          "name": "v1:legacy-persistent-torn-groups",
+          "passed": true,
+          "checks": 1174,
+          "output": "PASS checks=1174\n"
+        },
+        {
+          "number": 77,
+          "name": "v2:legacy-persistent-torn-groups",
+          "passed": true,
+          "checks": 1090,
+          "output": "PASS checks=1090\n"
+        },
+        {
+          "number": 78,
+          "name": "v1:legacy-late-native-status",
+          "passed": true,
+          "checks": 105,
+          "output": "PASS checks=105\n"
+        },
+        {
+          "number": 79,
+          "name": "v2:legacy-late-native-status",
+          "passed": true,
+          "checks": 97,
+          "output": "PASS checks=97\n"
+        },
+        {
+          "number": 80,
+          "name": "v1:legacy-long-first-fault-expires",
+          "passed": true,
+          "checks": 1013,
+          "output": "PASS checks=1013\n"
+        },
+        {
+          "number": 81,
+          "name": "v2:legacy-long-first-fault-expires",
+          "passed": true,
+          "checks": 929,
+          "output": "PASS checks=929\n"
+        },
+        {
+          "number": 82,
+          "name": "v1:legacy-late-counts-no-deadline-renewal",
+          "passed": true,
+          "checks": 1067,
+          "output": "PASS checks=1067\n"
+        },
+        {
+          "number": 83,
+          "name": "v2:legacy-late-counts-no-deadline-renewal",
+          "passed": true,
+          "checks": 979,
+          "output": "PASS checks=979\n"
+        },
+        {
+          "number": 84,
+          "name": "MPR:hw1:failed-filter-new-ON",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 85,
+          "name": "MPR:hw2:failed-filter-new-ON",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 86,
+          "name": "MPR:hw1:failed-baseline-is-not-threshold-rejection",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 486: g_verifyFail[e] == 0\n"
+        },
+        {
+          "number": 87,
+          "name": "MPR:hw2:failed-baseline-is-not-threshold-rejection",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 486: g_verifyFail[e] == 0\n"
+        },
+        {
+          "number": 88,
+          "name": "MPR:hw1:status-fault-hold-49-release-50",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 89,
+          "name": "MPR:hw2:status-fault-hold-49-release-50",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 90,
+          "name": "MPR:hw1:pending-confirmation-fault-resets",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 493: rawTouch[0] == 0\n"
+        },
+        {
+          "number": 91,
+          "name": "MPR:hw2:pending-confirmation-fault-resets",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 493: rawTouch[0] == 0\n"
+        },
+        {
+          "number": 92,
+          "name": "MPR:hw1:neighbour-cannot-authorize-fault",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 499: !(rawTouch[0] & (1u << 8))\n"
+        },
+        {
+          "number": 93,
+          "name": "MPR:hw2:neighbour-cannot-authorize-fault",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 499: !(rawTouch[0] & (1u << 8))\n"
+        },
+        {
+          "number": 94,
+          "name": "MPR:hw1:healthy-flick-and-held-read-budget",
+          "passed": true,
+          "checks": 186,
+          "output": "PASS checks=186\n"
+        },
+        {
+          "number": 95,
+          "name": "MPR:hw2:healthy-flick-and-held-read-budget",
+          "passed": true,
+          "checks": 186,
+          "output": "PASS checks=186\n"
+        },
+        {
+          "number": 96,
+          "name": "MPR:hw1:healthy-weak-confirmation",
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "number": 97,
+          "name": "MPR:hw2:healthy-weak-confirmation",
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "number": 98,
+          "name": "MPR:hw1:four-fixed-lanes",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 99,
+          "name": "MPR:hw2:four-fixed-lanes",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 100,
+          "name": "MPR:hw1:actual-OFF-needs-fresh-evidence",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 515: rawTouch[0] == 0\n"
+        },
+        {
+          "number": 101,
+          "name": "MPR:hw2:actual-OFF-needs-fresh-evidence",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 515: rawTouch[0] == 0\n"
+        },
+        {
+          "number": 102,
+          "name": "MPR:hw1:later-chip-age-check",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 103,
+          "name": "MPR:hw2:later-chip-age-check",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 104,
+          "name": "MPR:hw1:fault-clock-wrap",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 105,
+          "name": "MPR:hw2:fault-clock-wrap",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 106,
+          "name": "MPR:hw1:recovered-retry-conservative-tier",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 107,
+          "name": "MPR:hw2:recovered-retry-conservative-tier",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 108,
+          "name": "MPR:hw1:long-first-fault-expires",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 109,
+          "name": "MPR:hw2:long-first-fault-expires",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 110,
+          "name": "MPR:hw1:zero-start-and-expired-no-resurrection",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 111,
+          "name": "MPR:hw2:zero-start-and-expired-no-resurrection",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 112,
+          "name": "MPR:hw1:all-32-mappings-slide",
+          "passed": true,
+          "checks": 97,
+          "output": "PASS checks=97\n"
+        },
+        {
+          "number": 113,
+          "name": "MPR:hw2:all-32-mappings-slide",
+          "passed": true,
+          "checks": 97,
+          "output": "PASS checks=97\n"
+        },
+        {
+          "number": 114,
+          "name": "MPR:hw1:published-ON-dip-retains-read-budget",
+          "passed": true,
+          "checks": 68,
+          "output": "PASS checks=68\n"
+        },
+        {
+          "number": 115,
+          "name": "MPR:hw2:published-ON-dip-retains-read-budget",
+          "passed": true,
+          "checks": 68,
+          "output": "PASS checks=68\n"
+        },
+        {
+          "number": 116,
+          "name": "MPR:hw1:per-key-threshold-and-confirmation",
+          "passed": true,
+          "checks": 29,
+          "output": "PASS checks=29\n"
+        },
+        {
+          "number": 117,
+          "name": "MPR:hw2:per-key-threshold-and-confirmation",
+          "passed": true,
+          "checks": 29,
+          "output": "PASS checks=29\n"
+        },
+        {
+          "number": 118,
+          "name": "MPR:hw1:global-and-per-key-floor",
+          "passed": true,
+          "checks": 22,
+          "output": "PASS checks=22\n"
+        },
+        {
+          "number": 119,
+          "name": "MPR:hw2:global-and-per-key-floor",
+          "passed": true,
+          "checks": 22,
+          "output": "PASS checks=22\n"
+        },
+        {
+          "number": 120,
+          "name": "MPR:hw1:inclusive-status-age-15-reject-16",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 121,
+          "name": "MPR:hw2:inclusive-status-age-15-reject-16",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 122,
+          "name": "MPR:hw1:late-analog-does-not-authorize",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        },
+        {
+          "number": 123,
+          "name": "MPR:hw2:late-analog-does-not-authorize",
+          "passed": false,
+          "checks": 0,
+          "output": "FAIL line 79: (touchData32[lane] != 0) == active\n"
+        }
+      ],
+      "source_sha256": "d3c0ff9f15e30de47505c98d9cc9f3480f1008a06098c748f192a259eb35ce0e",
+      "driver_sha256": "3dd372053df582bf21b316e5f238988aeec4eae1603c62cb6be948d81a7ea9b7",
+      "header_sha256": {
+        "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share\\nyanithm_shared.h": "f052f1eab8b863f96713fda8ba2ff29506985ee84a3274c377b5620a762ac527",
+        "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software\\mbr_distance_gate.h": "1896ceaac1e038e33e95370b55da24e5cac596f951743420a800cdbfda6d6896"
+      }
+    },
+    "pipeline_after": {
+      "kind": "production-source host integration; fake devices, not real hardware",
+      "fragments": [
+        {
+          "name": "requestDataFromAddress",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\cy8cmbr3116.cpp",
+          "line": 648,
+          "sha256": "6c3cefcca84ea5ab40bed38f27dce451ce43781a5e562e42d3fb415ab3e684bc"
+        },
+        {
+          "name": "readDifferenceCounts",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\cy8cmbr3116.cpp",
+          "line": 530,
+          "sha256": "0578b3516bb50a3ea7454c1df9f3a0dd49da916c35b225b63e05a7c264d38fc4"
+        },
+        {
+          "name": "legacyDifferenceCounts",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\cy8cmbr3116.cpp",
+          "line": 523,
+          "sha256": "947e017cd7e3c4180fd8929554a7d12b2c7049772e6eed7d03394a82b07bba1c"
+        },
+        {
+          "name": "lane-tables-and-helpers",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 166,
+          "sha256": "d30d1635650407aeaab0ac0421c0439f13d167df27fce11c2c107468d49a0886"
+        },
+        {
+          "name": "touch-globals",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 370,
+          "sha256": "a7e0967e9dd2e7eefefca8cd034592760271208b2ffb458c02305df5ddfc9c4d"
+        },
+        {
+          "name": "distance-globals",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 399,
+          "sha256": "97daf6b55f2a0eeac567d68463ab5324583f28cf8dca0cde24bd7ca1c2442485"
+        },
+        {
+          "name": "prepareMbrDistanceGate",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 425,
+          "sha256": "c65a1b3c47cdadf51dfe4a5697bf9cd9ad70ed4a3f8c6583eab3355c7931e6cc"
+        },
+        {
+          "name": "mbrDistanceReadAttempt",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 452,
+          "sha256": "bd3de13d0afc6978bf3d163311d6459c14f92b45dec74d490e8e2b6648f8cb4b"
+        },
+        {
+          "name": "mbrDistanceReadSample",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 480,
+          "sha256": "8f5a34a5a846c320b7cad756e6a31a37ae6768a66626c1901b1aa079e59305e1"
+        },
+        {
+          "name": "mbrDistanceRetrySample",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 495,
+          "sha256": "6a2ae2be6de054e566d24a060028072603eb60b6c589d5acb1155ec17397e9d6"
+        },
+        {
+          "name": "readMbrButtons",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 503,
+          "sha256": "564cfd59fdee93831e82f7315f731dfc46efc262b3bf64602e827b8d19eccbb4"
+        },
+        {
+          "name": "touchReadFaultHold",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 511,
+          "sha256": "b5dd95e110180fb6ee970c97c65f3fd668fd3f7a74a5323709d3adca32c52673"
+        },
+        {
+          "name": "mbrDistanceAllowedMask",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 526,
+          "sha256": "f1675034eb53887f395767e3d70b44e834b6a6edfcf8cbe36a3348ab4643087a"
+        },
+        {
+          "name": "updateTouch_v2",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 616,
+          "sha256": "80b5aa035b4eee9571c3ec3126ea1f70227752915cd2fbac6d92a4a847f9243f"
+        },
+        {
+          "name": "updateTouch_v1",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 993,
+          "sha256": "97d1fa66e0183155f283d1c93e11c3e6d327b3cd4544a7e11c7379ffbf6be1e8"
+        },
+        {
+          "name": "buildMbrTouchTrace",
+          "path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\src\\hw_devices.cpp",
+          "line": 1684,
+          "sha256": "5f5957c8ac69382de37ac816953f2638d2026593be4501c40db4020b73a59641"
+        }
+      ],
+      "compile_command": [
+        "C:\\Program Files\\LLVM\\bin\\clang++.exe",
+        "-std=c++11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wno-unused-function",
+        "-Wno-missing-braces",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fuse-ld=lld",
+        "-nostdlib",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share",
+        "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software",
+        "-ID:\\pico-sdk\\src\\common\\pico_base_headers\\include",
+        "..\\_dev_tools\\round90n_pipeline_final\\test_mbr_distance_pipeline_generated.cpp",
+        "-Wl,/entry:mbrPipelineTestEntry",
+        "-Wl,/subsystem:console",
+        "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+        "-o",
+        "..\\_dev_tools\\round90n_pipeline_final\\test_mbr_distance_pipeline.exe"
+      ],
+      "results": [
+        {
+          "number": 0,
+          "name": "v1:sustained-OFF-clears-all-retention",
+          "passed": true,
+          "checks": 2302,
+          "output": "PASS checks=2302\n"
+        },
+        {
+          "number": 1,
+          "name": "v2:sustained-OFF-clears-all-retention",
+          "passed": true,
+          "checks": 2102,
+          "output": "PASS checks=2102\n"
+        },
+        {
+          "number": 2,
+          "name": "v1:neighbour-cannot-relax-strict-ON",
+          "passed": true,
+          "checks": 2399,
+          "output": "PASS checks=2399\n"
+        },
+        {
+          "number": 3,
+          "name": "v2:neighbour-cannot-relax-strict-ON",
+          "passed": true,
+          "checks": 2191,
+          "output": "PASS checks=2191\n"
+        },
+        {
+          "number": 4,
+          "name": "v1:native-OFF-with-cached-high-count",
+          "passed": true,
+          "checks": 2197,
+          "output": "PASS checks=2197\n"
+        },
+        {
+          "number": 5,
+          "name": "v2:native-OFF-with-cached-high-count",
+          "passed": true,
+          "checks": 2009,
+          "output": "PASS checks=2009\n"
+        },
+        {
+          "number": 6,
+          "name": "v1:count-I2C-failure-and-reconfirmation",
+          "passed": true,
+          "checks": 2828,
+          "output": "PASS checks=2828\n"
+        },
+        {
+          "number": 7,
+          "name": "v2:count-I2C-failure-and-reconfirmation",
+          "passed": true,
+          "checks": 2588,
+          "output": "PASS checks=2588\n"
+        },
+        {
+          "number": 8,
+          "name": "v1:5ms-cache-and-due-refresh",
+          "passed": true,
+          "checks": 268,
+          "output": "PASS checks=268\n"
+        },
+        {
+          "number": 9,
+          "name": "v2:5ms-cache-and-due-refresh",
+          "passed": true,
+          "checks": 248,
+          "output": "PASS checks=248\n"
+        },
+        {
+          "number": 10,
+          "name": "v1:15ms-inclusive-host-age",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 11,
+          "name": "v2:15ms-inclusive-host-age",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 12,
+          "name": "v1:later-chip-17ms-stall",
+          "passed": true,
+          "checks": 189,
+          "output": "PASS checks=189\n"
+        },
+        {
+          "number": 13,
+          "name": "v2:later-chip-17ms-stall",
+          "passed": true,
+          "checks": 173,
+          "output": "PASS checks=173\n"
+        },
+        {
+          "number": 14,
+          "name": "v1:profile-change-in-new-hysteresis-band",
+          "passed": true,
+          "checks": 2119,
+          "output": "PASS checks=2119\n"
+        },
+        {
+          "number": 15,
+          "name": "v2:profile-change-in-new-hysteresis-band",
+          "passed": true,
+          "checks": 1935,
+          "output": "PASS checks=1935\n"
+        },
+        {
+          "number": 16,
+          "name": "v1:layout-change-clears-held-state",
+          "passed": true,
+          "checks": 2371,
+          "output": "PASS checks=2371\n"
+        },
+        {
+          "number": 17,
+          "name": "v2:layout-change-clears-held-state",
+          "passed": true,
+          "checks": 2211,
+          "output": "PASS checks=2211\n"
+        },
+        {
+          "number": 18,
+          "name": "v1:legacy-zero-profile-and-stray-enable",
+          "passed": true,
+          "checks": 1219,
+          "output": "PASS checks=1219\n"
+        },
+        {
+          "number": 19,
+          "name": "v2:legacy-zero-profile-and-stray-enable",
+          "passed": true,
+          "checks": 1119,
+          "output": "PASS checks=1119\n"
+        },
+        {
+          "number": 20,
+          "name": "v1:valid-disabled-profile-legacy",
+          "passed": true,
+          "checks": 1218,
+          "output": "PASS checks=1218\n"
+        },
+        {
+          "number": 21,
+          "name": "v2:valid-disabled-profile-legacy",
+          "passed": true,
+          "checks": 1118,
+          "output": "PASS checks=1118\n"
+        },
+        {
+          "number": 22,
+          "name": "v1:all-32-lane-mappings-and-unmapped-bits",
+          "passed": true,
+          "checks": 9982,
+          "output": "PASS checks=9982\n"
+        },
+        {
+          "number": 23,
+          "name": "v2:all-32-lane-mappings-and-unmapped-bits",
+          "passed": true,
+          "checks": 9090,
+          "output": "PASS checks=9090\n"
+        },
+        {
+          "number": 24,
+          "name": "v1:actual-driver-SYNC-bounded-retry",
+          "passed": true,
+          "checks": 2042,
+          "output": "PASS checks=2042\n"
+        },
+        {
+          "number": 25,
+          "name": "v2:actual-driver-SYNC-bounded-retry",
+          "passed": true,
+          "checks": 1866,
+          "output": "PASS checks=1866\n"
+        },
+        {
+          "number": 26,
+          "name": "v1:above-255-count-fails-closed",
+          "passed": true,
+          "checks": 2212,
+          "output": "PASS checks=2212\n"
+        },
+        {
+          "number": 27,
+          "name": "v2:above-255-count-fails-closed",
+          "passed": true,
+          "checks": 2020,
+          "output": "PASS checks=2020\n"
+        },
+        {
+          "number": 28,
+          "name": "v1:BUTTON_STAT-failure",
+          "passed": true,
+          "checks": 2198,
+          "output": "PASS checks=2198\n"
+        },
+        {
+          "number": 29,
+          "name": "v2:BUTTON_STAT-failure",
+          "passed": true,
+          "checks": 2010,
+          "output": "PASS checks=2010\n"
+        },
+        {
+          "number": 30,
+          "name": "v1:disable-enable-clears-retention",
+          "passed": true,
+          "checks": 2170,
+          "output": "PASS checks=2170\n"
+        },
+        {
+          "number": 31,
+          "name": "v2:disable-enable-clears-retention",
+          "passed": true,
+          "checks": 1982,
+          "output": "PASS checks=1982\n"
+        },
+        {
+          "number": 32,
+          "name": "v1:deferred-retry-order-and-metadata",
+          "passed": true,
+          "checks": 124,
+          "output": "PASS checks=124\n"
+        },
+        {
+          "number": 33,
+          "name": "v2:deferred-retry-order-and-metadata",
+          "passed": true,
+          "checks": 106,
+          "output": "PASS checks=106\n"
+        },
+        {
+          "number": 34,
+          "name": "v1:all-retries-torn-no-third-burst",
+          "passed": true,
+          "checks": 1952,
+          "output": "PASS checks=1952\n"
+        },
+        {
+          "number": 35,
+          "name": "v2:all-retries-torn-no-third-burst",
+          "passed": true,
+          "checks": 1778,
+          "output": "PASS checks=1778\n"
+        },
+        {
+          "number": 36,
+          "name": "v1:transport-failure-not-deferred",
+          "passed": true,
+          "checks": 100,
+          "output": "PASS checks=100\n"
+        },
+        {
+          "number": 37,
+          "name": "v2:transport-failure-not-deferred",
+          "passed": true,
+          "checks": 92,
+          "output": "PASS checks=92\n"
+        },
+        {
+          "number": 38,
+          "name": "v1:late-retry-keeps-whole-poll-age-limit",
+          "passed": true,
+          "checks": 101,
+          "output": "PASS checks=101\n"
+        },
+        {
+          "number": 39,
+          "name": "v2:late-retry-keeps-whole-poll-age-limit",
+          "passed": true,
+          "checks": 93,
+          "output": "PASS checks=93\n"
+        },
+        {
+          "number": 40,
+          "name": "MPR:legacy-zero-profile",
+          "passed": true,
+          "checks": 71,
+          "output": "PASS checks=71\n"
+        },
+        {
+          "number": 41,
+          "name": "MPR:signed-enabled-profile-ignored",
+          "passed": true,
+          "checks": 71,
+          "output": "PASS checks=71\n"
+        },
+        {
+          "number": 42,
+          "name": "v1:legacy-failed-new-ON",
+          "passed": true,
+          "checks": 1194,
+          "output": "PASS checks=1194\n"
+        },
+        {
+          "number": 43,
+          "name": "v2:legacy-failed-new-ON",
+          "passed": true,
+          "checks": 1110,
+          "output": "PASS checks=1110\n"
+        },
+        {
+          "number": 44,
+          "name": "v1:legacy-partial-confirmation-then-fault",
+          "passed": true,
+          "checks": 665,
+          "output": "PASS checks=665\n"
+        },
+        {
+          "number": 45,
+          "name": "v2:legacy-partial-confirmation-then-fault",
+          "passed": true,
+          "checks": 617,
+          "output": "PASS checks=617\n"
+        },
+        {
+          "number": 46,
+          "name": "v1:legacy-neighbour-cannot-authorize-fault",
+          "passed": true,
+          "checks": 2106,
+          "output": "PASS checks=2106\n"
+        },
+        {
+          "number": 47,
+          "name": "v2:legacy-neighbour-cannot-authorize-fault",
+          "passed": true,
+          "checks": 1946,
+          "output": "PASS checks=1946\n"
+        },
+        {
+          "number": 48,
+          "name": "v1:legacy-native-button-range",
+          "passed": true,
+          "checks": 1093,
+          "output": "PASS checks=1093\n"
+        },
+        {
+          "number": 49,
+          "name": "v2:legacy-native-button-range",
+          "passed": true,
+          "checks": 1009,
+          "output": "PASS checks=1009\n"
+        },
+        {
+          "number": 50,
+          "name": "v1:legacy-held-status-fault-50ms",
+          "passed": true,
+          "checks": 1109,
+          "output": "PASS checks=1109\n"
+        },
+        {
+          "number": 51,
+          "name": "v2:legacy-held-status-fault-50ms",
+          "passed": true,
+          "checks": 1017,
+          "output": "PASS checks=1017\n"
+        },
+        {
+          "number": 52,
+          "name": "v1:legacy-expired-no-resurrection",
+          "passed": true,
+          "checks": 1161,
+          "output": "PASS checks=1161\n"
+        },
+        {
+          "number": 53,
+          "name": "v2:legacy-expired-no-resurrection",
+          "passed": true,
+          "checks": 1065,
+          "output": "PASS checks=1065\n"
+        },
+        {
+          "number": 54,
+          "name": "v1:legacy-short-status-recovery",
+          "passed": true,
+          "checks": 1062,
+          "output": "PASS checks=1062\n"
+        },
+        {
+          "number": 55,
+          "name": "v2:legacy-short-status-recovery",
+          "passed": true,
+          "checks": 974,
+          "output": "PASS checks=974\n"
+        },
+        {
+          "number": 56,
+          "name": "v1:legacy-fault-clock-wrap",
+          "passed": true,
+          "checks": 1109,
+          "output": "PASS checks=1109\n"
+        },
+        {
+          "number": 57,
+          "name": "v2:legacy-fault-clock-wrap",
+          "passed": true,
+          "checks": 1017,
+          "output": "PASS checks=1017\n"
+        },
+        {
+          "number": 58,
+          "name": "v1:legacy-fault-start-zero",
+          "passed": true,
+          "checks": 1111,
+          "output": "PASS checks=1111\n"
+        },
+        {
+          "number": 59,
+          "name": "v2:legacy-fault-start-zero",
+          "passed": true,
+          "checks": 1019,
+          "output": "PASS checks=1019\n"
+        },
+        {
+          "number": 60,
+          "name": "v1:legacy-profile-transition",
+          "passed": true,
+          "checks": 1249,
+          "output": "PASS checks=1249\n"
+        },
+        {
+          "number": 61,
+          "name": "v2:legacy-profile-transition",
+          "passed": true,
+          "checks": 1145,
+          "output": "PASS checks=1145\n"
+        },
+        {
+          "number": 62,
+          "name": "v1:legacy-retained-verification-after-real-OFF",
+          "passed": true,
+          "checks": 2187,
+          "output": "PASS checks=2187\n"
+        },
+        {
+          "number": 63,
+          "name": "v2:legacy-retained-verification-after-real-OFF",
+          "passed": true,
+          "checks": 2007,
+          "output": "PASS checks=2007\n"
+        },
+        {
+          "number": 64,
+          "name": "v1:legacy-healthy-fast-recontact-cadence",
+          "passed": true,
+          "checks": 2010,
+          "output": "PASS checks=2010\n"
+        },
+        {
+          "number": 65,
+          "name": "v2:legacy-healthy-fast-recontact-cadence",
+          "passed": true,
+          "checks": 1842,
+          "output": "PASS checks=1842\n"
+        },
+        {
+          "number": 66,
+          "name": "v1:legacy-held-read-optimization",
+          "passed": true,
+          "checks": 1926,
+          "output": "PASS checks=1926\n"
+        },
+        {
+          "number": 67,
+          "name": "v2:legacy-held-read-optimization",
+          "passed": true,
+          "checks": 1766,
+          "output": "PASS checks=1766\n"
+        },
+        {
+          "number": 68,
+          "name": "v1:legacy-healthy-medium-cadence",
+          "passed": true,
+          "checks": 157,
+          "output": "PASS checks=157\n"
+        },
+        {
+          "number": 69,
+          "name": "v2:legacy-healthy-medium-cadence",
+          "passed": true,
+          "checks": 145,
+          "output": "PASS checks=145\n"
+        },
+        {
+          "number": 70,
+          "name": "v1:legacy-cross-chip-fault",
+          "passed": true,
+          "checks": 2106,
+          "output": "PASS checks=2106\n"
+        },
+        {
+          "number": 71,
+          "name": "v2:legacy-cross-chip-fault",
+          "passed": true,
+          "checks": 1946,
+          "output": "PASS checks=1946\n"
+        },
+        {
+          "number": 72,
+          "name": "v1:legacy-recovered-wake-NACK",
+          "passed": true,
+          "checks": 62,
+          "output": "PASS checks=62\n"
+        },
+        {
+          "number": 73,
+          "name": "v2:legacy-recovered-wake-NACK",
+          "passed": true,
+          "checks": 58,
+          "output": "PASS checks=58\n"
+        },
+        {
+          "number": 74,
+          "name": "v1:legacy-torn-then-good-group",
+          "passed": true,
+          "checks": 110,
+          "output": "PASS checks=110\n"
+        },
+        {
+          "number": 75,
+          "name": "v2:legacy-torn-then-good-group",
+          "passed": true,
+          "checks": 102,
+          "output": "PASS checks=102\n"
+        },
+        {
+          "number": 76,
+          "name": "v1:legacy-persistent-torn-groups",
+          "passed": true,
+          "checks": 1174,
+          "output": "PASS checks=1174\n"
+        },
+        {
+          "number": 77,
+          "name": "v2:legacy-persistent-torn-groups",
+          "passed": true,
+          "checks": 1090,
+          "output": "PASS checks=1090\n"
+        },
+        {
+          "number": 78,
+          "name": "v1:legacy-late-native-status",
+          "passed": true,
+          "checks": 105,
+          "output": "PASS checks=105\n"
+        },
+        {
+          "number": 79,
+          "name": "v2:legacy-late-native-status",
+          "passed": true,
+          "checks": 97,
+          "output": "PASS checks=97\n"
+        },
+        {
+          "number": 80,
+          "name": "v1:legacy-long-first-fault-expires",
+          "passed": true,
+          "checks": 1013,
+          "output": "PASS checks=1013\n"
+        },
+        {
+          "number": 81,
+          "name": "v2:legacy-long-first-fault-expires",
+          "passed": true,
+          "checks": 929,
+          "output": "PASS checks=929\n"
+        },
+        {
+          "number": 82,
+          "name": "v1:legacy-late-counts-no-deadline-renewal",
+          "passed": true,
+          "checks": 1067,
+          "output": "PASS checks=1067\n"
+        },
+        {
+          "number": 83,
+          "name": "v2:legacy-late-counts-no-deadline-renewal",
+          "passed": true,
+          "checks": 979,
+          "output": "PASS checks=979\n"
+        },
+        {
+          "number": 84,
+          "name": "MPR:hw1:failed-filter-new-ON",
+          "passed": true,
+          "checks": 27,
+          "output": "PASS checks=27\n"
+        },
+        {
+          "number": 85,
+          "name": "MPR:hw2:failed-filter-new-ON",
+          "passed": true,
+          "checks": 27,
+          "output": "PASS checks=27\n"
+        },
+        {
+          "number": 86,
+          "name": "MPR:hw1:failed-baseline-is-not-threshold-rejection",
+          "passed": true,
+          "checks": 34,
+          "output": "PASS checks=34\n"
+        },
+        {
+          "number": 87,
+          "name": "MPR:hw2:failed-baseline-is-not-threshold-rejection",
+          "passed": true,
+          "checks": 34,
+          "output": "PASS checks=34\n"
+        },
+        {
+          "number": 88,
+          "name": "MPR:hw1:status-fault-hold-49-release-50",
+          "passed": true,
+          "checks": 70,
+          "output": "PASS checks=70\n"
+        },
+        {
+          "number": 89,
+          "name": "MPR:hw2:status-fault-hold-49-release-50",
+          "passed": true,
+          "checks": 70,
+          "output": "PASS checks=70\n"
+        },
+        {
+          "number": 90,
+          "name": "MPR:hw1:pending-confirmation-fault-resets",
+          "passed": true,
+          "checks": 17,
+          "output": "PASS checks=17\n"
+        },
+        {
+          "number": 91,
+          "name": "MPR:hw2:pending-confirmation-fault-resets",
+          "passed": true,
+          "checks": 17,
+          "output": "PASS checks=17\n"
+        },
+        {
+          "number": 92,
+          "name": "MPR:hw1:neighbour-cannot-authorize-fault",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 93,
+          "name": "MPR:hw2:neighbour-cannot-authorize-fault",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 94,
+          "name": "MPR:hw1:healthy-flick-and-held-read-budget",
+          "passed": true,
+          "checks": 186,
+          "output": "PASS checks=186\n"
+        },
+        {
+          "number": 95,
+          "name": "MPR:hw2:healthy-flick-and-held-read-budget",
+          "passed": true,
+          "checks": 186,
+          "output": "PASS checks=186\n"
+        },
+        {
+          "number": 96,
+          "name": "MPR:hw1:healthy-weak-confirmation",
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "number": 97,
+          "name": "MPR:hw2:healthy-weak-confirmation",
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "number": 98,
+          "name": "MPR:hw1:four-fixed-lanes",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 99,
+          "name": "MPR:hw2:four-fixed-lanes",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 100,
+          "name": "MPR:hw1:actual-OFF-needs-fresh-evidence",
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "number": 101,
+          "name": "MPR:hw2:actual-OFF-needs-fresh-evidence",
+          "passed": true,
+          "checks": 11,
+          "output": "PASS checks=11\n"
+        },
+        {
+          "number": 102,
+          "name": "MPR:hw1:later-chip-age-check",
+          "passed": true,
+          "checks": 8,
+          "output": "PASS checks=8\n"
+        },
+        {
+          "number": 103,
+          "name": "MPR:hw2:later-chip-age-check",
+          "passed": true,
+          "checks": 8,
+          "output": "PASS checks=8\n"
+        },
+        {
+          "number": 104,
+          "name": "MPR:hw1:fault-clock-wrap",
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "number": 105,
+          "name": "MPR:hw2:fault-clock-wrap",
+          "passed": true,
+          "checks": 13,
+          "output": "PASS checks=13\n"
+        },
+        {
+          "number": 106,
+          "name": "MPR:hw1:recovered-retry-conservative-tier",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 107,
+          "name": "MPR:hw2:recovered-retry-conservative-tier",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 108,
+          "name": "MPR:hw1:long-first-fault-expires",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 109,
+          "name": "MPR:hw2:long-first-fault-expires",
+          "passed": true,
+          "checks": 7,
+          "output": "PASS checks=7\n"
+        },
+        {
+          "number": 110,
+          "name": "MPR:hw1:zero-start-and-expired-no-resurrection",
+          "passed": true,
+          "checks": 22,
+          "output": "PASS checks=22\n"
+        },
+        {
+          "number": 111,
+          "name": "MPR:hw2:zero-start-and-expired-no-resurrection",
+          "passed": true,
+          "checks": 22,
+          "output": "PASS checks=22\n"
+        },
+        {
+          "number": 112,
+          "name": "MPR:hw1:all-32-mappings-slide",
+          "passed": true,
+          "checks": 97,
+          "output": "PASS checks=97\n"
+        },
+        {
+          "number": 113,
+          "name": "MPR:hw2:all-32-mappings-slide",
+          "passed": true,
+          "checks": 97,
+          "output": "PASS checks=97\n"
+        },
+        {
+          "number": 114,
+          "name": "MPR:hw1:published-ON-dip-retains-read-budget",
+          "passed": true,
+          "checks": 68,
+          "output": "PASS checks=68\n"
+        },
+        {
+          "number": 115,
+          "name": "MPR:hw2:published-ON-dip-retains-read-budget",
+          "passed": true,
+          "checks": 68,
+          "output": "PASS checks=68\n"
+        },
+        {
+          "number": 116,
+          "name": "MPR:hw1:per-key-threshold-and-confirmation",
+          "passed": true,
+          "checks": 29,
+          "output": "PASS checks=29\n"
+        },
+        {
+          "number": 117,
+          "name": "MPR:hw2:per-key-threshold-and-confirmation",
+          "passed": true,
+          "checks": 29,
+          "output": "PASS checks=29\n"
+        },
+        {
+          "number": 118,
+          "name": "MPR:hw1:global-and-per-key-floor",
+          "passed": true,
+          "checks": 22,
+          "output": "PASS checks=22\n"
+        },
+        {
+          "number": 119,
+          "name": "MPR:hw2:global-and-per-key-floor",
+          "passed": true,
+          "checks": 22,
+          "output": "PASS checks=22\n"
+        },
+        {
+          "number": 120,
+          "name": "MPR:hw1:inclusive-status-age-15-reject-16",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 121,
+          "name": "MPR:hw2:inclusive-status-age-15-reject-16",
+          "passed": true,
+          "checks": 9,
+          "output": "PASS checks=9\n"
+        },
+        {
+          "number": 122,
+          "name": "MPR:hw1:late-analog-does-not-authorize",
+          "passed": true,
+          "checks": 8,
+          "output": "PASS checks=8\n"
+        },
+        {
+          "number": 123,
+          "name": "MPR:hw2:late-analog-does-not-authorize",
+          "passed": true,
+          "checks": 8,
+          "output": "PASS checks=8\n"
+        }
+      ],
+      "source_sha256": "3fb2525af17dee336e7458e16feb28895b7ee69fc3f464cee7f9ecfdd1fea2b7",
+      "driver_sha256": "3dd372053df582bf21b316e5f238988aeec4eae1603c62cb6be948d81a7ea9b7",
+      "header_sha256": {
+        "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share\\nyanithm_shared.h": "f052f1eab8b863f96713fda8ba2ff29506985ee84a3274c377b5620a762ac527",
+        "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software\\mbr_distance_gate.h": "1896ceaac1e038e33e95370b55da24e5cac596f951743420a800cdbfda6d6896"
+      }
+    }
+  },
+  "source_sha256": {
+    "src/hw_devices.cpp": "3fb2525af17dee336e7458e16feb28895b7ee69fc3f464cee7f9ecfdd1fea2b7",
+    "src/mpr121.cpp": "e1fdb59b5b80caca179b12526db78c27e236fd7ef538691301e8945a744913f1",
+    "include/device/mpr121.h": "988defe7668e7b4c2a24e0580d4bf9ef7830086579dd893734c8261437b4afc1",
+    "include/share/nyanithm_shared.h": "f052f1eab8b863f96713fda8ba2ff29506985ee84a3274c377b5620a762ac527",
+    "tools/test_mbr_distance_pipeline.py": "f5319baa8a23afa4abba5d60543198fea646a46326a324c2469a8236ae9ee05b",
+    "tools/test_mpr_read_contract.py": "2c98905079df8b384f1fd5481bd9dff940d180ab19727036d91fb3d3ea753e47",
+    "tools/test_round50_migration.py": "bfbe9746e2f27011b114f39569ddd40a0ebd4c514f42cf54c12968a2b859982d"
+  }
+}

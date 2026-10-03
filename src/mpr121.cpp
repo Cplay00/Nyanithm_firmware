@@ -326,9 +326,9 @@ void MPR121::calibrateBaseline(bool force) {
  *  @returns    the filtered reading as a 10 bit unsigned value
  */
 uint16_t MPR121::filteredData(uint8_t t) {
-    if (t > 12)
-        return 0;
-    return readRegister16(MPR121_FILTDATA_0L + t * 2);
+    uint16_t value = 0;
+    readFilteredData(t, value);
+    return value;
 }
 
 /*!
@@ -340,10 +340,9 @@ uint16_t MPR121::filteredData(uint8_t t) {
  *  @returns    the baseline data that was read
  */
 uint16_t MPR121::baselineData(uint8_t t) {
-    if (t > 12)
-        return 0;
-    uint16_t bl = readRegister8(MPR121_BASELINE_0 + t);
-    return (bl << 2);
+    uint16_t value = 0;
+    readBaselineData(t, value);
+    return value;
 }
 
 // round46b: bulk register read (single I2C transaction) - used by the fast
@@ -352,9 +351,10 @@ uint16_t MPR121::baselineData(uint8_t t) {
 // bulk read previously left uninitialized stack garbage in dst, which the
 // diff clamp turned into false diff=255 spikes (th_touch=257 calibration).
 bool MPR121::readRegisters(uint8_t reg, uint8_t* dst, uint8_t n) {
+    if (dst == nullptr || n == 0) return false;
     uint8_t data[1] = { reg };
     int ret = i2c_write_read(port, addr, data, 1, dst, n);
-    if (ret < 0) {
+    if (ret != n) {
         memset(dst, 0, n);
         return false;
     }
@@ -369,18 +369,47 @@ bool MPR121::readRegisters(uint8_t reg, uint8_t* dst, uint8_t n) {
  * device is currently deemed to be touched.
  */
 uint16_t MPR121::touched(void) {
-    uint8_t reg = MPR121_TOUCHSTATUS_L;
-    uint8_t buffer[2] = {0, 0};
-    int ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
-    if (ret < 0) {
-        sleep_us(50);
-        ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
-        if (ret < 0) return 0;  // I2C error: safe default = no touch
-    }
-    uint16_t t = buffer[1];
-    t <<= 8;
-    t |= buffer[0];
-    return t & 0x0FFF;
+    uint16_t status = 0;
+    readTouchStatus(status);
+    return status;
+}
+
+bool MPR121::readRegisterChecked(uint8_t reg, uint8_t* dst, uint8_t n, bool* retried) {
+    if (retried) *retried = false;
+    if (readRegisters(reg, dst, n)) return true;
+    sleep_us(50);
+    if (retried) *retried = true;
+    return readRegisters(reg, dst, n);
+}
+
+bool MPR121::readTouchStatus(uint16_t& status) {
+    status = 0;
+    uint8_t buffer[2] = {};
+    if (!readRegisterChecked(MPR121_TOUCHSTATUS_L, buffer, 2)) return false;
+    status = ((uint16_t)buffer[0] | ((uint16_t)buffer[1] << 8)) & 0x0FFF;
+    return true;
+}
+
+bool MPR121::readFilteredData(uint8_t t, uint16_t& value, bool* retried) {
+    value = 0;
+    if (retried) *retried = false;
+    if (t > 12) return false;
+    uint8_t buffer[2] = {};
+    if (!readRegisterChecked(MPR121_FILTDATA_0L + t * 2, buffer, 2, retried)) return false;
+    uint16_t reading = (uint16_t)buffer[0] | ((uint16_t)buffer[1] << 8);
+    if (reading > 0x03FF) return false;  // native 10-bit output; reserved bits are not data
+    value = reading;
+    return true;
+}
+
+bool MPR121::readBaselineData(uint8_t t, uint16_t& value, bool* retried) {
+    value = 0;
+    if (retried) *retried = false;
+    if (t > 12) return false;
+    uint8_t buffer[1] = {};
+    if (!readRegisterChecked(MPR121_BASELINE_0 + t, buffer, 1, retried)) return false;
+    value = (uint16_t)buffer[0] << 2;  // only high 8 bits of the native baseline are readable
+    return true;
 }
 
 /*!
@@ -390,11 +419,7 @@ uint16_t MPR121::touched(void) {
  */
 uint8_t MPR121::readRegister8(uint8_t reg) {
     uint8_t buffer[1] = {0};
-    int ret = i2c_write_read(port, addr, &reg, 1, buffer, 1);
-    if (ret < 0) {
-        sleep_us(50);
-        i2c_write_read(port, addr, &reg, 1, buffer, 1);
-    }
+    readRegisterChecked(reg, buffer, 1);
     return buffer[0];
 }
 
@@ -405,11 +430,7 @@ uint8_t MPR121::readRegister8(uint8_t reg) {
  */
 uint16_t MPR121::readRegister16(uint8_t reg) {
     uint8_t buffer[2] = {0, 0};
-    int ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
-    if (ret < 0) {
-        sleep_us(50);
-        i2c_write_read(port, addr, &reg, 1, buffer, 2);
-    }
+    readRegisterChecked(reg, buffer, 2);
     uint16_t val = buffer[1];
     val <<= 8;
     val |= buffer[0];
