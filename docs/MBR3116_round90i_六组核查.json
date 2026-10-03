@@ -1,0 +1,13 @@
+{
+  "packet": "MBR3116_round90i_同32寸六组证据.zip",
+  "sha256": "b9228525840d1da1572df78cce5eda01642f6e607588a6f487079e7e28f26324",
+  "bytes": 466546,
+  "members_verified": 25,
+  "all_cycles": 2194,
+  "confirmed_cycles": 1462,
+  "discarded_jobs_retained": 3,
+  "portable_replay_byte_equal": true,
+  "game_feedback": "目前很稳定",
+  "direct_hid_report_capture": false,
+  "mbr_hover_cured": false
+}

@@ -1,0 +1,13 @@
+{
+  "packet": "MBR3116_round90i_同32寸MPR基线证据.zip",
+  "sha256": "38386c05b4cb10759acfe32b7f3d5ed54c17df9b3a949455ebb3d6d013356f72",
+  "bytes": 146859,
+  "members_verified": 25,
+  "idle_snapshots": 36,
+  "normal_cdc_frames": 100,
+  "configuration_saved_and_reboot_equal": true,
+  "mock_cycles": 356,
+  "new_touch_or_firmware_code": false,
+  "real_user_gestures": "pending",
+  "hid_game_acceptance": "pending"
+}
