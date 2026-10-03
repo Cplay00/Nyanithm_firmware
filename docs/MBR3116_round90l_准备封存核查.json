@@ -1,0 +1,35 @@
+{
+  "date_local": "2026-10-04",
+  "scope": "preparation + four completed normal-mode fixed physical action captures",
+  "source_commit_before_delivery": "eea779453944f0e499eff7bd64313ec22ad508c2",
+  "archives": {
+    "preparation": {
+      "name": "MBR3116_round90l_映射测试准备.zip",
+      "members": 46,
+      "size": 950752,
+      "sha256": "1aaa39dac8aeda84502ddf2bc5e01f79e0c6d095928d010e2b9b181def99181d",
+      "all_member_hashes_and_CRC_passed": true,
+      "isolated_replay_byte_equal": true,
+      "replay_output": "PASS 10426 normal pairs; 4 confirmed points; 1 discarded; MOCK\n"
+    },
+    "real": {
+      "name": "MBR3116_round90l_四点实机证据.zip",
+      "members": 28,
+      "size": 401550,
+      "sha256": "687d0ead3f3abbd948c555492d183e4535add40bbc18352b748e7ef68bb24db2",
+      "all_member_hashes_and_CRC_passed": true,
+      "isolated_replay_byte_equal": true,
+      "replay_output": "PASS 7688 normal pairs; 4 confirmed points; 0 discarded; REAL\n"
+    }
+  },
+  "mock_pairs": 10426,
+  "real_pairs": 7688,
+  "real_confirmed_points": 4,
+  "real_discarded": 0,
+  "usb_side_from_front": "left",
+  "serial_released": true,
+  "normal_hardware_mask_validity": "C0 lacks read quality/freshness; OFF can represent failed touched() reads",
+  "no_firmware_configuration_or_register_write": true,
+  "no_reset_or_configuration_mode": true,
+  "firmware_checks_exempt_reason": "host-only capture/analysis/UI/documentation; no firmware/touch/protocol behavior edits"
+}
