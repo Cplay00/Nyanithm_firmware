@@ -33,7 +33,7 @@ Host API的SetDebugDataSensorId要求等刷新后读诊断；ReadDiffCounts检�
 
 当前三芯片调用链：updateInputState → updateTouch_v1 → 原生按钮位 → MBR差值验证 → 确认/保持/拉伸/slide → 完成快照 → HID/CDC。hwVer3/4走双芯片updateTouch_v2。profile ON走mbrDistanceReadSample/RetrySample和严格读组；当前OFF首次验证与压力快照调用旧get_DIFFERENCE_COUNT_SENSOR入口。MPR使用自身滤波/基线与专属验证尺度。
 
-源码MPR分支使用CONFIG1=0x10、CONFIG2=0x28，关闭AutoConfig，配置触摸期基线冻结及启动空闲基线处理。这是**当前源码行为**，不是此次MPR模块的现场寄存器快照；尚未取得本次无悬空MPR的现场数据。
+源码MPR分支使用CONFIG1=0x10、CONFIG2=0x28，关闭AutoConfig，设置触摸期基线参数及启动空闲基线处理。这是**源码设置**，不是此次MPR模块的现场寄存器快照；尚未取得本次无悬空MPR的现场数据。round90e补充核查：FDLT=255的“冻结”注释不能直接作为硬件禁用跟踪的证明，AN3891定义为减慢滤波；详见[基线研究](MBR3116_round90e_故障准入修复与基线研究.md)。
 
 ## 3. 用户确认离开后的空闲测图
 

@@ -3,7 +3,8 @@
 Round50 MBR3116 Migration Theoretical Test
 ===========================================
 Simulates the touch processing pipeline for both MPR121 and MBR3116 paths,
-verifying behavioral equivalence across 14 test scenarios.
+verifying behavior across 44 grouped scenarios. Production I/O fault tests
+are separately executed by test_mbr_distance_pipeline.py.
 
 Tests:
   1. New touch - strong signal (fast path)
@@ -79,6 +80,8 @@ MBR_NEIGHBOR_GATE_MARGIN = 40  # round84: lane-anchored gate relaxation floor
 RAW_REPORT_LEVEL_OFF = 0       # round84: 0xC5 session levels
 RAW_REPORT_LEVEL_SIM = 1       #   1 = simulated (round80 semantics: MPR x2)
 RAW_REPORT_LEVEL_RAW = 2       #   2 = raw unscaled (MBR identical to level 1)
+MBR_LEGACY_FAULT_HOLD_MS = 50  # round90e: missing required evidence cannot create ON
+MBR_NATIVE_MAX_AGE_MS = 15
 
 
 # ============================================================
@@ -95,6 +98,8 @@ class ElectrodeState:
     stickyGrace: int = 0
     lastTouchedMs: int = 0
     fastOk: bool = False  # round80: strong flick first-cycle output flag
+    faultActive: bool = False
+    faultStartedMs: int = 0
 
 
 @dataclass
@@ -130,6 +135,8 @@ class TouchPipeline:
         # profile signature/check and transport/cache are tested by C++ harness.
         self.distance_profile = distance_profile
         self.distance_active = [False] * num_elec
+        self.strict_current = False
+        self.mbr_fault_mask = 0
 
     def _verify_mpr121(self, raw: int, hw_touch: int, diff_data: List[int],
                        i2c_error: bool, prev_stretched: int) -> Tuple[int, SimResult]:
@@ -215,7 +222,8 @@ class TouchPipeline:
         return raw, result
 
     def _verify_mbr3116(self, raw: int, hw_touch: int, diff_data: List[int],
-                        i2c_error: bool, prev_stretched: int) -> Tuple[int, SimResult]:
+                        i2c_error: bool, prev_stretched: int,
+                        difference_read_valid: bool = True) -> Tuple[int, SimResult]:
         """MBR3116 verification path."""
         result = SimResult()
         nowVer = self.cycle_ms
@@ -225,23 +233,30 @@ class TouchPipeline:
 
         for e in range(self.num_elec):
             if raw & (1 << e):
-                if self.elec[e].verifiedCount < 2:
+                if (self.elec[e].verifiedCount < 2 or
+                        (not self.strict_current and not (prev_stretched & (1 << e)))):
                     if not diff_read:
                         result.i2c_reads += 1
-                        diff_ok = not i2c_error
+                        diff_ok = not i2c_error and difference_read_valid
                         if not diff_ok:
                             diff_retried = True
                             result.i2c_reads += 1
-                            diff_ok = not i2c_error  # second read also fails in error case
-                            if not diff_ok:
-                                diff_ok = True  # simulate second read succeeding
-                                diff_retried = True
+                            # i2c_error models a transient first-attempt error;
+                            # this argument models the final bounded outcome.
+                            diff_ok = difference_read_valid
                         diff_read = True
 
                     if not diff_ok:
+                        raw &= ~(1 << e)
+                        self.mbr_fault_mask |= 1 << e
                         self.elec[e].confirmReq = CONFIRM_CYCLES
                     else:
                         diff = diff_data[e]
+                        if not self.strict_current and not 0 <= diff <= 255:
+                            raw &= ~(1 << e)
+                            self.mbr_fault_mask |= 1 << e
+                            self.elec[e].confirmReq = CONFIRM_CYCLES
+                            continue
                         # round64: base_k = per-key if set, else the default 80;
                         # tiers = base_k + {40, 120, 220}. MBR can only tighten:
                         # config <=80 keeps the verify baseline (never relaxes).
@@ -272,6 +287,10 @@ class TouchPipeline:
                             if self.g_verifyFail[e] < 255:
                                 self.g_verifyFail[e] += 1
                                 result.verify_fails += 1
+                        elif self.elec[e].verifiedCount >= 2:
+                            # Fresh evidence admits a cached rapid re-contact;
+                            # preserve the established confirmation cadence.
+                            pass
                         elif self.elec[e].verifiedCount == 0 and not diff_retried and diff >= MBR_FLICK_FAST_TH:
                             # round80: strong flick fast path (first sighting,
                             # no I2C retry). Gate >= 200 lifts the effective
@@ -301,12 +320,30 @@ class TouchPipeline:
         return raw, result
 
     def _stretch(self, raw: int, prev_stretched: int) -> Tuple[int, SimResult]:
-        """Shared stretching logic (identical for MPR121 and MBR3116)."""
+        """Shared stretching, with bounded legacy-MBR evidence-fault holding."""
         result = SimResult()
         stretched = 0
         now = self.cycle_ms
 
         for e in range(self.num_elec):
+            state = self.elec[e]
+            fault = (self.is_mbr3116 and not self.strict_current and
+                     bool(self.mbr_fault_mask & (1 << e)))
+            if fault:
+                if not state.faultActive:
+                    state.faultActive = True
+                    state.faultStartedMs = now
+                if ((prev_stretched & (1 << e)) and
+                        ((now - state.faultStartedMs) & 0xFFFFFFFF) < MBR_LEGACY_FAULT_HOLD_MS):
+                    stretched |= 1 << e
+                else:
+                    # Retain only the original fault deadline; never grant
+                    # verification, confirmation, or stretch credit on failure.
+                    self.elec[e] = ElectrodeState(
+                        confirmReq=CONFIRM_CYCLES, faultActive=True,
+                        faultStartedMs=state.faultStartedMs)
+                continue
+            state.faultActive = False
             is_touched = (raw >> e) & 1
             if is_touched:
                 self.elec[e].lastTouchedMs = now
@@ -355,7 +392,10 @@ class TouchPipeline:
         return stretched, result
 
     def process_cycle(self, hw_touch: int, diff_data: List[int], i2c_error: bool = False,
-                      distance_sample_valid: bool = True) -> SimResult:
+                      distance_sample_valid: bool = True,
+                      difference_read_valid: bool = True,
+                      mbr_button_valid: bool = True,
+                      button_read_age_ms: int = 0) -> SimResult:
         """Process one cycle: verify -> stretch -> output."""
         result = SimResult()
         prev_stretched = self.prevStretched
@@ -364,6 +404,8 @@ class TouchPipeline:
         strict = (self.is_mbr3116 and profile is not None and
                   0 <= profile[0] < profile[1] <= 255 and
                   0 <= profile[3] < profile[2] <= 100)
+        self.strict_current = strict
+        self.mbr_fault_mask = 0
         if strict:
             zero, full, on_percent, off_percent = profile
             on_count = zero + ((full - zero) * on_percent + 99) // 100
@@ -386,7 +428,11 @@ class TouchPipeline:
 
         # Verification
         if self.is_mbr3116:
-            raw, v_res = self._verify_mbr3116(raw, hw_touch, diff_data, i2c_error, prev_stretched)
+            raw, v_res = self._verify_mbr3116(
+                raw, hw_touch, diff_data, i2c_error, prev_stretched, difference_read_valid)
+            if not strict and (not mbr_button_valid or button_read_age_ms > MBR_NATIVE_MAX_AGE_MS):
+                raw = 0
+                self.mbr_fault_mask = (1 << self.num_elec) - 1
         else:
             raw, v_res = self._verify_mpr121(raw, hw_touch, diff_data, i2c_error, prev_stretched)
         result.i2c_reads = v_res.i2c_reads
@@ -402,12 +448,12 @@ class TouchPipeline:
         # flat sim's lanes ARE the electrodes) for next cycle's anchoring.
         for lane in range(self.num_elec):
             self.prevLaneStretched[lane] = bool(stretched & (1 << lane))
-        self.cycle_ms += 3  # ~3ms per cycle
+        self.cycle_ms = (self.cycle_ms + 3) & 0xFFFFFFFF  # ~3ms per cycle
         return result
 
     def advance_ms(self, ms: int):
         """Advance simulated time without processing."""
-        self.cycle_ms += ms
+        self.cycle_ms = (self.cycle_ms + ms) & 0xFFFFFFFF
 
 
 # ============================================================
@@ -445,8 +491,8 @@ def run_tests():
 
     # MPR121: diff=10 (sw_th+6=10 -> skip path; below fast_th=50, no fastOk)
     r_mpr = mpr.process_cycle(0x001, [10]*12)
-    # MBR3116: diff=300 (>= MBR_FLICK_FAST_TH -> round80 fast path, first-cycle output)
-    r_mbr = mbr.process_cycle(0x001, [300]*16)
+    # MBR button DIFF is at most 255; use a valid strong sample for the fast path.
+    r_mbr = mbr.process_cycle(0x001, [255]*16)
 
     tr.check("S1: MPR121 verifiedCount=2 (skip, no fast)", mpr.elec[0].verifiedCount == 2,
              f"got {mpr.elec[0].verifiedCount}")
@@ -515,10 +561,10 @@ def run_tests():
 
     # First: establish touch on electrode 0
     mpr.process_cycle(0x001, [10]*12)  # strong signal
-    mbr.process_cycle(0x001, [300]*16)
+    mbr.process_cycle(0x001, [255]*16)
     # Second cycle: touch persists + neighbor (electrode 1) starts
     r_mpr = mpr.process_cycle(0x003, [10]*12)  # elec 0 sustained, elec 1 new with neighbor
-    r_mbr = mbr.process_cycle(0x003, [300]*16)
+    r_mbr = mbr.process_cycle(0x003, [255]*16)
 
     tr.check("S5: MPR121 elec1 fast path (neighbor)", mpr.elec[1].verifiedCount == 2,
              f"got {mpr.elec[1].verifiedCount}")
@@ -757,11 +803,11 @@ def run_tests():
     mbr_pk = TouchPipeline(16, is_mbr3116=True, per_key=[0]*16)
 
     seq = [
-        (0x001, [10]*12, [300]*16),   # strong fast-path
+        (0x001, [10]*12, [255]*16),   # strong fast-path
         (0x001, [8]*12, [200]*16),    # medium
         (0x001, [6]*12, [120]*16),    # weak/edge strict
         (0x001, [2]*12, [50]*16),     # false touch (rejected)
-        (0x001, [10]*12, [300]*16),   # re-touch
+        (0x001, [10]*12, [255]*16),   # re-touch
         (0x000, [0]*12, [0]*16),      # release
     ]
     equiv_mpr = True
@@ -865,7 +911,7 @@ def run_tests():
     # run 3 cycles to confirm the touch (touchData32 gets the binary bits)
     for _ in range(3):
         r_mpr_b = mpr.process_cycle(0x001, [10]*12)
-        r_mbr_b = mbr.process_cycle(0x001, [300]*16)
+        r_mbr_b = mbr.process_cycle(0x001, [255]*16)
 
     # pressure substitution: pressed lane (bit set) -> max(1, pressure),
     # untouched lane -> 0. Binary truth (nonzero) must match raw bit.
@@ -1161,6 +1207,74 @@ def run_tests():
     legacy.process_cycle(1, [240] * 16)
     r = legacy.process_cycle(1, [10] * 16)
     tr.check("S36: legacy sustained low DIFF blind spot reproduced", r.stretched_out & 1, "")
+
+    print("\n--- Scenarios 37-44: legacy MBR required-evidence faults (round90e) ---")
+    legacy = TouchPipeline(16, True)
+    outcomes = [legacy.process_cycle(1, [255] * 16, difference_read_valid=False)
+                for _ in range(30)]
+    tr.check("S37: persistent difference failure never creates ON",
+             all(r.raw_out == 0 and r.stretched_out == 0 and r.i2c_reads == 2 for r in outcomes), "")
+    tr.check("S37: recovery restores strong first-cycle touch",
+             legacy.process_cycle(1, [255] * 16).stretched_out == 1, "")
+
+    legacy = TouchPipeline(16, True)
+    legacy.process_cycle(1, [100] * 16)
+    outcomes = [legacy.process_cycle(1, [255] * 16, difference_read_valid=False)
+                for _ in range(20)]
+    tr.check("S38: partial confirmation cannot advance on failed evidence",
+             all(r.stretched_out == 0 for r in outcomes) and legacy.elec[0].touchCount == 0, "")
+
+    legacy = TouchPipeline(16, True)
+    legacy.process_cycle(1, [255] * 16)
+    legacy.cycle_ms = 0  # zero is a valid fault start time
+    r = legacy.process_cycle(1, [255] * 16, mbr_button_valid=False)
+    tr.check("S39: short native-state fault holds only prior ON", r.stretched_out == 1, "")
+    legacy.cycle_ms = 49
+    tr.check("S39: prior ON held at 49ms",
+             legacy.process_cycle(1, [255] * 16, mbr_button_valid=False).stretched_out == 1, "")
+    legacy.cycle_ms = 50
+    r = legacy.process_cycle(1, [255] * 16, mbr_button_valid=False)
+    tr.check("S39: release at 50ms clears confirmation and fast credentials",
+             r.stretched_out == 0 and legacy.elec[0].touchCount == 0 and
+             legacy.elec[0].verifiedCount == 0 and not legacy.elec[0].fastOk, "")
+
+    legacy = TouchPipeline(16, True)
+    legacy.process_cycle(1, [255] * 16)
+    legacy.process_cycle(1, [255] * 16, mbr_button_valid=False)
+    r = legacy.process_cycle(1, [255] * 16)
+    tr.check("S40: short native-state failure recovers without extra debounce",
+             r.stretched_out == 1 and r.i2c_reads == 0, "")
+
+    legacy = TouchPipeline(16, True)
+    legacy.process_cycle(1, [255] * 16)
+    legacy.process_cycle(1, [255] * 16)
+    for _ in range(6):
+        legacy.process_cycle(0, [0] * 16)
+    tr.check("S41: output OFF while verification credits remain",
+             legacy.prevStretched == 0 and legacy.elec[0].verifiedCount == 2, "")
+    r = legacy.process_cycle(1, [255] * 16, difference_read_valid=False)
+    tr.check("S41: cached credits cannot admit failed re-contact",
+             r.stretched_out == 0 and r.i2c_reads == 2, "")
+
+    for age, expected in ((15, 1), (16, 0)):
+        legacy = TouchPipeline(16, True)
+        r = legacy.process_cycle(1, [255] * 16, button_read_age_ms=age)
+        tr.check(f"S42: native evidence age={age}ms", r.stretched_out == expected, "")
+    for value, expected in ((255, 1), (256, 0)):
+        legacy = TouchPipeline(16, True)
+        r = legacy.process_cycle(1, [value] * 16)
+        tr.check(f"S43: native button count={value}", r.stretched_out == expected, "")
+
+    legacy = TouchPipeline(16, True)
+    legacy.process_cycle(1, [255] * 16)
+    legacy.cycle_ms = 0xFFFFFFF0
+    legacy.process_cycle(1, [255] * 16, mbr_button_valid=False)
+    legacy.cycle_ms = 0x21  # 49ms elapsed across wrap
+    tr.check("S44: unsigned wrap preserves 49ms hold",
+             legacy.process_cycle(1, [255] * 16, mbr_button_valid=False).stretched_out == 1, "")
+    legacy.cycle_ms = 0x22
+    tr.check("S44: unsigned wrap releases at 50ms",
+             legacy.process_cycle(1, [255] * 16, mbr_button_valid=False).stretched_out == 0, "")
     return tr
 
 

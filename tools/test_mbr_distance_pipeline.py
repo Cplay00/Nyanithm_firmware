@@ -138,26 +138,29 @@ public:
     uint16_t hardwareBits = 0;
     uint16_t counts[16] = {0};
     unsigned coherentReads = 0, legacyReads = 0, statusReads = 0;
-    uint32_t delayMs = 0;
-    bool readFails = false, statusFails = false;
+    uint32_t delayMs = 0, statusDelayMs = 0;
+    bool readFails = false, statusFails = false, inLegacyRead = false;
     unsigned tornReadsRemaining = 0;
     unsigned genericFailuresRemaining = 0;
     uint8_t get_BUTTON_STAT(uint8_t* result) {
         ++statusReads;
+        fakeNow += statusDelayMs;
         if (statusFails) return 1;
         result[0] = hardwareBits & 0xFF; result[1] = hardwareBits >> 8;
         return 0;
     }
     uint8_t get_DIFFERENCE_COUNT_SENSOR(uint16_t* result) {
         ++legacyReads;
-        if (readFails) return 1;
-        for (unsigned i = 0; i < 16; ++i) result[i] = counts[i];
-        return 0;
+        inLegacyRead = true;
+        uint8_t status = legacyDifferenceCounts(result);
+        inLegacyRead = false;
+        return status;
     }
+    uint8_t legacyDifferenceCounts(uint16_t* result);
     int fakeReadRegisters(uint8_t address, uint8_t count, uint8_t* result) {
         CHECK(address == SYNC_COUNTER0_ADDRESS);
         CHECK(count == SYNC_COUNTER1_ADDRESS - SYNC_COUNTER0_ADDRESS + 1);
-        ++coherentReads;
+        if (!inLegacyRead) ++coherentReads;
         CHECK(readOrderCount < 64);
         readOrder[readOrderCount++] = DEVICE_I2C_ADDRESS;
         fakeNow += delayMs;
@@ -544,6 +547,125 @@ static void runMpr(bool withProfile) {
     mprs[m]->hardwareBits = 0; frame(1); output(0, true);  // Existing sticky release.
     CHECK(mprs[m]->dataReads == 2);
 }
+static void runLegacyFault(unsigned scenario, bool v2) {
+    initialize(v2, false);
+    unsigned lane = 0, m = laneChip(lane);
+    switch (scenario) {
+    case 0:  // No previous admission: repeated failed differences cannot count toward ON.
+        setLane(lane, 250); chip(m).readFails = true;
+        for (unsigned i = 0; i < 20; ++i) { frame(); output(lane, false); CHECK(rawTouch[m] == 0); }
+        CHECK(chip(m).legacyReads == 40);
+        chip(m).readFails = false; frame(); output(lane, true);
+        break;
+    case 1:  // A weak valid first sighting plus failures is not a completed touch.
+        setLane(lane, 140); frame(); output(lane, false);
+        chip(m).readFails = true;
+        for (unsigned i = 0; i < 10; ++i) { frame(); output(lane, false); }
+        chip(m).readFails = false; setLane(lane, 250); frame(); output(lane, true);
+        break;
+    case 2:  // Same-chip confirmed neighbour cannot authorize a failed new lane.
+        held(lane); setLane(1, 250); CHECK(laneChip(1) == m); chip(m).readFails = true;
+        for (unsigned i = 0; i < 20; ++i) { frame(); output(lane, true); output(1, false); }
+        break;
+    case 3:  // The native button range ends at 255 even though the container has 16 bits.
+        setLane(lane, 256);
+        for (unsigned i = 0; i < 20; ++i) { frame(); output(lane, false); }
+        setLane(lane, 255); frame(); output(lane, true);
+        break;
+    case 4:  // Existing ON survives a short status fault, then expires at the 50ms boundary.
+        held(lane); chip(m).statusFails = true;
+        frame(); output(lane, true); frame(49); output(lane, true); frame(1); output(lane, false);
+        break;
+    case 5:  // Timeout clears all output retention; native OFF recovery cannot resurrect it.
+        held(lane); chip(m).statusFails = true;
+        frame(); output(lane, true); frame(51); output(lane, false);
+        chip(m).statusFails = false; setLane(lane, 0, false); frame(); output(lane, false);
+        setLane(lane, 250); frame(); output(lane, true);
+        break;
+    case 6: {  // Recovering a short native-status gap does not add a new confirmation delay.
+        held(lane); unsigned before = chip(m).legacyReads;
+        chip(m).statusFails = true; frame(); output(lane, true);
+        chip(m).statusFails = false; frame(); output(lane, true);
+        CHECK(chip(m).legacyReads == before);
+        break;
+    }
+    case 7:  // Fault deadlines use unsigned elapsed time across the clock wrap.
+        fakeNow = 0xFFFFFF90u; held(lane); chip(m).statusFails = true;
+        frame(4); output(lane, true); frame(45); output(lane, true); frame(5); output(lane, false);
+        break;
+    case 8:  // Fault start zero is valid and must not continually restart the deadline.
+        fakeNow = 0xFFFFFF9Bu; held(lane); CHECK(fakeNow == 0xFFFFFFFFu);
+        chip(m).statusFails = true; frame(1); CHECK(fakeNow == 0); output(lane, true);
+        frame(49); output(lane, true); frame(1); output(lane, false);
+        break;
+    case 9:  // A mode transition clears fault-held state before applying strict admission.
+        held(lane); chip(m).statusFails = true; frame(); output(lane, true);
+        profile(true); frame(); output(lane, false);
+        chip(m).statusFails = false; setLane(lane, 170); frame(); output(lane, false);
+        profile(false); setLane(lane, 250); frame(); output(lane, true);
+        break;
+    case 10:  // Old verification retained for 50ms cannot create a new ON after true OFF.
+        held(lane); setLane(lane, 0, false);
+        for (unsigned i = 0; i < 20; ++i) frame(1);
+        output(lane, false); setLane(lane, 250); chip(m).readFails = true;
+        for (unsigned i = 0; i < 5; ++i) { frame(1); output(lane, false); }
+        CHECK(chip(m).legacyReads > 1);
+        break;
+    case 11:  // Valid rapid recontact retains the old bounce guard/confirmation cadence.
+        held(lane); setLane(lane, 0, false);
+        for (unsigned i = 0; i < 20; ++i) frame(1);
+        output(lane, false); setLane(lane, 250);
+        frame(1); output(lane, false); frame(1); output(lane, true);
+        break;
+    case 12: {  // Healthy held touches retain the no-extra-difference-read optimization.
+        held(lane); unsigned before = chip(m).legacyReads; setLane(lane, 10);
+        for (unsigned i = 0; i < 20; ++i) { frame(); output(lane, true); }
+        CHECK(chip(m).legacyReads == before);
+        break;
+    }
+    case 13:  // Valid low/medium signals retain ordinary three-poll isolated confirmation.
+        setLane(lane, 140); frame(); output(lane, false); frame(); output(lane, false);
+        frame(); output(lane, true);
+        break;
+    case 14:  // Faults on the other side of a chip boundary cannot propagate admission.
+        lane = 15; held(lane); setLane(16, 250); CHECK(laneChip(lane) != laneChip(16));
+        chip(laneChip(16)).readFails = true;
+        for (unsigned i = 0; i < 20; ++i) { frame(); output(lane, true); output(16, false); }
+        break;
+    case 15:  // Recovered wake NACKs still represent one successful coherent logical group.
+        setLane(lane, 250); chip(m).genericFailuresRemaining = 2;
+        frame(); output(lane, true); CHECK(chip(m).legacyReads == 1);
+        break;
+    case 16:  // A torn first group succeeds on the existing second group, without a fast exemption.
+        setLane(lane, 250); chip(m).tornReadsRemaining = 1;
+        frame(); output(lane, false); CHECK(chip(m).legacyReads == 2);
+        frame(); output(lane, true);
+        break;
+    case 17:  // Repeated native SYNC mismatches never become newly confirmed touches.
+        setLane(lane, 250); chip(m).tornReadsRemaining = 40;
+        for (unsigned i = 0; i < 20; ++i) { frame(); output(lane, false); }
+        CHECK(chip(m).legacyReads == 40); frame(); output(lane, true);
+        break;
+    case 18:  // A slow other chip makes earlier native status too old for a new ON.
+        lane = v2 ? 16 : 30;
+        setLane(lane, 250); chip(laneChip(lane)).delayMs = 17;
+        frame(); output(lane, false);
+        chip(laneChip(lane)).delayMs = 0; frame(); output(lane, true);
+        break;
+    case 19:  // A first failing transfer that already took 51ms has exhausted the hold.
+        held(lane); chip(m).statusFails = true; chip(m).statusDelayMs = 51;
+        frame(); output(lane, false);
+        break;
+    case 20:  // Late fresh counts cannot authorize a new lane, or renew a held deadline.
+        held(lane); setLane(1, 250); chip(m).delayMs = 16;
+        frame(); output(lane, true); output(1, false);
+        chip(m).delayMs = 0; chip(m).statusFails = true;
+        frame(34); output(lane, false); output(1, false);
+        break;
+    default: CHECK(false);
+    }
+    CHECK(!mbrDistanceEnabledForFrame && g_mbrDistanceReadFailures == 0);
+}
 extern "C" void mbrPipelineTestEntry() {
     const char* command = GetCommandLineA();
     unsigned number = 999;
@@ -556,6 +678,7 @@ extern "C" void mbrPipelineTestEntry() {
     }
     if (number < 40) runScenario(number / 2, (number & 1) != 0);
     else if (number < 42) runMpr(number == 41);
+    else if (number < 84) runLegacyFault((number - 42) / 2, (number & 1) != 0);
     else CHECK(false);
     writeText("PASS checks="); writeNumber(checks); writeText("\n");
     ExitProcess(0);
@@ -573,6 +696,16 @@ SCENARIOS = [
     "deferred-retry-order-and-metadata", "all-retries-torn-no-third-burst",
     "transport-failure-not-deferred", "late-retry-keeps-whole-poll-age-limit",
 ]
+LEGACY_FAULT_SCENARIOS = [
+    "failed-new-ON", "partial-confirmation-then-fault", "neighbour-cannot-authorize-fault",
+    "native-button-range", "held-status-fault-50ms", "expired-no-resurrection",
+    "short-status-recovery", "fault-clock-wrap", "fault-start-zero", "profile-transition",
+    "retained-verification-after-real-OFF", "healthy-fast-recontact-cadence",
+    "held-read-optimization", "healthy-medium-cadence", "cross-chip-fault",
+    "recovered-wake-NACK", "torn-then-good-group", "persistent-torn-groups",
+    "late-native-status", "long-first-fault-expires", "late-counts-no-deadline-renewal",
+]
+CASE_COUNT = 42 + 2 * len(LEGACY_FAULT_SCENARIOS)
 
 
 def main() -> int:
@@ -581,12 +714,12 @@ def main() -> int:
     parser.add_argument("--kernel32", type=Path, default=KERNEL32)
     parser.add_argument("--sdk", type=Path, default=Path(r"D:\pico-sdk"))
     parser.add_argument("--output", type=Path, default=WORKSPACE / "_dev_tools" / "mbr_distance_pipeline_host")
-    parser.add_argument("--case", type=int, help="Run just one numbered scenario (0..41)")
+    parser.add_argument("--case", type=int, help=f"Run just one numbered scenario (0..{CASE_COUNT - 1})")
     args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("This runner currently targets the installed Windows LLVM/SDK toolchain.")
-    if args.case is not None and not 0 <= args.case < 42:
-        parser.error("--case must be 0..41")
+    if args.case is not None and not 0 <= args.case < CASE_COUNT:
+        parser.error(f"--case must be 0..{CASE_COUNT - 1}")
     for dependency in (args.clang, args.kernel32):
         if not dependency.is_file():
             parser.error(f"Missing compiler dependency: {dependency}")
@@ -607,12 +740,17 @@ def main() -> int:
         (source_path, "touch-globals", extract_block(source, "uint8_t touchData[4];", "// round66: real-time pressure")),
         (source_path, "distance-globals", extract_block(source, "static const uint32_t MBR_DISTANCE_POLL_MS", "static void prepareMbrDistanceGate()")),
     ]
+    legacy, legacy_line = extract_function(driver, "uint8_t CY8CMBR3116::get_DIFFERENCE_COUNT_SENSOR(")
+    # Rename only the method entry for a host-only call counter; retain its body.
+    parts.insert(2, (driver_path, "legacyDifferenceCounts", (
+        legacy.replace("::get_DIFFERENCE_COUNT_SENSOR(", "::legacyDifferenceCounts(", 1), legacy_line)))
     parts.extend((source_path, name, extract_function(source, signature)) for name, signature in [
         ("prepareMbrDistanceGate", "static void prepareMbrDistanceGate()"),
         ("mbrDistanceReadAttempt", "static bool mbrDistanceReadAttempt("),
         ("mbrDistanceReadSample", "static void mbrDistanceReadSample("),
         ("mbrDistanceRetrySample", "static void mbrDistanceRetrySample("),
         ("readMbrButtons", "static uint16_t readMbrButtons("),
+        ("mbrLegacyFaultHold", "static bool mbrLegacyFaultHold("),
         ("mbrDistanceAllowedMask", "static uint16_t mbrDistanceAllowedMask("),
         ("updateTouch_v2", "void updateTouch_v2()"),
         ("updateTouch_v1", "void updateTouch_v1()"),
@@ -644,10 +782,11 @@ def main() -> int:
         print(compiled.stdout + compiled.stderr, end="")
         return compiled.returncode
     results = []
-    numbers = [args.case] if args.case is not None else range(42)
+    numbers = [args.case] if args.case is not None else range(CASE_COUNT)
     for number in numbers:
         name = (("v2" if number & 1 else "v1") + ":" + SCENARIOS[number // 2]
-                if number < 40 else "MPR:" + ("signed-enabled-profile-ignored" if number == 41 else "legacy-zero-profile"))
+                if number < 40 else "MPR:" + ("signed-enabled-profile-ignored" if number == 41 else "legacy-zero-profile")
+                if number < 42 else ("v2" if number & 1 else "v1") + ":legacy-" + LEGACY_FAULT_SCENARIOS[(number - 42) // 2])
         result = subprocess.run([str(executable), f"--case={number}"], capture_output=True, text=True, timeout=15)
         match = re.search(r"PASS checks=(\d+)", result.stdout)
         passed = result.returncode == 0 and match is not None

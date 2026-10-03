@@ -413,6 +413,14 @@ static bool mbrDistanceEnabledForFrame = false;
 static bool mbrDistanceResetForFrame = false;
 static bool mbrButtonValid[3] = {};
 static uint32_t mbrButtonStartMs[3] = {}, mbrButtonEndMs[3] = {};
+// Host policy for profile-off transport faults, not a contact-distance rule.
+// Keep an already published ON through a short fault, without refreshing its
+// confirmation/stretch timers. Expire from the first failing read's start.
+static const uint32_t MBR_LEGACY_FAULT_HOLD_MS = 50;
+struct MbrLegacyFaultState {
+    bool active = false;
+    uint32_t startedMs = 0;
+};
 
 static void prepareMbrDistanceGate() {
     static uint8_t previousProfile[8] = {0};
@@ -500,6 +508,19 @@ static uint16_t readMbrButtons(uint8_t m, CY8CMBR3116* chip) {
     return mbrButtonValid[m] ? value : 0;
 }
 
+static bool mbrLegacyFaultHold(MbrLegacyFaultState& state, bool fault, bool wasOn,
+                               uint32_t readStartedMs, uint32_t now) {
+    if (!fault) {
+        state.active = false;
+        return false;
+    }
+    if (!state.active) {
+        state.active = true;
+        state.startedMs = readStartedMs;
+    }
+    return wasOn && (now - state.startedMs) < MBR_LEGACY_FAULT_HOLD_MS;
+}
+
 // All chip reads finish before masks are formed at one common host time. A
 // slow later chip must not leave an earlier, now over-age sample authorized.
 static uint16_t mbrDistanceAllowedMask(uint8_t m, uint16_t hardwareBits, uint32_t now) {
@@ -543,8 +564,8 @@ static bool mprReadPressureSnap() {
     return allOk;
 }
 
-// round66: MBR3116 bulk diff read (one 32B transaction per chip, 16x16-bit
-// diff). v1 layout 3 chips / v2 layout 2 chips.
+// MBR3116 native coherent diff group (35B including SYNC, 16x16-bit diff).
+// v1 layout 3 chips / v2 layout 2 chips.
 static bool mbrReadPressureSnap() {
     bool allOk = true;
     uint8_t numChips = (ControllerConfig.hwVer == 3 || ControllerConfig.hwVer == 4) ? 2 : 3;
@@ -633,6 +654,8 @@ void updateTouch_v2() {
         std::memset(fastOkV2, 0, sizeof(fastOkV2));
     }
     uint32_t nowVer = to_ms_since_boot(get_absolute_time());
+    uint16_t legacyFaultMask[2] = {0, 0};
+    uint32_t legacyReadStartedMs[2] = {mbrButtonStartMs[0], mbrButtonStartMs[1]};
     // round64: per-lane MBR thresholds. base_k defaults to 80 (=round50
     // MBR3116_VERIFY_TH); amplitude tiers are relative offsets off it, so
     // per-key values only tighten; native BUTTON_STAT remains a separate gate.
@@ -681,12 +704,14 @@ void updateTouch_v2() {
                     continue;
                 }
                 if (raw[m] & (1 << e)) {
-                    if (verifiedCount[m][e] < 2) {
+                    if (verifiedCount[m][e] < 2 ||
+                        (!mbrDistanceEnabledForFrame && !(prevStretched[m] & (1u << e)))) {
                         if (!diffRead[m]) {
                             if (mbrDistanceEnabledForFrame) {
                                 diffOk[m] = mbrDistanceSamples[m].valid;
                                 std::memcpy(diffCounts[m], mbrDistanceSamples[m].counts, sizeof(diffCounts[m]));
                             } else {
+                                legacyReadStartedMs[m] = to_ms_since_boot(get_absolute_time());
                                 diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
                                 if (!diffOk[m]) {
                                     diffRetried[m] = true;
@@ -696,9 +721,16 @@ void updateTouch_v2() {
                             diffRead[m] = true;
                         }
                         if (!diffOk[m]) {
+                            raw[m] &= ~(1u << e);
+                            legacyFaultMask[m] |= 1u << e;
                             confirmReq[m][e] = CONFIRM_CYCLES_V2;
                         } else {
                             uint16_t diff = diffCounts[m][e];
+                            if (!mbrDistanceEnabledForFrame && diff > 255) {
+                                raw[m] &= ~(1u << e);
+                                legacyFaultMask[m] |= 1u << e;
+                                continue;
+                            }
                             uint16_t baseK = verifyBaseK[m][e];
                             // round80: hover-rejection gate (mbrTouchGate, 0=off).
                             // Legacy new-touch verification only: no physical
@@ -737,6 +769,9 @@ void updateTouch_v2() {
                                 confirmReq[m][e] = CONFIRM_CYCLES_V2;
                                 fastOkV2[m][e] = false;
                                 if (g_verifyFail[m * 16 + e] < 255) g_verifyFail[m * 16 + e]++;
+                            } else if (verifiedCount[m][e] >= 2) {
+                                // A recent confirmation can keep its cadence only
+                                // after a fresh valid read when output was OFF.
                             } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
                                        diff >= MBR_FLICK_FAST_TH) {
                                 // round80: strong flick fast path -- first-cycle
@@ -773,6 +808,17 @@ void updateTouch_v2() {
                 }
             }
         }
+        if (!mbrDistanceEnabledForFrame) {
+            uint32_t checkedAt = to_ms_since_boot(get_absolute_time());
+            for (uint8_t m = 0; m < 2; ++m) {
+                if (!mbrButtonValid[m] ||
+                    checkedAt - mbrButtonStartMs[m] > MBR_DISTANCE_MAX_READ_AGE_MS) {
+                    legacyFaultMask[m] = 0xFFFF;
+                    legacyReadStartedMs[m] = mbrButtonStartMs[m];
+                    raw[m] = 0;
+                }
+            }
+        }
         t0 = raw[0]; t1 = raw[1];
     }
     rawTouch[0] = t0; rawTouch[1] = t1; rawTouch[2] = 0;
@@ -786,17 +832,35 @@ void updateTouch_v2() {
         static uint32_t lastConfirmed[2][16] = {0};
         static uint8_t dipGrace[2][16] = {0};
         static uint8_t stickyGrace[2][16] = {0};
+        static MbrLegacyFaultState legacyFaults[2][16];
         if (mbrDistanceResetForFrame) {
             std::memset(touchCount, 0, sizeof(touchCount));
             std::memset(lastConfirmed, 0, sizeof(lastConfirmed));
             std::memset(dipGrace, 0, sizeof(dipGrace));
             std::memset(stickyGrace, 0, sizeof(stickyGrace));
+            for (uint8_t m = 0; m < 2; ++m)
+                for (uint8_t e = 0; e < 16; ++e) legacyFaults[m][e] = MbrLegacyFaultState{};
         }
         uint16_t raw[2] = {t0, t1};
         uint16_t stretched[2] = {0, 0};
         uint32_t now = to_ms_since_boot(get_absolute_time());
         for (uint8_t m = 0; m < 2; m++) {
             for (uint8_t e = 0; e < 16; e++) {
+                bool fault = !mbrDistanceEnabledForFrame && (legacyFaultMask[m] & (1u << e));
+                bool hold = mbrLegacyFaultHold(legacyFaults[m][e], fault,
+                    (prevStretched[m] & (1u << e)) != 0, legacyReadStartedMs[m], now);
+                if (fault) {
+                    if (hold) {
+                        stretched[m] |= 1u << e;
+                    } else {
+                        touchCount[m][e] = dipGrace[m][e] = stickyGrace[m][e] = 0;
+                        lastConfirmed[m][e] = lastTouchedMsV2[m][e] = 0;
+                        verifiedCount[m][e] = 0;
+                        confirmReq[m][e] = CONFIRM_CYCLES_V2;
+                        fastOkV2[m][e] = false;
+                    }
+                    continue;
+                }
                 if (mbrDistanceEnabledForFrame && !(distanceAllowed[m] & (1u << e))) {
                     touchCount[m][e] = 0;
                     lastConfirmed[m][e] = 0;
@@ -986,6 +1050,9 @@ void updateTouch_v1() {
         std::memset(fastOk, 0, sizeof(fastOk));
     }
    uint32_t nowVer = to_ms_since_boot(get_absolute_time());  // round45r: sticky dip verification preservation
+   const bool legacyMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) && !mbrDistanceEnabledForFrame;
+   uint16_t legacyFaultMask[3] = {0, 0, 0};
+   uint32_t legacyReadStartedMs[3] = {mbrButtonStartMs[0], mbrButtonStartMs[1], mbrButtonStartMs[2]};
    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
         uint16_t raw[3] = {t0, t1, t2};
         MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
@@ -1159,13 +1226,15 @@ void updateTouch_v1() {
                     continue;
                 }
                 if (raw[m] & (1 << e)) {
-                    if (verifiedCount[m][e] < 2) {
+                    if (verifiedCount[m][e] < 2 ||
+                        (!mbrDistanceEnabledForFrame && !(prevStretched[m] & (1u << e)))) {
                         // New touch - verify with sensor difference count
                         if (!diffRead[m]) {
                             if (mbrDistanceEnabledForFrame) {
                                 diffOk[m] = mbrDistanceSamples[m].valid;
                                 std::memcpy(diffCounts[m], mbrDistanceSamples[m].counts, sizeof(diffCounts[m]));
                             } else {
+                                legacyReadStartedMs[m] = to_ms_since_boot(get_absolute_time());
                                 diffOk[m] = (chips[m]->get_DIFFERENCE_COUNT_SENSOR(diffCounts[m]) == 0);
                                 if (!diffOk[m]) {
                                     // round47b-patch: I2C error - re-read once before trusting
@@ -1176,10 +1245,17 @@ void updateTouch_v1() {
                             diffRead[m] = true;
                         }
                         if (!diffOk[m]) {
-                            // I2C failure - don't trust, don't reject, skip this cycle
+                            // A failed group cannot count toward a new ON.
+                            raw[m] &= ~(1u << e);
+                            legacyFaultMask[m] |= 1u << e;
                             confirmReq[m][e] = CONFIRM_CYCLES;
                         } else {
                             uint16_t diff = diffCounts[m][e];
+                            if (!mbrDistanceEnabledForFrame && diff > 255) {
+                                raw[m] &= ~(1u << e);
+                                legacyFaultMask[m] |= 1u << e;
+                                continue;
+                            }
                             uint16_t baseK = verifyBaseK[m][e];
                             // round80: hover-rejection gate (mbrTouchGate, 0=off).
                             // Legacy new-touch verification only: no physical
@@ -1213,6 +1289,9 @@ void updateTouch_v1() {
                                 confirmReq[m][e] = CONFIRM_CYCLES;
                                 fastOk[m][e] = false;
                                 if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;
+                            } else if (verifiedCount[m][e] >= 2) {
+                                // Preserve rapid recontact cadence after fresh
+                                // evidence, never on retained verification alone.
                             } else if (verifiedCount[m][e] == 0 && !diffRetried[m] &&
                                        diff >= MBR_FLICK_FAST_TH) {
                                 // round80: strong flick fast path -- first-cycle
@@ -1239,7 +1318,7 @@ void updateTouch_v1() {
                             }
                         }
                     }
-                    // else: sustained touch, skip I2C reads to minimize latency
+                    // Healthy sustained ON retains the no-extra-read path.
                 } else {
                     // round45r: preserve verification if recently touched (sticky dip recovery)
                     if (verifiedCount[m][e] != 0) {
@@ -1249,6 +1328,17 @@ void updateTouch_v1() {
                             fastOk[m][e] = false;
                         }
                     }
+                }
+            }
+        }
+        if (legacyMbr) {
+            uint32_t checkedAt = to_ms_since_boot(get_absolute_time());
+            for (uint8_t m = 0; m < 3; ++m) {
+                if (!mbrButtonValid[m] ||
+                    checkedAt - mbrButtonStartMs[m] > MBR_DISTANCE_MAX_READ_AGE_MS) {
+                    legacyFaultMask[m] = 0xFFFF;
+                    legacyReadStartedMs[m] = mbrButtonStartMs[m];
+                    raw[m] = 0;
                 }
             }
         }
@@ -1275,17 +1365,35 @@ void updateTouch_v1() {
    static uint32_t lastConfirmed[3][12] = {0};
    static uint8_t  dipGrace[3][12] = {0};
    static uint8_t  stickyGrace[3][12] = {0};           // round45n: sticky-mode dip grace counter
+   static MbrLegacyFaultState legacyFaults[3][12];
     if (mbrDistanceResetForFrame) {
         std::memset(touchCount, 0, sizeof(touchCount));
         std::memset(lastConfirmed, 0, sizeof(lastConfirmed));
         std::memset(dipGrace, 0, sizeof(dipGrace));
         std::memset(stickyGrace, 0, sizeof(stickyGrace));
+        for (uint8_t m = 0; m < 3; ++m)
+            for (uint8_t e = 0; e < 12; ++e) legacyFaults[m][e] = MbrLegacyFaultState{};
     }
    uint16_t raw[3] = {t0, t1, t2};
    uint16_t stretched[3] = {0, 0, 0};
    uint32_t now = to_ms_since_boot(get_absolute_time());
    for (uint8_t m = 0; m < 3; m++) {
        for (uint8_t e = 0; e < 12; e++) {
+           bool fault = legacyMbr && (legacyFaultMask[m] & (1u << e));
+           bool hold = mbrLegacyFaultHold(legacyFaults[m][e], fault,
+               (prevStretched[m] & (1u << e)) != 0, legacyReadStartedMs[m], now);
+           if (fault) {
+               if (hold) {
+                   stretched[m] |= 1u << e;
+               } else {
+                   touchCount[m][e] = dipGrace[m][e] = stickyGrace[m][e] = 0;
+                   lastConfirmed[m][e] = lastTouchedMs[m][e] = 0;
+                   verifiedCount[m][e] = 0;
+                   confirmReq[m][e] = CONFIRM_CYCLES;
+                   fastOk[m][e] = false;
+               }
+               continue;
+           }
            if (mbrDistanceEnabledForFrame && !(distanceAllowed[m] & (1u << e))) {
                touchCount[m][e] = 0;
                lastConfirmed[m][e] = 0;
