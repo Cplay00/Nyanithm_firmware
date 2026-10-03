@@ -1,0 +1,48 @@
+{
+  "zip_members": 27,
+  "member_hashes_verified": 26,
+  "controller_config_bytes_equal": 128,
+  "static_mpr_register_comparisons": 195,
+  "native_idle_images": 6,
+  "native_idle_on_or_oor": 0,
+  "normal_idle_zero_frames": 30,
+  "gain_changes": {
+    "5a": [
+      {
+        "register": "0x65",
+        "before": 55,
+        "after": 56
+      }
+    ],
+    "5b": [],
+    "5c": [
+      {
+        "register": "0x66",
+        "before": 40,
+        "after": 39
+      }
+    ]
+  },
+  "beta12_signature_verified": true,
+  "beta13_deployed": false,
+  "gameplay_acceptance": "pending; no serial sampler remains running",
+  "source_archives_not_in_zip": {
+    "source_beta11_round90l.zip": {
+      "local_path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_archive\\round90o_beta12_before_20261004_050603\\source_beta11_round90l.zip",
+      "sha256": "f15a760e36d7f6546c5fc5e28ae6dde24e75c68265347e72bcd14deee4842ef8",
+      "git_archive_commit": "f0fa0cb9d65f2c2fca4bb8e7b6a256de837c31f9",
+      "crc_verified": true
+    },
+    "source_beta12_round90m.zip": {
+      "local_path": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_archive\\round90o_beta12_before_20261004_050603\\source_beta12_round90m.zip",
+      "sha256": "b64fdedde806fc9fec6550e365363d874d2d34fba55a2d1f6a857cc0a49e8a2e",
+      "git_archive_commit": "9649267af96b6579d3e43f2f4402923367b7699b",
+      "crc_verified": true
+    }
+  },
+  "package_sha256": "7f19c12c97c4dc807269b67f75b0c54b6be886ff312cc332dac9fc8e37ae46b5",
+  "package_bytes": 178713,
+  "host_guard_negative_cases_passed": 9,
+  "backup_manifest_files_verified": 12,
+  "isolated_stdlib_replay_equal": true
+}
