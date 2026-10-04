@@ -3083,12 +3083,37 @@ input[type="range"]:disabled {
    round88: MBR3116 寄存器详细设置悬浮窗 (mbrRegModal)
    ================================================================ */
 .mbr-reg-card {
-    max-width: 720px;
-    width: min(720px, 92vw);
+    max-width: 780px;
+    width: min(780px, 94vw);
 }
 .mbr-reg-card .flash-modal-body {
-    max-height: 62vh;
+    max-height: 72vh;
     overflow-y: auto;
+}
+/* 范围选择与顶条 */
+.mbr-reg-scope-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--c-surface-2, rgba(128,128,128,0.1));
+}
+.mbr-reg-scope-bar select {
+    min-width: 180px;
+    font-weight: 600;
+}
+.mbr-reg-hex-details {
+    border-top: 1px solid var(--c-border, rgba(128,128,128,0.2));
+    padding-top: 8px;
+}
+.mbr-reg-hex-details textarea.hex-table {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    line-height: 1.5;
 }
 /* 状态卡片: 自动阈值/判定链一览 */
 .mbr-reg-status {
@@ -3858,21 +3883,27 @@ input[type="range"]:disabled {
                         <div class="section-subtitle">3116 NVRAM 设置<span class="collapse-arrow">▾</span></div>
                         <div class="config-collapse-wrapper">
                             <div class="config-collapse-inner">
-                                <!-- 切换芯片保留编辑。 -->
                                 <div class="field-grid">
                                     <div class="field-item">
                                         <label class="field-label">目标芯片 (I2C 地址)</label>
                                         <select class="sel-input" id="mbrChip" disabled></select>
-                                        <span class="field-hint" id="mbrChipHint">按硬件探测结果列出</span>
+                                        <span class="field-hint" id="mbrChipHint">进入配置模式自动识别并读取全部芯片</span>
                                     </div>
                                     <div class="field-item" style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;">
-                                        <button id="btnMbrReadChip" class="btn" disabled>读取当前芯片</button>
                                         <button id="btnMbrReadAll" class="btn" disabled>读取全部芯片</button>
+                                        <button id="btnMbrReadChip" class="btn" disabled>读取当前芯片</button>
                                     </div>
                                 </div>
-                                <!-- round86 #12: 全芯片阈值/消抖/灵敏度联动编辑后的统一落盘入口 -->
-                                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-                                    <button id="btnMbrBurnAll" class="btn" disabled>
+                                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center;">
+                                    <!-- 详细设置主入口: 围绕该入口展开全芯片/单芯片调谐与寄存器表联动 -->
+                                    <button id="btnMbrRegWin" class="btn btn-primary" style="flex:1;min-width:140px;" disabled>
+                                        <svg viewBox="0 0 16 16" fill="none">
+                                            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+                                            <path d="M8 1.5V3.5M8 12.5V14.5M1.5 8H3.5M12.5 8H14.5M3.4 3.4L4.8 4.8M11.2 11.2L12.6 12.6M12.6 3.4L11.2 4.8M4.8 11.2L3.4 12.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                                        </svg>
+                                        详细设置 (参数调优与寄存器表)
+                                    </button>
+                                    <button id="btnMbrBurnAll" class="btn btn-danger" disabled>
                                         <svg viewBox="0 0 16 16" fill="none">
                                             <path d="M8 1L10 5H6L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                                             <path d="M4 7H12V11C12 13 10.5 14.5 8 14.5C5.5 14.5 4 13 4 11V7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
@@ -3880,29 +3911,12 @@ input[type="range"]:disabled {
                                         写入全部修改
                                     </button>
                                     <button id="btnMbrRestoreAll" class="btn" disabled>恢复模板触摸参数</button>
-                                    <!-- round88: 详细设置悬浮窗入口(译自 TRM 寄存器数据表) -->
-                                    <button id="btnMbrRegWin" class="btn" disabled>
-                                        <svg viewBox="0 0 16 16" fill="none">
-                                            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
-                                            <path d="M8 1.5V3.5M8 12.5V14.5M1.5 8H3.5M12.5 8H14.5M3.4 3.4L4.8 4.8M11.2 11.2L12.6 12.6M12.6 3.4L11.2 4.8M4.8 11.2L3.4 12.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                                        </svg>
-                                        详细设置
-                                    </button>
                                 </div>
-                                <div class="mbr-write-state" role="status" aria-live="polite"><span id="mbrWriteStatus">请先读取芯片</span><button id="btnMbrBackup" class="btn" disabled>导出写前备份</button></div>
-                                <span class="field-hint">先读取，再编辑。写前备份，写后回读；失败即停止。</span>
-                                <span class="field-hint">仅恢复可调触摸参数，保留地址、硬件映射和基线设置。</span>
-                                <details class="adv-details">
-                                    <summary>高级：完整寄存器表 (128 字节)</summary>
-                                    <textarea class="txt-input hex-table" id="mbrHexTable" rows="8" spellcheck="false" disabled></textarea>
-                                    <div class="btn-grid" style="margin-top:8px;">
-                                        <button id="btnMbrTemplate" class="btn" disabled>查看固件模板</button>
-                                        <button id="btnMbrLoadFile" class="btn" disabled>导入表文件</button>
-                                        <button id="btnMbrSaveFile" class="btn" disabled>导出表文件</button>
-                                        <button id="btnMbrApply" class="btn btn-danger" disabled>写入当前芯片</button>
-                                    </div>
-                                    <span class="field-hint">整表导入仍须通过安全参数校验；地址与硬件映射保持原值。</span>
-                                </details>
+                                <div class="mbr-write-state" role="status" aria-live="polite">
+                                    <span id="mbrWriteStatus">进入配置模式自动读取全部芯片</span>
+                                    <button id="btnMbrBackup" class="btn" disabled>导出写前备份</button>
+                                </div>
+                                <span class="field-hint" style="margin-top:6px;">默认对全部芯片做修改；参数调节以“详细设置”为主入口展开，完整寄存器表实时双向同步。</span>
                             </div>
                         </div>
                     </div>
@@ -4114,8 +4128,22 @@ input[type="range"]:disabled {
                         <pre class="log-box mbr-reg-dbg-out" id="mbrDbgOut">未采样</pre>
                         <span class="field-hint">DIFF 0–255；255 可能饱和。RAW=原始计数，baseline=基线。</span>
                     </details>
-                    <!-- 参数编辑区(JS 按 MBR_REG_DEFS 生成) -->
+                    <!-- 参数编辑区(JS 按 MBR_REG_DEFS 生成常用参数与通道分组) -->
                     <div id="mbrRegBody"></div>
+
+                    <!-- 完整寄存器表 (128 字节) 同步移入详细设置末尾, 与上方可视化参数实时双向联动 -->
+                    <details class="adv-details mbr-reg-hex-details" id="mbrHexDetails" style="margin-top:14px;">
+                        <summary>高级：完整寄存器表 (128 字节) · 实时双向同步</summary>
+                        <textarea class="txt-input hex-table" id="mbrHexTable" rows="8" spellcheck="false" disabled></textarea>
+                        <div class="btn-grid" style="margin-top:8px;">
+                            <button id="btnMbrTemplate" class="btn" disabled>查看固件模板</button>
+                            <button id="btnMbrLoadFile" class="btn" disabled>导入表文件</button>
+                            <button id="btnMbrSaveFile" class="btn" disabled>导出表文件</button>
+                            <button id="btnMbrApply" class="btn btn-danger" disabled>应用表到当前修改</button>
+                        </div>
+                        <span class="field-hint" style="margin-top:4px;">修改上方任意参数均实时联动此表；在此编辑或导入合法表亦可实时反向更新上方所有参数。整表仍受安全参数校验。</span>
+                    </details>
+
                     <label class="checkbox-item mbr-reg-ack" id="mbrRegAckRow" style="display:none;justify-content:flex-start;">
                         <input type="checkbox" id="mbrRegAck" class="form-check-input">
                         <span class="form-check-label">我已知晓上述警告风险,仍要写入芯片</span>
@@ -4123,10 +4151,10 @@ input[type="range"]:disabled {
                 </div>
                 <div class="flash-modal-foot">
                     <span id="mbrRegWriteStatus" class="field-hint" role="status" aria-live="polite"></span>
-                    <button type="button" id="btnMbrRegRead" class="btn">读取当前芯片</button>
-                    <button type="button" id="btnMbrRegRestore" class="btn">恢复触摸参数</button>
+                    <button type="button" id="btnMbrRegRead" class="btn">重新读取</button>
+                    <button type="button" id="btnMbrRegRestore" class="btn">恢复模板参数</button>
                     <button type="button" id="mbrRegClose" class="btn">关闭</button>
-                    <button type="button" id="btnMbrRegWrite" class="btn btn-danger" disabled>写入芯片</button>
+                    <button type="button" id="btnMbrRegWrite" class="btn btn-danger" disabled>写入芯片修改</button>
                 </div>
             </div>
         </div>
@@ -4490,10 +4518,10 @@ const MBR_REG_DEFS = [
     { a: 0x1F, n: "低基线复位 LBR", d: "连续低 RAW 样本数；保持芯片值", min: 0, max: 255, r: 0 },
     { a: 0x20, n: "负噪声阈值 NNT", d: "人工比例须依据实触信号；保持芯片值", min: 0, max: 255, r: 0 },
     { a: 0x21, n: "噪声阈值 NT", d: "人工比例须依据实触信号；保持芯片值", min: 0, max: 255, r: 0 },
-    { a: 0x26, n: "PROX_EN", d: "接近感应复用: 把 CS0/CS1 变成接近传感器。会牺牲这两个按键电极——音游严禁", min: 0, max: 3, r: 1 },
+    { a: 0x26, n: "PROX_EN", d: "接近感应配置(仅CS14/CS15硬件支持): 0=关闭(音游推荐), 1=PROX0, 2=PROX1, 3=双通道。开启会大幅增加悬空灵敏度", min: 0, max: 3, r: 0 },
     { a: 0x4C, n: "特殊输出 SPO_CFG", d: "硬件输出配置；只读", min: 0, max: 255, r: 0 },
     { a: 0x4D, n: "按钮信号滤波", d: "中值抑制尖峰；IIR 平滑会增加响应时间", min: 0, max: 255, r: 0 },
-    { a: 0x4E, n: "DEVICE_CFG1", d: "系统诊断开关(SYSD_EN bit0)。官方建议保持 0", min: 0, max: 1, r: 0 },
+    { a: 0x4E, n: "DEVICE_CFG1", d: "系统与屏蔽配置(bit0 SHIELD_EN 开启主动屏蔽电极，收束侧向电场改善隔空误触)", min: 0, max: 1, r: 0 },
     { a: 0x4F, n: "触摸阈值模式", d: "自动：芯片定阈值；手动：使用 FT。保留 ARST 等开关", min: 0, max: 255, r: 0 },
     { a: 0x50, n: "DEVICE_CFG3", d: "供电配置(bit0 SUPPLY_LOW_POWER)。本机 5V 内部稳压必须保持 0, 改 1 可能损坏芯片", min: 0, max: 1, r: 2 },
     { a: 0x51, n: "I2C_ADDR", d: "芯片 I2C 地址(8-119)。改错 = 固件彻底找不到芯片 = 变砖, 烧录时会被面板直接拒绝", min: 8, max: 119, r: 2 },
@@ -4510,7 +4538,7 @@ function mbrEditableMask(addr, base) {
         return mask;
     }
     if (addr >= 0x0C && addr <= 0x1B) return enabled & (1 << (addr - 0x0C)) ? 0xFF : 0;
-    return ({ 0x1C: 0x0F, 0x1D: 0x9F, 0x4D: 0x03, 0x4F: 0x08 })[addr] || 0;
+    return ({ 0x1C: 0x0F, 0x1D: 0x9F, 0x26: 0x03, 0x4D: 0x03, 0x4E: 0x01, 0x4F: 0x08 })[addr] || 0;
 }
 
 function mbrValidateTable(table, addr, base = null, checkCrc = true) {
@@ -4666,6 +4694,20 @@ function cmpBuildId(bid) {
     const m = (bid || "").match(/^round(\d+)([a-z]?)/);
     if (!m) return -Infinity;
     return Number(m[1]) + (m[2] ? (m[2].charCodeAt(0) - 96) / 26 : 0);
+}
+
+// 固件功能门禁标准常量与复合校验
+const MBR_MIN_VERSION = "1.6.5";
+const MBR_MIN_ROUND = "round87";
+const MBR_MIN_VER_TEXT = "1.6.5 (round87)";
+
+// 判定固件是否达到版本+构建轮次要求(如 1.6.5 或 round87 及以上)
+function isFirmwareAtLeast(devInfo, minVer = MBR_MIN_VERSION, minRound = MBR_MIN_ROUND) {
+    if (!devInfo) return false;
+    const fw = devInfo.fw ? devInfo.fw.replace(/-.*$/, "") : null;
+    const fwOk = fw ? cmpVersion(fw, minVer) >= 0 : false;
+    const bidOk = devInfo.buildId ? cmpBuildId(devInfo.buildId) >= cmpBuildId(minRound) : false;
+    return fwOk || bidOk;
 }
 
 // devInfo: {fw, api, hwVer, var, sig, raw} 或 null
@@ -6861,6 +6903,9 @@ function validateUf2ForDevice(p, devInfo) {
             crossCheckProbe();
             // round57: 配置模式心跳(每 30s 发 0xC3 重置固件 60s 自动退出计时器)
             startCfgKeepalive();
+            if ($("ckMbr3116").checked) {
+                setTimeout(() => withSerialLock(mbrAutoReadAllChips), 80);
+            }
             return true;
         } catch (e) { log("进入配置模式失败: " + e.message, "error"); return false; }
     }
@@ -7851,7 +7896,7 @@ function validateUf2ForDevice(p, devInfo) {
             sel.appendChild(o);
         });
         if (prev && addrs.includes(prev)) sel.value = prev;
-        $("mbrChipHint").textContent = hint;
+        if ($("mbrChipHint")) $("mbrChipHint").textContent = hint;
         if (!mbrTable || (prev && sel.value !== prev)) loadMbrTemplate();
     }
 
@@ -7898,11 +7943,7 @@ function validateUf2ForDevice(p, devInfo) {
         return chips.length > 0 && chips.every(o => !!mbrReadBases[mbrKey(o.value)]);
     }
     function mbrCanProgram() {
-        const bid = devInfo && devInfo.buildId;
-        const parsed = typeof bid === "string" ? bid.match(/^round(\d+)[a-z]*$/) : null;
-        if (!parsed || parsed[0] !== bid || !Number.isSafeInteger(Number(parsed[1]))) return false;
-        return configMode && mbrGateFwSupport && MBR_CRC_OK && devInfo &&
-            cmpBuildId(devInfo.buildId) >= cmpBuildId("round88d");
+        return configMode && mbrGateFwSupport && MBR_CRC_OK && isFirmwareAtLeast(devInfo, MBR_MIN_VERSION, MBR_MIN_ROUND);
     }
     // 把"以当前表为基准的编辑"传播到全部目标芯片缓存:
     // 各芯片在自己缓存(或当前表)的基础上应用编辑器写法, 保留各片 SENSOR_EN
@@ -8076,7 +8117,7 @@ function validateUf2ForDevice(p, devInfo) {
     async function mbrBurnOne(addr) {
         const key = mbrKey(addr);
         const target = parseInt(addr, 16);
-        if (!mbrCanProgram()) { log("写入 NVRAM 需 round88d 或更新固件", "error"); return false; }
+        if (!mbrCanProgram()) { log("写入 NVRAM 需 " + MBR_MIN_VER_TEXT + " 或更新固件", "error"); return false; }
         const cached = mbrCacheGet(addr);
         if (!cached || !mbrReadBases[key]) { log(`${key} 请先读取芯片`, "error"); return false; }
         const table = new Uint8Array(cached);
@@ -8160,13 +8201,15 @@ function validateUf2ForDevice(p, devInfo) {
         return true;
     }
 
-    $("btnMbrRestoreAll").addEventListener("click", () => {
-        const chips = [...$("mbrChip").options].map(o => o.value);
-        if (chips.some(c => !mbrReadBases[mbrKey(c)] || !MBR_TABLES[mbrKey(c)])) { log("请先读取全部目标芯片", "warn"); return; }
-        chips.forEach(mbrRestoreSafeParams);
-        syncMbrFields(); syncMbrRegInputs();
-        mbrSetWriteStatus("已恢复模板触摸参数；待写入");
-    });
+    if ($("btnMbrRestoreAll")) {
+        $("btnMbrRestoreAll").addEventListener("click", () => {
+            const chips = [...$("mbrChip").options].map(o => o.value);
+            if (chips.some(c => !mbrReadBases[mbrKey(c)] || !MBR_TABLES[mbrKey(c)])) { log("请先读取全部目标芯片", "warn"); return; }
+            chips.forEach(mbrRestoreSafeParams);
+            syncMbrFields(); syncMbrRegInputs();
+            mbrSetWriteStatus("已恢复模板触摸参数；待写入");
+        });
+    }
 
     async function mbrBurnAll() {
         const chips = [...$("mbrChip").options].map(o => o.value).filter(c => mbrDirty[mbrKey(c)]);
@@ -8174,43 +8217,111 @@ function validateUf2ForDevice(p, devInfo) {
         if (!confirm(`写入 ${chips.length} 片芯片的修改？\n写前备份，写后校验。`)) return;
         if (await mbrBurnQueue(chips)) mbrSetWriteStatus(`完成 · ${chips.length} 片已核对`);
     }
-    $("btnMbrBurnAll").addEventListener("click", () => withSerialLock(() => mbrBurnAll().catch(e => log("同步烧录失败: " + e.message, "error"))));
+    if ($("btnMbrBurnAll")) {
+        $("btnMbrBurnAll").addEventListener("click", () => withSerialLock(() => mbrBurnAll().catch(e => log("同步烧录失败: " + e.message, "error"))));
+    }
 
     // NVRAM 详细设置。
     let mbrRegRisk = { severe: false, warn: false, reasons: [] };
 
+    // 常用核心参数提炼（SmartSense、全局阈值、消抖、迟滞、屏蔽电极、接近模式、滤波）
+    const MBR_PRIMARY_REGS = [0x4F, 0x0C, 0x1C, 0x1D, 0x4E, 0x26, 0x4D];
+
     function buildMbrRegUI() {
         const body = $("mbrRegBody");
-        body.innerHTML = '<div class="mbr-reg-group-title">常用参数</div><div class="mbr-reg-grid" id="mbrSafeGrid"></div><details class="adv-details"><summary>逐通道阈值与灵敏度</summary><div class="mbr-reg-grid" id="mbrChannelGrid"></div></details><details class="adv-details"><summary>硬件与基线参数 · 只读</summary><div class="mbr-reg-grid" id="mbrReadOnlyGrid"></div></details>';
-        const primary = [0x4D, 0x4F, 0x1D, 0x1C];
-        const ordered = [...primary.map(a => MBR_REG_DEFS.find(d => d.a === a)), ...MBR_REG_DEFS.filter(d => !primary.includes(d.a))];
-        ordered.forEach(def => {
-            const editable = !!mbrEditableMask(def.a);
+        body.innerHTML = `
+            <div class="mbr-reg-scope-bar">
+                <span style="font-size:12.5px;font-weight:600;">修改模式</span>
+                <label class="checkbox-item mbr-reg-global" style="margin:0;font-size:12.5px;">
+                    <input type="checkbox" id="mbrRegGlobal" class="form-check-input" checked>
+                    <span class="form-check-label">默认同步修改全部已读芯片 (推荐)</span>
+                </label>
+            </div>
+            <div class="mbr-reg-group-title">常用核心参数</div>
+            <div class="mbr-reg-grid" id="mbrSafeGrid"></div>
+            <details class="adv-details" style="margin-top:10px;">
+                <summary>逐通道阈值与灵敏度微调 (CS0–CS15)</summary>
+                <div class="mbr-reg-grid" id="mbrChannelGrid"></div>
+            </details>
+            <details class="adv-details" style="margin-top:8px;">
+                <summary>硬件与基线参数 · 只读</summary>
+                <div class="mbr-reg-grid" id="mbrReadOnlyGrid"></div>
+            </details>
+        `;
+
+        // 1. 构建常用参数
+        const safeGrid = $("mbrSafeGrid");
+        MBR_PRIMARY_REGS.forEach(addr => {
+            const def = MBR_REG_DEFS.find(d => d.a === addr);
+            if (!def) return;
             const item = document.createElement("div"); item.className = "mbr-reg-item";
             const label = document.createElement("label"); label.className = "field-label";
-            label.textContent = def.a >= 0x0C && def.a <= 0x1B ? `CS${def.a - 0x0C} 阈值` : def.n;
-            const special = [0x1D, 0x4D, 0x4F].includes(def.a);
-            const input = document.createElement(special ? "select" : "input");
-            input.id = "mbrReg_" + def.a.toString(16).toUpperCase().padStart(2, "0");
+            label.textContent = addr === 0x0C ? "全局触摸阈值 (FT 比例)"
+                : addr === 0x4F ? "SmartSense 自动调谐"
+                : addr === 0x4E ? "主动屏蔽电极 (Shield)"
+                : addr === 0x26 ? "接近检测模式 (Proximity)"
+                : def.n;
+
+            const isSelect = [0x1D, 0x26, 0x4D, 0x4E, 0x4F].includes(addr);
+            const input = document.createElement(isSelect ? "select" : "input");
+            input.id = "mbrReg_" + addr.toString(16).toUpperCase().padStart(2, "0");
             label.htmlFor = input.id;
-            input.className = special ? "sel-input" : "num-input";
-            if (special) {
-                const options = def.a === 0x4D ? [[0, "关闭"], [1, "中值"], [2, "IIR 平滑"], [3, "中值 + IIR"]]
-                    : def.a === 0x4F ? [[8, "自动阈值"], [0, "手动阈值"]]
-                    : [[-1, "自动迟滞"], ...Array.from({ length: 32 }, (_, i) => [i, `手动 ${i}`])];
+            input.className = isSelect ? "sel-input" : "num-input";
+
+            if (isSelect) {
+                let options = [];
+                if (addr === 0x4F) {
+                    options = [[8, "开启 SmartSense (自动阈值)"], [0, "关闭 SmartSense (手动阈值，推荐)"]];
+                } else if (addr === 0x4E) {
+                    options = [[1, "启用主动屏蔽 (SHIELD_EN)"], [0, "关闭屏蔽电极 (保持原值)"]];
+                } else if (addr === 0x26) {
+                    options = [[0, "关闭 (推荐音游键区)"], [1, "启用 PROX0 (CS14)"], [2, "启用 PROX1 (CS15)"], [3, "启用 PROX0 + PROX1"]];
+                } else if (addr === 0x4D) {
+                    options = [[0, "关闭"], [1, "中值滤波"], [2, "IIR 平滑"], [3, "中值 + IIR"]];
+                } else if (addr === 0x1D) {
+                    options = [[-1, "自动迟滞"], [0, "0 (无迟滞)"], [4, "4"], [8, "8"], [12, "12"], [16, "16"], [20, "20"], [24, "24"], [30, "30"]];
+                }
                 options.forEach(([v, text]) => input.add(new Option(text, String(v))));
             } else {
                 input.type = "number"; input.min = def.min; input.max = def.max; input.step = 1;
             }
             input.disabled = true;
-            input.dataset.editable = editable ? "1" : "0";
+
             const desc = document.createElement("span"); desc.className = "field-hint";
-            desc.textContent = def.a >= 0x0C && def.a <= 0x1B ? "31–200；手动阈值模式生效"
-                : def.a === 0x1D ? "ON=FT+迟滞；OFF=FT−迟滞"
-                : def.a >= 0x08 && def.a <= 0x0B ? "每传感器 2 位；亦可用灵敏度滑条"
-                : !editable && ![0x1F, 0x20, 0x21, 0x4C, 0x52, 0x55].includes(def.a) ? "只读；保持芯片值" : def.d;
+            desc.textContent = addr === 0x0C ? "31–200；联动全通道。悬空易触调大，漏触调小"
+                : addr === 0x4F ? "关闭后手动阈值与迟滞精准生效；开启时芯片动态算阈值"
+                : addr === 0x4E ? "消除侧向散射电场，收束垂直电场，显著削弱隔空悬停耦合"
+                : addr === 0x26 ? "仅CS14/CS15硬件支持；开启会大幅扩大隔空感应范围，音游建议关闭"
+                : addr === 0x1D ? "ON=FT+迟滞；OFF=FT−迟滞。消除悬停临界微颤"
+                : addr === 0x1C ? "按下消抖次数(1–15)。增大可过滤轻微掠过，微增延迟"
+                : def.d;
+
             item.append(label, input, desc);
-            $(primary.includes(def.a) ? "mbrSafeGrid" : editable ? "mbrChannelGrid" : "mbrReadOnlyGrid").appendChild(item);
+            safeGrid.appendChild(item);
+        });
+
+        // 2. 构建逐通道与只读网格
+        MBR_REG_DEFS.forEach(def => {
+            if (MBR_PRIMARY_REGS.includes(def.a)) return;
+            const editable = !!mbrEditableMask(def.a);
+            const item = document.createElement("div"); item.className = "mbr-reg-item";
+            const label = document.createElement("label"); label.className = "field-label";
+            label.textContent = def.a >= 0x0C && def.a <= 0x1B ? `CS${def.a - 0x0C} 阈值` : def.n;
+
+            const input = document.createElement("input");
+            input.id = "mbrReg_" + def.a.toString(16).toUpperCase().padStart(2, "0");
+            label.htmlFor = input.id;
+            input.className = "num-input";
+            input.type = "number"; input.min = def.min; input.max = def.max; input.step = 1;
+            input.disabled = true;
+
+            const desc = document.createElement("span"); desc.className = "field-hint";
+            desc.textContent = def.a >= 0x0C && def.a <= 0x1B ? "31–200；单通道独立微调"
+                : def.a >= 0x08 && def.a <= 0x0B ? "每传感器 2 位灵敏度(0.1–0.4pF)"
+                : !editable && ![0x1F, 0x20, 0x21, 0x4C, 0x52, 0x55].includes(def.a) ? "只读；保持芯片值" : def.d;
+
+            item.append(label, input, desc);
+            $(editable ? "mbrChannelGrid" : "mbrReadOnlyGrid").appendChild(item);
         });
     }
 
@@ -8221,10 +8332,14 @@ function validateUf2ForDevice(p, devInfo) {
             if (!el || document.activeElement === el) return;
             el.value = def.a === 0x4D ? mbrTable[def.a] & 3
                 : def.a === 0x4F ? mbrTable[def.a] & 8
+                : def.a === 0x4E ? mbrTable[def.a] & 1
+                : def.a === 0x26 ? mbrTable[def.a] & 3
                 : def.a === 0x1D ? (mbrTable[def.a] & 0x80 ? mbrTable[def.a] & 31 : -1)
                 : def.a === 0x1C ? mbrTable[def.a] & 15 : mbrTable[def.a];
         });
-        updateMbrRegStatus(); evaluateMbrRegRisk();
+        updateMbrRegStatus();
+        evaluateMbrRegRisk();
+        renderMbrHex(); // 保持模态窗末尾十六进制表实时同步更新
     }
 
     function updateMbrRegStatus() {
@@ -8234,9 +8349,16 @@ function validateUf2ForDevice(p, devInfo) {
         const hysOn = !!(mbrTable[0x1D] & 0x80);
         const hys = mbrTable[0x1D] & 31;
         const ft = mbrTable[0x0C];
+        const shield = !!(mbrTable[0x4E] & 1);
+        const prox = mbrTable[0x26] & 3;
         const filter = ["关闭", "中值", "IIR", "中值 + IIR"][mbrTable[0x4D] & 3];
-        $("mbrRegStatus").textContent = `${mbrReadBases[key] ? (mbrDirty[key] ? "已读芯片 · 待写入" : "已读芯片") : "模板 · 请先读取芯片"} · 滤波 ${filter} · ${ath ? "自动阈值" : "手动阈值"} · 迟滞 ${hysOn ? hys : "自动"}` +
-            (!ath && hysOn ? ` · CS0 ON≥${ft + hys} / OFF≤${ft - hys}` : "");
+        const isGlobal = $("mbrRegGlobal") ? $("mbrRegGlobal").checked : true;
+
+        $("mbrRegStatus").innerHTML = `
+            <div><strong>范围:</strong> ${isGlobal ? "全部芯片 (同步修改)" : key} · <strong>状态:</strong> ${mbrReadBases[key] ? (mbrDirty[key] ? '<span class="mbr-st-warn">已读芯片 · 有未写入修改</span>' : '<span class="mbr-st-ok">已读芯片 · 无未写入修改</span>') : '<span class="mbr-st-warn">固件模板 · 请先读取芯片</span>'}</div>
+            <div style="margin-top:2px;"><strong>调优链路:</strong> ${ath ? "自动阈值(SmartSense动态)" : "手动阈值模式"} · FT=${ft} · 迟滞=${hysOn ? hys : "自动"} · Shield=${shield ? "已开启" : "关闭"} · Prox=${prox ? "已启用" : "关闭"} · 滤波=${filter}</div>
+            ${(!ath && hysOn) ? `<div style="margin-top:2px;color:var(--c-text-dim);"><strong>判定窗口:</strong> 按下 ON ≥ ${ft + hys}，抬起 OFF ≤ ${Math.max(0, ft - hys)}</div>` : ""}
+        `;
     }
 
     function evaluateMbrRegRisk() {
@@ -8244,14 +8366,15 @@ function validateUf2ForDevice(p, devInfo) {
         const check = mbrValidateTable(mbrTable, mbrChipAddr(), mbrReadBases[key]);
         const reasons = [...check.reasons];
         if (!mbrReadBases[key]) reasons.unshift("请先读取芯片");
-        if (configMode && !mbrCanProgram()) reasons.unshift("写入需 round88d 或更新固件");
+        if (configMode && !mbrCanProgram()) reasons.unshift("写入需 " + MBR_MIN_VER_TEXT + " 或更新固件");
         mbrRegRisk = { severe: reasons.length > 0, warn: false, reasons };
         $("btnMbrRegWrite").disabled = !configMode || mbrWriting || !MBR_CRC_OK || mbrRegRisk.severe;
         $("mbrRegAckRow").style.display = "none";
+
         const global = $("mbrRegGlobal");
         if (global) {
             global.disabled = !configMode || mbrWriting || !mbrAllRead();
-            if (!mbrAllRead()) global.checked = false;
+            if (mbrAllRead()) global.checked = true;
         }
         $("btnMbrRegRestore").disabled = !configMode || mbrWriting || !mbrReadBases[key];
         const old = $("mbrRegRiskBox"); if (old) old.remove();
@@ -8264,6 +8387,8 @@ function validateUf2ForDevice(p, devInfo) {
             if (el) el.disabled = !configMode || mbrWriting || !mbrReadBases[key] || !mbrEditableMask(def.a, mbrReadBases[key]) ||
                 (def.a >= 0x0C && def.a <= 0x1B && !!(mbrTable?.[0x4F] & 8));
         });
+        if ($("mbrHexTable")) $("mbrHexTable").disabled = !configMode || mbrWriting || !mbrReadBases[key];
+        if ($("btnMbrApply")) $("btnMbrApply").disabled = !configMode || mbrWriting || !mbrReadBases[key];
     }
 
     function mbrRegEdit(addrHex, value, maskOverride = null) {
@@ -8271,17 +8396,31 @@ function validateUf2ForDevice(p, devInfo) {
         const addr = parseInt(addrHex, 16);
         const key = mbrKey($("mbrChip").value);
         if (!mbrReadBases[key]) return;
-        if ($("mbrRegGlobal").checked && !mbrAllRead()) { log("请先读取全部芯片", "warn"); return; }
-        const chips = $("mbrRegGlobal").checked ? [...$("mbrChip").options].map(o => o.value) : [key];
+        const isGlobal = $("mbrRegGlobal") ? $("mbrRegGlobal").checked : true;
+        if (isGlobal && !mbrAllRead()) { log("请先读取全部芯片", "warn"); return; }
+        const chips = isGlobal ? [...$("mbrChip").options].map(o => o.value) : [key];
+
         chips.forEach(c => {
             const chipKey = mbrKey(c), base = mbrReadBases[chipKey], table = mbrTableCache[chipKey];
             if (!base || !table) return;
-            const mask = mbrEditableMask(addr, base) & (maskOverride === null ? 255 : maskOverride);
-            if (!mask) return;
-            table[addr] = (table[addr] & ~mask) | (value & mask);
+
+            // 特殊联动：若修改的是 0x0C（全局阈值），同步应用到所有已使能通道 0x0C~0x1B
+            if (addr === 0x0C) {
+                const en = (table[0x00] | (table[0x01] << 8)) & 0xFFFF;
+                for (let ch = 0; ch < 16; ch++) {
+                    if (en & (1 << ch)) {
+                        table[0x0C + ch] = Math.max(31, Math.min(200, value));
+                    }
+                }
+            } else {
+                const mask = mbrEditableMask(addr, base) & (maskOverride === null ? 255 : maskOverride);
+                if (!mask) return;
+                table[addr] = (table[addr] & ~mask) | (value & mask);
+            }
             mbrUpdateTableCrc(table);
             mbrDirty[chipKey] = !mbrTablesEqual(table, base);
         });
+
         mbrTable = new Uint8Array(mbrTableCache[key]);
         syncMbrFields(); syncMbrRegInputs(); updateSb3ForChip(); updateUI();
     }
@@ -8306,6 +8445,9 @@ function validateUf2ForDevice(p, devInfo) {
         $("mbrRegTitle").textContent = `3116 设置 · ${$("mbrChip").value}`;
         syncMbrRegInputs();
         openModalAnimated(w);
+        if (!mbrAllRead() && $("ckMbr3116").checked) {
+            withSerialLock(mbrAutoReadAllChips);
+        }
     }
 
     // 0xC7 单传感器采样: 双写铁律 [0xC7] + [addr][sensor], 回 11B 或文本行
@@ -8361,15 +8503,14 @@ function validateUf2ForDevice(p, devInfo) {
             const v = Number(e.target.value);
             if (!Number.isInteger(v)) { syncMbrRegInputs(); return; }
             if (def.a === 0x1D) mbrRegEdit("1D", v < 0 ? 0 : 0x80 | v, v < 0 ? 0x80 : 0x9F);
+            else if (def.a === 0x4E) mbrRegEdit("4E", v & 1, 0x01);
+            else if (def.a === 0x26) mbrRegEdit("26", v & 3, 0x03);
+            else if (def.a === 0x4F) mbrRegEdit("4F", v & 8, 0x08);
             else mbrRegEdit(def.a.toString(16), Math.max(def.min, Math.min(def.max, v)));
         });
     });
     (function initMbrRegUI() {
         buildMbrRegUI();
-        const row = document.createElement("label"); row.className = "checkbox-item mbr-reg-global";
-        row.style.justifyContent = "flex-start";
-        row.innerHTML = '<input type="checkbox" id="mbrRegGlobal" class="form-check-input" checked><span class="form-check-label">同步修改全部芯片（先读取全部）</span>';
-        $("mbrRegModal").querySelector(".flash-modal-body").prepend(row);
     })();
 
     // round86 #12: 预设按钮已移除(阈值/消抖/灵敏度滑条并入参数调节与高级参数区)。
@@ -8401,17 +8542,57 @@ function validateUf2ForDevice(p, devInfo) {
             return false;
         }
     }
-    $("btnMbrReadChip").addEventListener("click", () => withSerialLock(async () => {
-        const key = mbrKey($("mbrChip").value);
-        if (mbrDirty[key] && !confirm("重新读取将丢弃当前未写入修改。继续？")) return;
-        await mbrReadForEdit(key);
-    }));
-    $("btnMbrRegRead").addEventListener("click", () => $("btnMbrReadChip").click());
-    $("btnMbrReadAll").addEventListener("click", () => withSerialLock(async () => {
-        if (Object.values(mbrDirty).some(Boolean) && !confirm("重新读取将丢弃未写入修改。继续？")) return;
-        for (const option of [...$("mbrChip").options]) if (!(await mbrReadForEdit(option.value))) return;
-        mbrSetWriteStatus("全部芯片已读取");
-    }));
+    async function mbrAutoReadAllChips() {
+        if (!configMode || mbrWriting || !$("ckMbr3116").checked) return;
+        const chips = [...$("mbrChip").options].map(o => o.value);
+        if (!chips.length) return;
+        if (mbrAllRead()) return;
+        log("正在自动读取全部 MBR3116 芯片配置...");
+        mbrSetWriteStatus("正在自动读取全部芯片...");
+        for (const option of chips) {
+            const key = mbrKey(option);
+            if (mbrReadBases[key]) continue;
+            await mbrReadForEdit(key);
+        }
+        if (mbrAllRead()) {
+            log(`全部 ${chips.length} 片 3116 芯片已读取并就绪`);
+            mbrSetWriteStatus(`全部芯片已就绪 (${chips.join(", ")})`);
+        } else {
+            mbrSetWriteStatus("部分芯片读取未完成，可点击重新读取", true);
+        }
+        syncMbrFields();
+        if ($("mbrRegModal") && $("mbrRegModal").style.display !== "none") syncMbrRegInputs();
+        updateUI();
+    }
+
+    if ($("btnMbrReadChip")) {
+        $("btnMbrReadChip").addEventListener("click", () => withSerialLock(async () => {
+            const key = mbrKey($("mbrChip").value);
+            if (mbrDirty[key] && !confirm("重新读取将丢弃当前未写入修改。继续？")) return;
+            await mbrReadForEdit(key);
+        }));
+    }
+    if ($("btnMbrRegRead")) {
+        $("btnMbrRegRead").addEventListener("click", () => withSerialLock(async () => {
+            const isGlobal = $("mbrRegGlobal") ? $("mbrRegGlobal").checked : true;
+            if (isGlobal) {
+                if (Object.values(mbrDirty).some(Boolean) && !confirm("重新读取将丢弃未写入修改。继续？")) return;
+                for (const option of [...$("mbrChip").options]) if (!(await mbrReadForEdit(option.value))) return;
+                mbrSetWriteStatus("全部芯片已读取");
+            } else {
+                const key = mbrKey($("mbrChip").value);
+                if (mbrDirty[key] && !confirm("重新读取将丢弃当前未写入修改。继续？")) return;
+                await mbrReadForEdit(key);
+            }
+        }));
+    }
+    if ($("btnMbrReadAll")) {
+        $("btnMbrReadAll").addEventListener("click", () => withSerialLock(async () => {
+            if (Object.values(mbrDirty).some(Boolean) && !confirm("重新读取将丢弃未写入修改。继续？")) return;
+            for (const option of [...$("mbrChip").options]) if (!(await mbrReadForEdit(option.value))) return;
+            mbrSetWriteStatus("全部芯片已读取");
+        }));
+    }
     $("btnMbrBackup").addEventListener("click", () => {
         if (!mbrWriteBackups.length) return;
         downloadBlob(new Blob([JSON.stringify({ format: "NYANITHM-MBR3116-BACKUP-1", backups: mbrWriteBackups }, null, 2)], { type: "application/json" }), "3116_write_backups.json");
@@ -8499,52 +8680,62 @@ function validateUf2ForDevice(p, devInfo) {
     // round86: 独立「悬空截止校准」按钮已移除 -- 校准入口统一到「一键校准阈值」
     // (btnCalibrate)按硬件探测路由(#7)。runHoverCutoffCalibration 保留为路由目标。
 
-    $("mbrHexTable").addEventListener("change", () => {
-        const txt = $("mbrHexTable").value;
-        const bytes = (txt.match(/[0-9a-fA-F]{2}/g) || []).map(s => parseInt(s, 16));
-        if (bytes.length !== 128) {
-            log(`寄存器表格式错误: 需要 128 字节,解析到 ${bytes.length} 字节`, "error");
-            renderMbrHex();
-            return;
-        }
-        mbrTable = new Uint8Array(bytes);
-        // round86 审查修复(P1): 寄存器表手改 = 对当前芯片的整表编辑,
-        // 写缓存并标脏(仅当前芯片,整表不做逐芯片语义传播)。
-        mbrUpdateTableCrc(mbrTable);
-        mbrCacheStore($("mbrChip").value, mbrTable, false);
-        mbrDirty[mbrKey($("mbrChip").value)] = true;
-        syncMbrFields(); syncMbrRegInputs();
-    });
+    function parseHexTextToBytes(txt) {
+        return (txt.match(/[0-9a-fA-F]{2}/g) || []).map(s => parseInt(s, 16));
+    }
 
-    // 0xBA 应用(双重确认按钮,避免误写 NVM)
+    function applyHexTableToMemory(silent = false) {
+        if (!mbrTable) return false;
+        const txt = $("mbrHexTable").value;
+        const bytes = parseHexTextToBytes(txt);
+        if (bytes.length !== 128) {
+            if (!silent) log(`寄存器表格式错误: 需要 128 字节, 解析到 ${bytes.length} 字节`, "error");
+            renderMbrHex();
+            return false;
+        }
+        const key = $("mbrChip").value || "0x40";
+        const targetAddr = mbrChipAddr();
+        const base = mbrReadBases[mbrKey(key)];
+        const check = mbrValidateTable(bytes, targetAddr, base, false);
+        if (!check.valid) {
+            if (!silent) log("十六进制表未通过校验：" + check.reasons.join("；"), "error");
+            renderMbrHex();
+            return false;
+        }
+
+        const isGlobal = $("mbrRegGlobal") ? $("mbrRegGlobal").checked : true;
+        const chips = isGlobal ? [...$("mbrChip").options].map(o => o.value) : [key];
+
+        chips.forEach(c => {
+            const chipKey = mbrKey(c), chipBase = mbrReadBases[chipKey];
+            if (!chipBase) return;
+            const newTable = new Uint8Array(bytes);
+            newTable[0x51] = parseInt(c, 16); // 保持芯片地址正确
+            // 保留各芯片专有使能差异
+            newTable[0x00] = chipBase[0x00];
+            newTable[0x01] = chipBase[0x01];
+            mbrUpdateTableCrc(newTable);
+            mbrCacheStore(c, newTable, false);
+            mbrDirty[chipKey] = !mbrTablesEqual(newTable, chipBase);
+        });
+
+        mbrTable = new Uint8Array(mbrTableCache[mbrKey(key)]);
+        syncMbrFields();
+        syncMbrRegInputs();
+        updateUI();
+        if (!silent) log(`已成功将十六进制寄存器表反向应用到上方参数（${isGlobal ? "全部芯片" : key}）`);
+        return true;
+    }
+
+    $("mbrHexTable").addEventListener("change", () => applyHexTableToMemory(false));
+    $("mbrHexTable").addEventListener("blur", () => applyHexTableToMemory(true));
+
     function setupMbrApply() {
         const btn = $("btnMbrApply");
-        const originalHTML = btn.innerHTML;
-        let confirmTimer = null, isConfirming = false;
-        function resetConfirm() {
-            btn.innerHTML = originalHTML;
-            btn.classList.remove('btn-confirming');
-            isConfirming = false;
-            if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
-        }
-        btn.addEventListener("click", () => withSerialLock(async () => {
-            if (!configMode) { log("请先进入配置模式", "warn"); return; }
-            if (!mbrTable) { log("寄存器表为空", "error"); return; }
-            if (!MBR_CRC_OK) { log("CRC 自检未通过,表应用已禁用", "error"); return; }
-            if (isConfirming) {
-                resetConfirm();
-                const addr = "0x" + mbrChipAddr().toString(16).toUpperCase();
-                const size = (probeInfo && probeInfo.tofCount === 5) ? "32寸" : "27寸";
-                log(`向芯片 ${addr} 烧录 128 字节寄存器表(${size} 设备)...`);
-                const ok = await mbrBurnOne(addr);
-                if (!ok) log(`芯片 ${addr} 未通过 NVM 完整校验`, "error");
-            } else {
-                isConfirming = true;
-                btn.classList.add('btn-confirming');
-                btn.textContent = "确认写入 NVRAM";
-                confirmTimer = setTimeout(resetConfirm, 3000);
-            }
-        }));
+        if (!btn) return;
+        btn.addEventListener("click", () => {
+            applyHexTableToMemory(false);
+        });
     }
     setupMbrApply();
 
@@ -9602,15 +9793,15 @@ function validateUf2ForDevice(p, devInfo) {
         $("rgMbrGate").disabled = !inCfg || !mbrGateFwSupport;
 
         // round86 #12: 预设/悬空截止校准按钮已移除;btnMbrBurnAll 为同步烧录入口。
-        const mbrIds = ["mbrChip", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply", "btnMbrBurnAll", "btnMbrRestoreAll", "btnMbrRegWin", "btnMbrReadAll", "btnMbrRegRead"];
+        const mbrIds = ["mbrChip", "mbrHexTable", "btnMbrTemplate", "btnMbrLoadFile", "btnMbrSaveFile", "btnMbrApply", "btnMbrBurnAll", "btnMbrRegWin", "btnMbrReadAll", "btnMbrRegRead"];
         const mbrEnabled = inCfg && MBR_CRC_OK && !mbrWriting;
-        mbrIds.forEach(id => $(id).disabled = !mbrEnabled);
-        ["btnMbrApply", "btnMbrBurnAll"].forEach(id => $(id).disabled = !mbrEnabled || !mbrCanProgram());
+        mbrIds.forEach(id => { const el = $(id); if (el) el.disabled = !mbrEnabled; });
+        ["btnMbrApply", "btnMbrBurnAll"].forEach(id => { const el = $(id); if (el) el.disabled = !mbrEnabled || !mbrCanProgram(); });
         // round82: 从芯片读取(0xC6)额外需要固件 >= 1.6.2-beta1。
-        $("btnMbrReadChip").disabled = !mbrEnabled || !mbrGateFwSupport;
-        $("btnMbrReadAll").disabled = !mbrEnabled || !mbrGateFwSupport;
-        $("btnMbrRegRead").disabled = !mbrEnabled || !mbrGateFwSupport;
-        $("btnMbrBackup").disabled = !mbrWriteBackups.length;
+        if ($("btnMbrReadChip")) $("btnMbrReadChip").disabled = !mbrEnabled || !mbrGateFwSupport;
+        if ($("btnMbrReadAll")) $("btnMbrReadAll").disabled = !mbrEnabled || !mbrGateFwSupport;
+        if ($("btnMbrRegRead")) $("btnMbrRegRead").disabled = !mbrEnabled || !mbrGateFwSupport;
+        if ($("btnMbrBackup")) $("btnMbrBackup").disabled = !mbrWriteBackups.length;
         evaluateMbrRegRisk();
         // round88: 悬浮窗内 0xC7 采样按钮需固件 1.6.5+。
         $("btnMbrDbgRead").disabled = !mbrEnabled || !mbrDebugFwSupport;
