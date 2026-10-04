@@ -42,6 +42,7 @@ TCA9539 iox0(1, 0x74);
 
 bool usingIR = false;
 bool useMuxScan = false;
+uint8_t g_tofReadyMask = 0;  // Only successfully initialized channels may be polled.
 uint8_t heightRange = 10;  // Air key segment overlap (mm), updated from config in initHwDevices
 
 // ===== round49: Kalman 1D filter for ToF sensor smoothing =====
@@ -112,6 +113,7 @@ void resetToF() {
 }
 
 void initToF() {
+    g_tofReadyMask = 0;
     initToFReset();
     resetToF();
     sleep_ms(2);
@@ -119,12 +121,15 @@ void initToF() {
     int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
     // Phase 1: init each sensor through mux, assign unique I2C address
     for (int i = 0; i < sensorCount; i++) {
-        mux0.setChannel(i);
+        watchdog_update();
+        if (mux0.setChannel(i) != 1) continue;
+        tofs[i]->setI2CAddressOnly(0x29);
         tofs[i]->setTimeout(200);
-        tofs[i]->forceInit();
+        if (!tofs[i]->forceInit()) continue;
         tofs[i]->setMeasurementTimingBudget(12000);
         tofs[i]->setAddress(0x30 + i);
         tofs[i]->startContinuous(0);
+        g_tofReadyMask |= 1u << i;
         sleep_ms(5);  // stagger: distribute measurement completion phases
     }
     // Phase 2: enable all mux channels simultaneously (all sensors on bus)
@@ -134,7 +139,8 @@ void initToF() {
     // Phase 3: verify all sensors respond at their new addresses
     useMuxScan = false;
     for (int i = 0; i < sensorCount; i++) {
-        if (!findI2CDevice(1, 0x30 + i, 10)) {
+        watchdog_update();
+        if (!(g_tofReadyMask & (1u << i)) || !findI2CDevice(1, 0x30 + i, 10)) {
             useMuxScan = true;
             break;
         }
@@ -143,16 +149,20 @@ void initToF() {
         // Fallback: reset all sensors, re-init with mux-per-channel scanning
         resetToF();
         sleep_ms(2);
+        g_tofReadyMask = 0;
         for (int i = 0; i < sensorCount; i++) {
-            mux0.setChannel(i);
+            watchdog_update();
+            if (mux0.setChannel(i) != 1) continue;
             tofs[i]->setI2CAddressOnly(0x29);
             tofs[i]->setTimeout(200);
-            tofs[i]->forceInit();
+            if (!tofs[i]->forceInit()) continue;
             tofs[i]->setMeasurementTimingBudget(12000);
             tofs[i]->startContinuous(0);
+            g_tofReadyMask |= 1u << i;
             sleep_ms(5);
         }
     }
+    watchdog_update();
 }
 
 // ===== round64: lane (game view, 0-31) <-> electrode (chip index m, bit e) =====
@@ -217,9 +227,13 @@ static uint8_t electrodeBaseReleaseTh(uint8_t m, uint8_t e) {
 }
 
 void initMPR121() {
+    watchdog_update();
     mpr0.init(6, 3, true);
+    watchdog_update();
     mpr1.init(6, 3, true);
+    watchdog_update();
     mpr2.init(6, 3, true);
+    watchdog_update();
 
     // Let auto-config run for 200ms to set optimal per-electrode charge current (CDC).
     // Without this delay, CDC may be 0 for some electrodes -> no touch detection.
@@ -240,6 +254,7 @@ void initMPR121() {
     // round64: per-electrode thresholds driven by config (lane table lookup,
     // 0 = inherit global). Touch + release both written per electrode.
     for (uint8_t m = 0; m < 3; m++) {
+        watchdog_update();
         for (uint8_t e = 0; e < 12; e++) {
             uint8_t base = electrodeBaseTouchTh(m, e);
             uint8_t baseR = electrodeBaseReleaseTh(m, e);
@@ -261,8 +276,11 @@ void initMPR121() {
     // Power-on baseline calibration: force baseline = current idle filtered value
     // so touch delta starts at 0. Skipped if any electrode is touched at boot.
     mpr0.calibrateBaseline();
+    watchdog_update();
     mpr1.calibrateBaseline();
+    watchdog_update();
     mpr2.calibrateBaseline();
+    watchdog_update();
 }
 
 void initI2C() {
@@ -342,7 +360,7 @@ void updateIR() {
 void initHwDevices() {
     // round46b: hardware watchdog - if Core0 ever wedges (e.g. stuck I2C bus),
     // the chip auto-resets after 2s instead of freezing the game input forever.
-    // updateInputState() calls watchdog_update() every cycle.
+    // Bounded startup stages also feed it; updateInputState() owns runtime feeds.
     watchdog_enable(2000, true);
     // round64: build the lane<->electrode inverse table BEFORE any threshold
     // consumer runs (initMPR121 / software verify layers).
@@ -360,11 +378,13 @@ void initHwDevices() {
         mux0.init();
         initToF();
     }
-    if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
+    watchdog_update();
+    if ((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3) {
         initCY8CMBR3116();
     } else {
         initMPR121();
     }
+    watchdog_update();
 }
 
 uint8_t touchData[4];
@@ -1594,6 +1614,7 @@ void updateAir() {
     bool anyUpdated = false;
     bool gotNewData[5] = {};
     for (int i = 0; i < sensorCount; i++) {
+        if (!(g_tofReadyMask & (1u << i))) continue;
         if (useMuxScan) mux0.setChannel(i);
         if (tofs[i]->readRangeContinuousMillimetersAsync(heightDataOriginal + i)) {
             if (heightDataOriginal[i] >= 8190) {
