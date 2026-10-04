@@ -1,86 +1,82 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  * Copyright (c) 2026 Catium2006
  */
-
 #include <controller_config.h>
-#include <error_state.h>
-#include <gpio_def.h>
 #include <hardware/watchdog.h>
 #include <hw_devices.h>
 #include <hw_check.h>
 #include <i2c_port.h>
-#include <pca954x.h>
+#include <tusb.h>
 
-extern bool useMuxScan;  // from hw_devices.cpp
+bool hardwareMismatchAtBoot = false;
+uint8_t detectedMprMask = 0, detectedMbrMask = 0;
 
-void checkToF() {
-    if (usingIR) return;
-    watchdog_update();
-    if (!findI2CDevice(1, 0x70)) {
-        error(false);
+static void startupWait(uint32_t durationMs) {
+    const uint32_t start = to_ms_since_boot(get_absolute_time());
+    do {
         watchdog_update();
-        return;
-    }
-    PCA954X mux(1, 0x70, GPIO_PCA9545_RESET);
-
-    int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
-    bool missing = false;
-    if (!useMuxScan) {
-        // Independent address mode: sensors at 0x30+, all mux channels enabled
-        for (int i = 0; i < sensorCount; i++) {
-            watchdog_update();
-            if (!(g_tofReadyMask & (1u << i)) || !findI2CDevice(1, 0x30 + i)) missing = true;
-        }
-        // Restore mux state: all channels enabled (initToF sets this)
-        uint8_t muxMask = (sensorCount == 5) ? 0x1F : 0x0F;
-        mux.setReg(muxMask);
-    } else {
-        // Mux scan fallback: check each channel at default 0x29
-        for (int i = 0; i < sensorCount; i++) {
-            watchdog_update();
-            if (mux.setChannel(i) != 1 || !(g_tofReadyMask & (1u << i)) ||
-                !findI2CDevice(1, 0x29)) missing = true;
-        }
-        // Leave mux in last channel state; updateAir switches per cycle
-    }
-    watchdog_update();
-    if (missing) warn(false);
-    watchdog_update();
+        // Core1 is parked; Core0 owns USB until startup completes.
+        tud_task();
+        sleep_ms(10);
+    } while (to_ms_since_boot(get_absolute_time()) - start < durationMs);
 }
 
-void check3116() {
-    bool v2 = ControllerConfig.hwVer >= 3;
-    bool missing = false;
-    for (uint8_t i = 0; i < (v2 ? 2 : 3); ++i) {
-        watchdog_update();
-        if (!findI2CDevice(0, (v2 ? 0x43 : 0x40) + i)) missing = true;
-    }
-    watchdog_update();
-    if (missing) warn(false);
-    watchdog_update();
-}
-
-void checkMPR121() {
-    bool missing = false;
+bool hardwareConfigMismatch() {
+    uint8_t mprMask = 0, mbrMask = 0;
+    CY8CMBR3116* chips[5] = {&MBR3116A, &MBR3116B, &MBR3116C, &MBR3116D, &MBR3116E};
     for (uint8_t i = 0; i < 3; ++i) {
         watchdog_update();
-        if (!findI2CDevice(0, 0x5a + i)) missing = true;
+        if (findI2CDevice(0, 0x5a + i, 1)) mprMask |= 1u << i;
     }
-    watchdog_update();
-    if (missing) warn(false);
-    watchdog_update();
+    for (uint8_t i = 0; i < 5; ++i) {
+        watchdog_update();
+        uint8_t id[3] = {};
+        // Infineon TRM: FAMILY_ID=0x9A; CY8CMBR3116 DEVICE_ID=0x0A05.
+        // Startup only: a chip can still be waking after the driver's immediate
+        // NACK retries. Confirm failed discovery after two bounded 10ms waits.
+        for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+            if (chips[i]->requestDataFromAddress(0x8f, sizeof(id), id) == 0) {
+                if (id[0] == 0x9a && id[1] == 0x05 && id[2] == 0x0a)
+                    mbrMask |= 1u << i;
+                break;
+            }
+            if (attempt < 2) startupWait(10);
+        }
+    }
+    const bool v2 = ControllerConfig.hwVer >= 3;
+    detectedMprMask = mprMask;
+    detectedMbrMask = mbrMask;
+    const bool useMbr = v2 || (ControllerConfig.cfg0 & CFG0_BIT_MBR3116);
+    const bool touchMismatch = useMbr
+        ? (mprMask != 0 || mbrMask != (v2 ? 0x18 : 0x07))
+        : (mprMask != 0x07 || mbrMask != 0);
+    const uint8_t expectedTof = (ControllerConfig.hwVer == 2 ||
+                                 ControllerConfig.hwVer == 4) ? 0x1f : 0x0f;
+    // IR is auto-selected, not a saved configuration bit. WS2812 has no readback.
+    return touchMismatch || (!usingIR &&
+        (g_tofPhysicalMask != expectedTof || g_tofReadyMask != expectedTof));
 }
 
 void checkHardwareState() {
-    // A hardware mismatch must leave the main loop/configuration reachable.
-    // The old forever-alert loops never fed the 2s watchdog and rebooted here.
-    if ((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3) {
-        check3116();
-    } else {
-        checkMPR121();
+    hardwareMismatchAtBoot = hardwareConfigMismatch();
+    if (hardwareMismatchAtBoot) {
+        for (uint8_t flash = 0; flash < 3; ++flash) {
+            // All physical chain positions; visible even if lightLimit is zero.
+            RGB_LED.fill(255, 0, 0);
+            RGB_LED.flush();
+            startupWait(2000);
+            if (flash < 2) {
+                RGB_LED.fill(0, 0, 0);
+                RGB_LED.flush();
+                startupWait(500);
+            }
+        }
     }
-    checkToF();
+    RGB_LED.fill(0, 0, 0);
+    RGB_LED.fill(15, 15, 15, 0, g_lampCount);
+    RGB_LED.flush();
+    // FIFO submission is not completion; allow the final frame/latch to finish.
+    startupWait(2);
 }

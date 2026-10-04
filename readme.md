@@ -1,6 +1,8 @@
 # Nyanithm Firmware
 
-Nyanithm 触摸控制器固件 -- hw_v1 硬件兼容版本
+Nyanithm 触摸控制器固件 -- hw_v1 通用版本
+
+2026-10-05 起，唯一维护分支为 `hw_v1`，工作树为 `Nyanithm_firmware_hw_v1_universal/`。以已部署的 beta15 通用版为基线维护；`hw_v1_compatible` 为废弃存档，不再同步。构建使用本目录 `tools/build_firmware.ps1 -Variant hw_v1`。本次 beta16 的审查、备份、测试与安装证据见 [通用版审修报告](docs/round90v_通用版审查与启动提示.md)。
 
 ## Contributors
 

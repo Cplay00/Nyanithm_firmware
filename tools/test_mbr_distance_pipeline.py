@@ -186,8 +186,9 @@ public:
     uint16_t hardwareBits = 0;
     uint16_t differences[12] = {0};
     unsigned dataReads = 0;
+    bool readFails = false;
     uint16_t touched() { return hardwareBits; }
-    uint16_t filteredData(uint8_t) { ++dataReads; return 1000; }
+    uint16_t filteredData(uint8_t) { ++dataReads; return readFails ? 0 : 1000; }
     uint16_t baselineData(uint8_t electrode) { ++dataReads; return 1000 + differences[electrode]; }
 };
 controller_config ControllerConfig = {};
@@ -547,6 +548,25 @@ static void runMpr(bool withProfile) {
     mprs[m]->hardwareBits = 0; frame(1); output(0, true);  // Existing sticky release.
     CHECK(mprs[m]->dataReads == 2);
 }
+static void runMprFault(unsigned scenario) {
+    initialize(false, false); ControllerConfig.cfg0 = 0;
+    MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
+    const unsigned m = V1_LANE_M[0], e = V1_LANE_E[0];
+    mprs[m]->differences[e] = 60;
+    mprs[m]->hardwareBits = 1u << e;
+    if (scenario == 1) {
+        const unsigned other = V1_LANE_E[1];
+        mprs[m]->differences[other] = 60;
+        mprs[m]->hardwareBits = 1u << other;
+        for (unsigned n = 0; n < 3; ++n) frame();
+        output(1, true); mprs[m]->hardwareBits |= 1u << e;
+    }
+    if (scenario == 2) { mprs[m]->differences[e] = 4; frame(); output(0, false); }
+    mprs[m]->readFails = true;
+    for (unsigned n = 0; n < 8; ++n) { frame(); output(0, false); }
+    mprs[m]->readFails = false; mprs[m]->differences[e] = 60;
+    frame(); output(0, true);
+}
 static void runLegacyFault(unsigned scenario, bool v2) {
     initialize(v2, false);
     unsigned lane = 0, m = laneChip(lane);
@@ -679,6 +699,7 @@ extern "C" void mbrPipelineTestEntry() {
     if (number < 40) runScenario(number / 2, (number & 1) != 0);
     else if (number < 42) runMpr(number == 41);
     else if (number < 84) runLegacyFault((number - 42) / 2, (number & 1) != 0);
+    else if (number < 87) runMprFault(number - 84);
     else CHECK(false);
     writeText("PASS checks="); writeNumber(checks); writeText("\n");
     ExitProcess(0);
@@ -705,7 +726,7 @@ LEGACY_FAULT_SCENARIOS = [
     "recovered-wake-NACK", "torn-then-good-group", "persistent-torn-groups",
     "late-native-status", "long-first-fault-expires", "late-counts-no-deadline-renewal",
 ]
-CASE_COUNT = 42 + 2 * len(LEGACY_FAULT_SCENARIOS)
+CASE_COUNT = 45 + 2 * len(LEGACY_FAULT_SCENARIOS)
 
 
 def main() -> int:
@@ -786,7 +807,8 @@ def main() -> int:
     for number in numbers:
         name = (("v2" if number & 1 else "v1") + ":" + SCENARIOS[number // 2]
                 if number < 40 else "MPR:" + ("signed-enabled-profile-ignored" if number == 41 else "legacy-zero-profile")
-                if number < 42 else ("v2" if number & 1 else "v1") + ":legacy-" + LEGACY_FAULT_SCENARIOS[(number - 42) // 2])
+                if number < 42 else ("v2" if number & 1 else "v1") + ":legacy-" + LEGACY_FAULT_SCENARIOS[(number - 42) // 2]
+                if number < 84 else "MPR:evidence-failure-" + str(number - 84))
         result = subprocess.run([str(executable), f"--case={number}"], capture_output=True, text=True, timeout=15)
         match = re.search(r"PASS checks=(\d+)", result.stdout)
         passed = result.returncode == 0 and match is not None

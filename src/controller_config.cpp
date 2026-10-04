@@ -103,19 +103,28 @@ static void recomputeXorSum(controller_config* config) {
 }
 
 void saveConfigSafe(void* param) {
-    // round51: currentPage = last written page (0..15) or 0xFF (no valid
-    // history). 0xFF and 15 both erase the sector first -- the old code wrote
-    // page 1 after an erase (page 0 stayed erased, the sequential boot scan
-    // stopped at page 0, and the just-saved config was lost on reboot).
-    uint8_t next;
-    if (currentPage == 0xff || currentPage >= 15) {
+    // Append after every occupied page, including interrupted/invalid writes.
+    // NOR programming cannot restore 0 bits to 1 without a sector erase.
+    const uint8_t* sector = (const uint8_t*)(XIP_BASE + FLASH_STORAGE_START);
+    unsigned next = 0;
+    for (unsigned page = 0; page < FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE; ++page) {
+        for (unsigned byte = 0; byte < FLASH_PAGE_SIZE; ++byte) {
+            if (sector[page * FLASH_PAGE_SIZE + byte] != 0xff) {
+                next = page + 1;
+                break;
+            }
+        }
+    }
+    if (next == FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE) {
         flash_range_erase(FLASH_STORAGE_START, FLASH_SECTOR_SIZE);
         next = 0;
-    } else {
-        next = currentPage + 1;
     }
+    // The wire config stays 128B; the SDK requires whole 256B flash pages.
+    uint8_t pageData[FLASH_PAGE_SIZE];
+    memset(pageData, 0xff, sizeof(pageData));
+    memcpy(pageData, &ControllerConfig, sizeof(ControllerConfig));
     flash_range_program(FLASH_STORAGE_START + (next * FLASH_PAGE_SIZE),
-                        (const uint8_t*)&ControllerConfig, sizeof(controller_config));
+                        pageData, sizeof(pageData));
     currentPage = next;
 }
 
@@ -142,9 +151,6 @@ void readConfigSafe(void* param) {
         controller_config* config = (controller_config*)addr;
         // printf("magic = %d\n", config->magic);
         // 检查是否为存储的配置
-        if (config->magic != CONTROLLER_CONFIG_MAGIC) {
-            break;  // erased/unwritten page: sequential-write scheme ends here
-        }
         // round51: full integrity check (magic + cfgVer + xorSum) before
         // accepting a page; a torn write (power loss mid-program) falls back
         // to the previous valid page instead of loading bit-rotten values.
@@ -165,13 +171,7 @@ void readConfigSafe(void* param) {
     } else {
         // printf("config not found\n");
         currentPage = 0xff;
-        uint8_t* d = (uint8_t*)&defaultConfig;
-        uint8_t sum = 0;
-        for (int i = 0; i < sizeof(controller_config) - 1; i++) {
-            sum ^= *d;
-            d++;
-        }
-        defaultConfig.xorSum = sum;
+        recomputeXorSum(&defaultConfig);
         memcpy(&ControllerConfig, &defaultConfig, sizeof(controller_config));
         // printf("using default config\n");
         saveConfigSafe(nullptr);

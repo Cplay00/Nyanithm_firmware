@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 
 from test_touch_snapshot_readers import extract_body, find_compiler
+from test_mbr_distance_pipeline import extract_function
 
 HOST = r'''
 #ifdef NDEBUG
@@ -153,12 +154,14 @@ int main() {
 def main():
     variant = Path(__file__).resolve().parents[1]
     production = variant / 'src/app_link.cpp'
-    body = extract_body(production.read_text(encoding='utf-8'), 'else if (cmd == CMD_READ3116CONFIG)')
+    source = production.read_text(encoding='utf-8')
+    body = extract_body(source, 'else if (cmd == CMD_READ3116CONFIG)')
+    sender, _ = extract_function(source, 'static bool writeCdcPayload(')
     with tempfile.TemporaryDirectory(prefix='nyanithm_native_dump_') as directory:
         work = Path(directory)
         harness = work / 'dump.cpp'
         binary = work / ('dump.exe' if os.name == 'nt' else 'dump')
-        harness.write_text(HOST + '\nvoid readC6() {\n' + body + '\n}\n' + CASES, encoding='utf-8')
+        harness.write_text(HOST + sender + '\nvoid readC6() {\n' + body + '\n}\n' + CASES, encoding='utf-8')
         command = find_compiler(None) + ['-std=c++17', '-Wall', '-Wextra', '-Werror', '-O2',
                                         str(harness), '-o', str(binary)]
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace')

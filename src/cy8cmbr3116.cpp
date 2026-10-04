@@ -1,6 +1,7 @@
 /* Modified from https://github.com/sebastianregelmann/CypressCY8CMBR3116 */
 #include <cy8cmbr3116.h>
 #include <pico/error.h>
+#include <cstring>
 
 CY8CMBR3116::CY8CMBR3116(uint8_t _i2c_port, uint8_t I2C_ADDRESS) {
     i2c_port = _i2c_port;
@@ -629,6 +630,7 @@ uint8_t CY8CMBR3116::setPointer(int registerAddress) {
 // Method to retriev count of bytes from last pointer Postition to resultBuffer
 uint8_t CY8CMBR3116::requestData(uint8_t count, uint8_t* resultBuffer) {
     int ret = i2c_read(i2c_port, DEVICE_I2C_ADDRESS, resultBuffer, count, false);
+    if (ret != count) memset(resultBuffer, 0, count);
     return (ret == count) ? 0 : 1;
 }
 
@@ -650,8 +652,12 @@ uint8_t CY8CMBR3116::requestDataFromAddress(uint8_t registerAddress, uint8_t cou
     for (uint8_t attempt = 0; attempt < 3; ++attempt) {
         int ret = i2c_write_stop_read(i2c_port, DEVICE_I2C_ADDRESS, registerAddress, resultBuffer, count);
         if (ret == count) return 0;
-        if (ret != PICO_ERROR_GENERIC) return 1;
+        if (ret != PICO_ERROR_GENERIC) {
+            memset(resultBuffer, 0, count);
+            return 1;
+        }
     }
+    memset(resultBuffer, 0, count);
     return 1;
 }
 

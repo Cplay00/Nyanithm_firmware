@@ -37,6 +37,7 @@ extern volatile uint32_t flashDiagGapMs;
 // Uses bulk tud_cdc read/write instead of stdio getchar/putchar (old maindev_loop,
 // so CDC responses are no longer blocked by Core0's updateInputState() scan.
 void cdc_respond();
+void cdcSessionStateChanged(bool dtr);
 
 
 

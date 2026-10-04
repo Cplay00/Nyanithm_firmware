@@ -27,6 +27,7 @@ enum LampArrayReportId {
 
 void lamp_array_init(void);
 void lamp_array_apply(void);
+void lamp_array_finish_startup();
 
 uint16_t lamp_array_get_report(uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen);
 void lamp_array_set_report(uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize);

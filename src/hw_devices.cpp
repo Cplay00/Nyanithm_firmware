@@ -14,6 +14,7 @@
 #include <hardware/timer.h>
 #include <hardware/watchdog.h>
 #include <cstring>
+#include <i2c_port.h>
 
 VL53L0X tof0(1, 0x29);
 VL53L0X tof1(1, 0x29);
@@ -42,6 +43,7 @@ TCA9539 iox0(1, 0x74);
 
 bool usingIR = false;
 bool useMuxScan = false;
+uint8_t g_tofPhysicalMask = 0;
 uint8_t g_tofReadyMask = 0;  // Only successfully initialized channels may be polled.
 uint8_t heightRange = 10;  // Air key segment overlap (mm), updated from config in initHwDevices
 
@@ -83,11 +85,7 @@ static inline void kalmanUpdate(Kalman1D& k, float meas) {
     k.p = (1.0f - K) * p_pred;
     k.lastMeas = meas;
 }
-static inline void kalmanPredict(Kalman1D& k) {
-    k.v *= 0.85f;  // velocity decay: uncertainty grows without measurement
-    k.x += k.v;
-    k.p += KALMAN_Q;
-}
+
 
 // ===== round49: Air key lock state machine =====
 enum AirKeyState : uint8_t { AKS_IDLE, AKS_ACTIVE, AKS_COOLDOWN };
@@ -97,6 +95,9 @@ struct AirKeyTracker {
     uint8_t cooldown;
 };
 static AirKeyTracker airKeyTracker[6] = {};
+static bool tofValid[5] = {};
+static uint32_t tofSampleMs[5] = {};
+static constexpr uint32_t TOF_FRESH_MS = 200;
 
 
 void initToFReset() {
@@ -117,6 +118,17 @@ void initToF() {
     initToFReset();
     resetToF();
     sleep_ms(2);
+    // Probe all possible channels before assigning addresses. A fifth sensor
+    // remains at 0x29 when the saved layout expects four channels.
+    g_tofPhysicalMask = 0;
+    for (uint8_t i = 0; i < 5; ++i) {
+        watchdog_update();
+        uint8_t reg = 0xc0, model = 0;
+        if (mux0.setChannel(i) == 1 &&
+            i2c_write_read(1, 0x29, &reg, 1, &model, 1) == 1 && model == 0xee) {
+            g_tofPhysicalMask |= 1u << i;
+        }
+    }
     VL53L0X* tofs[5] = { &tof0, &tof1, &tof2, &tof3, &tof4 };
     int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
     // Phase 1: init each sensor through mux, assign unique I2C address
@@ -126,7 +138,7 @@ void initToF() {
         tofs[i]->setI2CAddressOnly(0x29);
         tofs[i]->setTimeout(200);
         if (!tofs[i]->forceInit()) continue;
-        tofs[i]->setMeasurementTimingBudget(12000);
+        // Keep the native default budget; the former 12ms request was rejected.
         tofs[i]->setAddress(0x30 + i);
         tofs[i]->startContinuous(0);
         g_tofReadyMask |= 1u << i;
@@ -156,7 +168,7 @@ void initToF() {
             tofs[i]->setI2CAddressOnly(0x29);
             tofs[i]->setTimeout(200);
             if (!tofs[i]->forceInit()) continue;
-            tofs[i]->setMeasurementTimingBudget(12000);
+            // Keep the native default budget; the former 12ms request was rejected.
             tofs[i]->startContinuous(0);
             g_tofReadyMask |= 1u << i;
             sleep_ms(5);
@@ -288,45 +300,6 @@ void initI2C() {
     initI2CBus(1, GPIO_I2C_1_SDA, GPIO_I2C_1_SCL, BR_I2C);
 }
 
-void program_cyc8mbr3116_with_address(uint8_t address, uint8_t* cfg) {
-    for (uint8_t i = 0; i < 128; i++) {
-        uint8_t buf[2] = { i, cfg[i] };
-        i2c_write(0, address, buf, 2, false);
-    }
-    uint8_t buf[2] = { 0x86, 0x02 };  // 给CTRL_CMD发送命令，检查CRC并保存，地址0x86，写入2
-    i2c_write(0, address, buf, 2, false);
-    sleep_ms(20);
-
-    buf[1] = 0xff;  // 软复位
-    i2c_write(0, address, buf, 2, false);
-    sleep_ms(20);
-}
-
-void initCY8CMBR3116() {
-    // program_cyc8mbr3116_with_address(0x40, cy8cmbr3116_cfg_0x40);
-    // program_cyc8mbr3116_with_address(0x41, cy8cmbr3116_cfg_0x41);
-    // program_cyc8mbr3116_with_address(0x42, cy8cmbr3116_cfg_0x42);
-
-    // gpio_init(GPIO_3116RST0);
-    // gpio_init(GPIO_3116RST1);
-
-    // gpio_set_dir(GPIO_3116RST0, true);
-    // gpio_set_dir(GPIO_3116RST1, true);
-
-    // gpio_pull_down(GPIO_3116RST0);
-    // gpio_pull_down(GPIO_3116RST1);
-
-    // gpio_set_drive_strength(GPIO_3116RST0,GPIO_DRIVE_STRENGTH_8MA);
-    // gpio_set_drive_strength(GPIO_3116RST1,GPIO_DRIVE_STRENGTH_8MA);
-
-    // gpio_put(GPIO_3116RST0, false);
-    // sleep_ms(10);
-    // gpio_put(GPIO_3116RST0, true);
-    // gpio_put(GPIO_3116RST1, false);
-    // sleep_ms(10);
-    // gpio_put(GPIO_3116RST1, true);
-}
-
 void detectIR() {
     if (iox0.isConnected()) {
         usingIR = true;
@@ -380,7 +353,7 @@ void initHwDevices() {
     }
     watchdog_update();
     if ((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3) {
-        initCY8CMBR3116();
+        // MBR3116 runs its existing native NVRAM configuration.
     } else {
         initMPR121();
     }
@@ -1112,7 +1085,10 @@ void updateTouch_v1() {
                             // increment verifiedCount, don't clear raw - let next cycle retry).
                             uint16_t filt2 = mprs[m]->filteredData(e);
                             if (filt2 == 0) {
-                                // Genuine I2C failure - don't trust, don't reject, just skip
+                                // Failed evidence must not advance a new ON confirmation.
+                                raw[m] &= ~(1 << e);
+                                verifiedCount[m][e] = 0;
+                                fastOk[m][e] = false;
                                 confirmReq[m][e] = CONFIRM_CYCLES;
                             } else {
                                 // First read was glitch, second OK - use filt2
@@ -1612,13 +1588,15 @@ void updateAir() {
 
     // Phase 1: Read ToF + Kalman update
     bool anyUpdated = false;
+    const uint32_t sampleNow = to_ms_since_boot(get_absolute_time());
     bool gotNewData[5] = {};
     for (int i = 0; i < sensorCount; i++) {
         if (!(g_tofReadyMask & (1u << i))) continue;
         if (useMuxScan) mux0.setChannel(i);
         if (tofs[i]->readRangeContinuousMillimetersAsync(heightDataOriginal + i)) {
             if (heightDataOriginal[i] >= 8190) {
-                heightData[i] = 4095;  // I2C error sentinel
+                tofValid[i] = false;
+                kalman[i] = {0, 0, 200.0f, -1.0f};
             } else {
                 float meas = (float)((int16_t)heightDataOriginal[i] + ControllerConfig.heightOffset[i]);
                 if (kalman[i].p >= 199.0f) {
@@ -1631,6 +1609,8 @@ void updateAir() {
                     kalmanUpdate(kalman[i], meas);
                 }
                 gotNewData[i] = true;
+                tofValid[i] = true;
+                tofSampleMs[i] = sampleNow;
             }
             anyUpdated = true;
         }
@@ -1638,9 +1618,22 @@ void updateAir() {
     // Phase 2: Kalman predict (sensors without new data only) + update heightData for debug
     for (int i = 0; i < sensorCount; i++) {
         if (!gotNewData[i] && heightDataOriginal[i] < 8190) { kalman[i].x += kalman[i].v; kalman[i].v *= 0.85f; }
-        heightData[i] = (int16_t)kalman[i].x;
+        if (tofValid[i] && sampleNow - tofSampleMs[i] >= TOF_FRESH_MS) {
+            tofValid[i] = false;
+            kalman[i] = {0, 0, 200.0f, -1.0f};
+            anyUpdated = true;
+        }
+        heightData[i] = tofValid[i] ? (int16_t)kalman[i].x : 4095;
     }
-    if (!anyUpdated) return;
+    if (!anyUpdated) {
+        // A fault may be the last completion; expire the release pulse even
+        // if every peripheral then stops producing measurements.
+        for (int j = 0; j < 6; ++j) {
+            if (airKeyTracker[j].state != AKS_ACTIVE &&
+                sampleNow - airKeyTracker[j].lastActiveMs >= 10) airKeys[j] = false;
+        }
+        return;
+    }
 
     // Phase 3: Slider gating (from previous cycle's touchData)
     bool handOnSlider = false;
@@ -1659,14 +1652,12 @@ void updateAir() {
 
         // Check detection: any sensor in range (with lookahead for rising hand)
         bool inRange = false;
-        bool risingConfident = false;
-        for (int i = 0; i < sensorCount; i++) {
-            if (kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
+            for (int i = 0; i < sensorCount; i++) {
+            if (!tofValid[i] || kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
             float v = kalman[i].v;
             // Actual position in range (maintains ACTIVE, also triggers)
             if (kalman[i].x >= rangeLow && kalman[i].x <= rangeHigh) {
                 inRange = true;
-                if (v < -V_MIN) risingConfident = true;
             }
             // Lookahead position (early trigger when approaching from below)
             if (!handOnSlider && v < -V_MIN) {
@@ -1674,7 +1665,6 @@ void updateAir() {
                 float xAhead = kalman[i].x + v * la;
                 if (xAhead >= rangeLow && xAhead <= rangeHigh) {
                     inRange = true;
-                    risingConfident = true;
                 }
             }
         }
@@ -1693,7 +1683,7 @@ void updateAir() {
                 // Hysteresis: check wider range with actual position
                 bool inHyst = false;
                 for (int i = 0; i < sensorCount; i++) {
-                    if (kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
+                    if (!tofValid[i] || kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
                     if (kalman[i].x >= rangeLow - EXIT_HYSTERESIS &&
                         kalman[i].x <= rangeHigh + EXIT_HYSTERESIS) {
                         inHyst = true; break;
@@ -1786,61 +1776,8 @@ void updateInputState() {
     }
     publishTouchState();
 
-    // Software baseline auto-correction: gradually adjust baseline to match
-    // idle filtered data. Fixes baseline stuck too high (e.g., M2E0 baseline=212
-    // vs idle filt=207, diff=5 causes false touches). Runs every 2s when idle.
-    // round50: MBR3116 does NOT need this - the chip manages its own baseline
-    // internally (configurable baseline tracking rate via BUTTON_LBR/NNT/NT
-    // registers). The software verification layer (round50) compensates for any
-    // residual baseline drift by rejecting touches with insufficient diff count.
-    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116) &&
-        (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 2)) {
-        // round47: idle baseline auto-correction (single software baseline writer).
-        // MPR121 hardware now freezes baseline during touch (FDLT=0xFF), so no
-        // anti-collapse / release-recovery writes are needed. This correction only
-        // nudges idle baseline down when it drifts high (prevents false touches).
-        // Uses writeBaselineRun() - direct I2C write without Stop->Run, so it never
-        // interrupts touch measurement. Per-electrode 2s cooldown avoids re-writes.
-        static uint32_t lastBaselineAdjust = 0;
-        static uint32_t blWriteMs[3][12] = {0};
-        uint32_t nowMs = to_ms_since_boot(get_absolute_time());
-        if (nowMs - lastBaselineAdjust > 500 && lastBaselineAdjust > 0) {
-            lastBaselineAdjust = nowMs;
-            MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
-            static uint8_t correctionIndex = 0;
-            // 8 electrodes per cycle, 500ms interval (2.25s rotation for all 36: 36/8*0.5s)
-            for (uint8_t i = 0; i < 8; i++) {
-                uint8_t idx = (correctionIndex + i) % 36;
-                uint8_t m = idx / 12;
-                uint8_t e = idx % 12;
-                if ((rawTouch[m] & (1 << e)) || (nowMs - lastTouchedMs[m][e] < 2000)) continue;  // not idle
-                if (nowMs - blWriteMs[m][e] < 2000) continue;  // round47: 2s cooldown per electrode
-                uint16_t filt = mprs[m]->filteredData(e);
-                uint16_t base = mprs[m]->baselineData(e);
-                int16_t diff = (int16_t)base - (int16_t)filt;
-                if (diff > 3 && filt > 0 && diff < 50) {
-                    uint8_t bl_reg = mprs[m]->readRegister8(MPR121_BASELINE_0 + e);
-                    uint8_t adj = (diff > 6) ? 2 : 1;
-                    if (bl_reg > adj) bl_reg -= adj;
-                    else bl_reg = 0;
-                    if (bl_reg == 0) continue;  // round47-review: read failure guard (baseline 0 -> 2-3s fake touch)
-                    // round47b: sanity check - bl_reg must be near filt>>2 (same electrode).
-                    // Corrupted I2C reads (observed in snapshot bursts: base=8/44/64 vs ~712)
-                    // would otherwise write a nonsense baseline. Allow +/-15 LSB tolerance.
-                    {
-                        uint16_t expected = (filt > 3) ? (uint16_t)(filt >> 2) : 0;
-                        int16_t blDiff = (int16_t)bl_reg - (int16_t)expected;
-                        if (blDiff > 15 || blDiff < -15) continue;  // corrupted read - skip write
-                    }
-                    mprs[m]->writeBaselineRun(e, bl_reg);  // round47: no Stop->Run
-                    blWriteMs[m][e] = nowMs;
-                }
-            }
-            correctionIndex = (correctionIndex + 8) % 36;
-        } else if (lastBaselineAdjust == 0) {
-            lastBaselineAdjust = nowMs;
-        }
-    }
+    // MPR baselines are writable only in Stop mode. Native tracking owns
+    // runtime baselines; remove the ineffective Run-mode correction I2C load.
 
     // round46: Core0 loop cycle timing (diagnostic telemetry, Core1 reads via 0xC1)
     {

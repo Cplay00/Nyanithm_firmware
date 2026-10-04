@@ -161,6 +161,9 @@ class TouchPipeline:
                         result.i2c_reads += 1
                         diff = diff_data[e]  # second read succeeds
                         if diff == 0:
+                            raw &= ~(1 << e)
+                            self.elec[e].verifiedCount = 0
+                            self.elec[e].fastOk = False
                             self.elec[e].confirmReq = CONFIRM_CYCLES
                             continue
                         # No fast-path on re-read (mirror hw_devices.cpp glitch path)
@@ -1275,6 +1278,12 @@ def run_tests():
     legacy.cycle_ms = 0x22
     tr.check("S44: unsigned wrap releases at 50ms",
              legacy.process_cycle(1, [255] * 16, mbr_button_valid=False).stretched_out == 0, "")
+    failed_mpr = TouchPipeline(12, False)
+    for frame in range(8):
+        r = failed_mpr.process_cycle(1, [0] * 12, i2c_error=True)
+        tr.check(f"S45: failed MPR evidence cannot create ON ({frame})", r.stretched_out == 0, "")
+    r = failed_mpr.process_cycle(1, [60] * 12)
+    tr.check("S45: fresh MPR evidence recovers", r.raw_out == 1, "")
     return tr
 
 

@@ -14,6 +14,7 @@
 #include <controller_config.h>
 #include <gpio_def.h>
 #include <hw_devices.h>
+#include <hw_check.h>
 #include <i2c_port.h>
 #include <nyanithm_shared.h>
 #include <pca954x.h>
@@ -31,33 +32,39 @@ bool hid_working = true;
 extern bool useMuxScan;  // from hw_devices.cpp
 
 void getStatus() {
-    // round46e: config-mode I/O restored to stdio (round45- era mechanism).
-    // Core1 keeps running tud_task() in config mode, which is exactly how the
-    // pre-round45 firmware worked (maindev_loop on Core0 + stdio_cdc).
-    printf("Nyanithm build " __DATE__ " " __TIME__ "\n");
-    printf("hwVer: %d\n", ControllerConfig.hwVer);
+    // Config-mode Core0 owns USB; stdio self-pumps with a per-call deadline.
+    // Feed between text groups so a slow reader cannot accumulate a WDT reset.
+    watchdog_update();
+    printf("Nyanithm build " __DATE__ " " __TIME__ "\nhwVer: %d\n", ControllerConfig.hwVer);
+    watchdog_update();
+    printf("startup config mismatch: %u; ToF detected mask: 0x%02X; ready mask: 0x%02X\n",
+           (unsigned)hardwareMismatchAtBoot, g_tofPhysicalMask, g_tofReadyMask);
+    watchdog_update();
+    printf("startup touch masks: MPR=0x%02X MBR=0x%02X\n", detectedMprMask, detectedMbrMask);
+    CY8CMBR3116* chips[] = {&MBR3116A, &MBR3116B, &MBR3116C, &MBR3116D, &MBR3116E};
+    for (uint8_t i = 0; i < 5; ++i) {
+        watchdog_update();
+        uint8_t family = 0;
+        uint16_t device = 0;
+        if (!chips[i]->get_FAMILY_ID(&family) && !chips[i]->get_DEVICE_ID(&device))
+            printf("MBR 0x%02X: FAMILY=0x%02X DEVICE=0x%04X\n", 0x40 + i, family, device);
+    }
     if (ControllerConfig.hwVer == 1 || ControllerConfig.hwVer == 3) {
+        watchdog_update();
         printf("original ToF distance (or error code):\n    tof0 = %d tof1 = %d tof2 = %d  tof3 = %d\n", heightDataOriginal[0], heightDataOriginal[1], heightDataOriginal[2], heightDataOriginal[3]);
-        printf("using config in page %d\n", getConfigPage());
-        for (int i = 0; i < 4; i++) {
-            if (heightDataOriginal[i] > 3000 && heightDataOriginal[i] != 8190) {
-                printf("*********************\n");
-                printf("ToF sensor #%d warning!\n", i);
-                printf("*********************\n");
-            }
-        }
     }
     if (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) {
+        watchdog_update();
         printf("original ToF distance (or error code):\n    tof0 = %d tof1 = %d tof2 = %d  tof3 = %d tof4 = %d\n", heightDataOriginal[0], heightDataOriginal[1], heightDataOriginal[2],
                heightDataOriginal[3], heightDataOriginal[4]);
-        printf("using config in page %d\n", getConfigPage());
-        for (int i = 0; i < 5; i++) {
-            if (heightDataOriginal[i] > 3000 && heightDataOriginal[i] != 8190) {
-                printf("*********************\n");
-                printf("ToF sensor #%d warning!\n", i);
-                printf("*********************\n");
-            }
-        }
+    }
+    watchdog_update();
+    printf("using config in page %d\n", getConfigPage());
+    const uint8_t tofCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
+    for (uint8_t i = 0; i < tofCount; ++i) {
+        watchdog_update();
+        if (heightDataOriginal[i] > 3000 && heightDataOriginal[i] != 8190)
+            printf("*********************\nToF sensor #%d warning!\n*********************\n", i);
     }
 }
 
@@ -85,6 +92,23 @@ static bool readCdcPayload(uint8_t* buf, int len, uint32_t timeout_ms) {
         }
     }
     return true;
+}
+
+// Shared bounded sender for binary configuration/debug replies.
+static bool writeCdcPayload(const uint8_t* data, uint32_t length) {
+    uint32_t sent = 0;
+    const uint32_t started = to_ms_since_boot(get_absolute_time());
+    while (sent < length && tud_cdc_connected() &&
+           to_ms_since_boot(get_absolute_time()) - started < 250) {
+        tud_task();
+        watchdog_update();
+        sent += tud_cdc_write(data + sent, length - sent);
+        tud_cdc_write_flush();
+        if (sent < length) sleep_ms(1);
+    }
+    tud_task();
+    tud_cdc_write_flush();
+    return sent == length;
 }
 
 void handleCommand() {
@@ -233,14 +257,7 @@ void handleCommand() {
                         // EP 包(64B)送出, 真机实测仅 86B 到达主机后停滞(CFG_READ
                         // 未暴露是因为它尾部还有 printf 文本顺带泵出)。必须循环
                         // 泵 tud_task + tud_cdc_write_flush 直到 TX 环排空。
-                        uint32_t total = 0;
-                        while (total < sizeof(cfg)) {
-                            tud_task();
-                            tud_cdc_write_flush();
-                            total += tud_cdc_write(cfg + total, (uint32_t)(sizeof(cfg) - total));
-                        }
-                        tud_task();
-                        tud_cdc_write_flush();
+                        writeCdcPayload(cfg, sizeof(cfg));
                     } else {
                         printf("3116 read fail\n");
                     }
@@ -266,19 +283,7 @@ void handleCommand() {
                     } else {
                         // Config-mode Core0 owns USB. Bound a stalled / closed
                         // host without appending text to a partial binary reply.
-                        uint32_t total = 0;
-                        uint32_t started = to_ms_since_boot(get_absolute_time());
-                        while (total < sizeof(regs) && tud_cdc_connected() &&
-                               to_ms_since_boot(get_absolute_time()) - started < 250) {
-                            tud_task();
-                            watchdog_update();
-                            uint32_t sent = tud_cdc_write(regs + total, sizeof(regs) - total);
-                            total += sent;
-                            tud_cdc_write_flush();
-                            if (sent == 0) sleep_ms(1);
-                        }
-                        tud_task();
-                        tud_cdc_write_flush();
+                        writeCdcPayload(regs, sizeof(regs));
                     }
                 } else {
                     printf("read3116: address 0x%02X not allowed.\n", address);
@@ -407,14 +412,7 @@ void handleCommand() {
                         out[8] = dbg[6];                       // BASELINE MSB
                         out[9] = dbg[7];                       // RAW_COUNT LSB
                         out[10] = dbg[8];                      // RAW_COUNT MSB
-                        uint32_t total = 0;
-                        while (total < sizeof(out)) {
-                            tud_task();
-                            tud_cdc_write_flush();
-                            total += tud_cdc_write(out + total, (uint32_t)(sizeof(out) - total));
-                        }
-                        tud_task();
-                        tud_cdc_write_flush();
+                        writeCdcPayload(out, sizeof(out));
                     } else {
                         printf("3116 debug fail\n");
                     }

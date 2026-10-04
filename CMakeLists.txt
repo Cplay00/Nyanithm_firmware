@@ -52,8 +52,6 @@ add_executable(Nyanithm
         src/button.cpp
         src/cy8cmbr3116.cpp
         src/hw_check.cpp
-        src/error_state.cpp
-        src/rainbow.cpp
         src/other_modes.cpp
         src/tca9539.cpp
         src/lamp_array.cpp
@@ -66,7 +64,9 @@ pico_generate_pio_header(Nyanithm ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 pico_set_program_name(Nyanithm "Nyanithm")
 
-pico_set_program_version(Nyanithm "1.6.6-beta8")
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/include/share/nyanithm_shared.h" FW_VERSION_LINE REGEX "^#define NYANITHM_FW_VERSION ")
+string(REGEX REPLACE "^#define NYANITHM_FW_VERSION +\"([^\"]+)\".*" "\\1" FW_VERSION "${FW_VERSION_LINE}")
+pico_set_program_version(Nyanithm "${FW_VERSION}")
 
 # round53: build variant for the NYANFW1 firmware signature (control panel
 # validates UF2 variant vs connected device before flashing)

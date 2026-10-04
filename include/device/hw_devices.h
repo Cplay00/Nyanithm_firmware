@@ -41,6 +41,7 @@ extern WS2812 RGB_LED;
 extern uint8_t g_lampCount;
 extern bool usingIR;
 extern uint8_t g_tofReadyMask;
+extern uint8_t g_tofPhysicalMask;
 
 void initHwDevices();
 void updateInputState();

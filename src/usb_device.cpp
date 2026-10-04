@@ -35,6 +35,8 @@
 #include <pico/flash.h>
 #include <pico/multicore.h>
 #include <pico/stdio/driver.h>
+#include <pico/sem.h>
+#include <hardware/watchdog.h>
 
 #include <chuni_io.h>
 #include <controller_config.h>
@@ -48,11 +50,27 @@
 // path calls tud_task() inside printf/getchar, which raced Core1's loop in
 // config / production / other-modes. Set by Core0 (boot_otherModes,
 // boot_productionMode) or by Core1 (CMD_CONFIG_MODE) before the handover.
-volatile bool core0_owns_usb = false;
+std::atomic<bool> core0_owns_usb{true};
+static semaphore_t usbParked;
+
+void acquireUSBForCore0() {
+    core0_owns_usb.store(true, std::memory_order_release);
+    // Core1 acknowledges only after leaving its complete USB iteration.
+    const uint32_t started = to_ms_since_boot(get_absolute_time());
+    while (!sem_acquire_timeout_ms(&usbParked, 10)) {
+        if (to_ms_since_boot(get_absolute_time()) - started >= 2000) {
+            // A failed handover cannot keep a stopped scanner alive forever.
+            watchdog_reboot(0, 0, 0);
+            while (true) tight_loop_contents();
+        }
+        watchdog_update();
+    }
+}
 
 void multicore_entry() {
     // multicore_lockout_victim_init();  // 初始化当前内核（内核1），使其可以被内核0中断
     flash_safe_execute_core_init();  // 初始化当前内核（内核1），使其可以被内核0中断
+    bool parked = false;
 
     while (true) {
         // round51: single-driver USB ownership. When Core0 owns the stack
@@ -62,9 +80,14 @@ void multicore_entry() {
         // both eliminates the cross-core tud_task() race and fixes the round46c
         // RX starvation by pumping inside handleCommand's wait loop.
         if (core0_owns_usb) {
+            if (!parked) {
+                sem_release(&usbParked);
+                parked = true;
+            }
             sleep_us(200);
             continue;
         }
+        parked = false;
         tud_task();
         static bool historyConnected = false;
         const bool connected = tud_cdc_n_connected(0);
@@ -101,7 +124,9 @@ void initUSBDevice(void) {
     }
 
     initMbrHistory();
+    sem_init(&usbParked, 0, 1);
     multicore_launch_core1(multicore_entry);
+    acquireUSBForCore0();
 }
 
 //--------------------------------------------------------------------+
@@ -126,6 +151,11 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
     }
 }
 
+void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
+    (void)rts;
+    if (itf == 0) cdcSessionStateChanged(dtr);
+}
+
 // PICO_CONFIG: PICO_STDIO_USB_STDOUT_TIMEOUT_US, Number of microseconds to be blocked trying to write USB output before assuming the host has disappeared and discarding data, default=500000,
 // group=pico_stdio_usb
 #ifndef PICO_STDIO_USB_STDOUT_TIMEOUT_US
@@ -140,7 +170,9 @@ static void stdio_cdc_out_chars(const char* buf, int length) {
         return;
     }
     if (tud_ready()) {
+        const uint64_t started = time_us_64();
         for (int i = 0; i < length;) {
+            if (time_us_64() - started >= PICO_STDIO_USB_STDOUT_TIMEOUT_US) break;
             int n = length - i;
             int avail = (int)tud_cdc_write_available();
             if (n > avail)
@@ -170,9 +202,11 @@ static void stdio_cdc_out_flush(void) {
     if (!mutex_try_enter_block_until(&stdio_usb_mutex, make_timeout_time_ms(PICO_STDIO_DEADLOCK_TIMEOUT_MS))) {
         return;
     }
+    const uint64_t started = time_us_64();
     do {
         tud_task();
-    } while (tud_cdc_write_flush());
+    } while (tud_cdc_write_flush() &&
+             time_us_64() - started < PICO_STDIO_USB_STDOUT_TIMEOUT_US);
     mutex_exit(&stdio_usb_mutex);
 }
 

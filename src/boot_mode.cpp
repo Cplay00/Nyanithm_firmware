@@ -20,7 +20,7 @@
 #include <pico/flash.h>
 #include <production_mode.h>
 #include <usb_device.h>
-#include <rainbow.h>
+#include <lamp_array.h>
 
 void reboot() {
     // round46h: delay_ms=0 -> _watchdog_enable(0) sets WATCHDOG_CTRL_TRIGGER,
@@ -75,6 +75,9 @@ void boot_appLinkMode() {
     readConfig();
     initHwDevices();
     sleep_ms(10);
+    checkHardwareState();
+    RGB_LED.fill(0x00, 0x0f, 0x00);
+    RGB_LED.flush();
     handleCommand();
 
     reboot();
@@ -94,6 +97,8 @@ void boot_normalMode() {
     checkHardwareState();
 
     sleep_ms(10);
+    lamp_array_finish_startup();
+    core0_owns_usb.store(false, std::memory_order_release);
     while (true) {
         updateInputState();
         // CDC command response moved to Core1 (cdc_respond); Core0 focuses on
@@ -106,6 +111,7 @@ void boot_normalMode() {
         }
         if (pending_config_mode) {
             pending_config_mode = false;
+            acquireUSBForCore0();
             handleCommand();  // round78: flashing/config CDC handled on Core0
         }
         // NOTE 1: do NOT call update_rainbow_frame() here. When game_connected=false

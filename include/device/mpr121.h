@@ -93,7 +93,6 @@ public:
     uint8_t readRegister8(uint8_t reg);
     uint16_t readRegister16(uint8_t reg);
     void writeRegister(uint8_t reg, uint8_t value);
-    void writeBaselineRun(uint8_t e, uint8_t val);  // round47: Run 模式直写 baseline(0x1E+e),不做 Stop->Run
     uint16_t touched(void);
 
     void setThresholds(uint8_t touch, uint8_t release);

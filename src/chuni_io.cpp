@@ -184,10 +184,89 @@ bool rawModeActive() {
     return rawReportLevel != 0 || gameRawEnabled;
 }
 
+// A timed-out RGB payload is still data, even if a byte equals B3/BB/A5.
+// Preserve its boundary across iterations; a disconnect resets the session.
+static struct {
+    uint8_t data[96];
+    uint32_t received, started;
+    bool pending, discard, startedWithDtr;
+} normalLed{};
+static bool discardUntilDtr = false;
+
+void cdcSessionStateChanged(bool dtr) {
+    if (!dtr && normalLed.pending && normalLed.startedWithDtr) {
+        normalLed = {};
+        tud_cdc_read_flush();
+        discardUntilDtr = true;
+    } else if (dtr && discardUntilDtr) {
+        tud_cdc_read_flush();
+        discardUntilDtr = false;
+    }
+}
+
+static void pollNormalLedPayload() {
+    if (!tud_mounted()) {
+        normalLed = {};
+        tud_cdc_read_flush();
+        return;
+    }
+    if (normalLed.startedWithDtr && !tud_cdc_connected()) {
+        cdcSessionStateChanged(false);
+        return;
+    }
+    if (to_ms_since_boot(get_absolute_time()) - normalLed.started >= 500) {
+        normalLed.discard = true;
+    }
+    normalLed.received += tud_cdc_read(normalLed.data + normalLed.received,
+                                     sizeof(normalLed.data) - normalLed.received);
+    if (normalLed.received != sizeof(normalLed.data)) return;
+    normalLed.pending = false;
+    if (normalLed.discard) return;
+        if (g_lampCount < 31) {
+            RGB_LED.fill(0, 0, 0, g_lampCount, 31 - g_lampCount);
+        }
+        // 16 灯模式: DLL 仍按 31 颗发送(含 15 颗间隙灯)，偶数索引(0,2,...,30)
+        //           是 16 颗判定灯，stride=2 跳过间隙灯
+        // 31 灯模式: stride=1 线性读取
+        const uint8_t dll_stride = (g_lampCount == 16) ? 6 : 3;
+        uint8_t r, g, b;
+        for (int i = 0; i < g_lampCount; i++) {
+            b = normalLed.data[i * dll_stride + 0];
+            r = normalLed.data[i * dll_stride + 1];
+            g = normalLed.data[i * dll_stride + 2];
+            uint32_t R = (r * ControllerConfig.lightLimit) / 255;
+            uint32_t G = (g * ControllerConfig.lightLimit) / 255;
+            uint32_t B = (b * ControllerConfig.lightLimit) / 255;
+            r = R;
+            g = G;
+            b = B;
+            if (g_lampCount == 31 && (i & 1) && (ControllerConfig.cfg0 & CFG0_BIT_DARKER_GAP)) {
+                r >>= 2;
+                g >>= 2;
+                b >>= 2;
+            }
+            RGB_LED.setColor((g_lampCount - 1) - i, r, g, b);
+        }
+        RGB_LED.flush();
+}
+
 // CDC command responder running on Core1. Replaces the CDC portion of maindev_loop
 // (which ran on Core0 and was blocked by updateInputState). Bulk tud_cdc I/O avoids
 // per-byte stdio_cdc mutex overhead; responses land in ~2-3ms instead of 6ms+jitter.
 void cdc_respond() {
+    if (!tud_mounted()) { normalLed = {}; discardUntilDtr = false; return; }
+    if (discardUntilDtr) {
+        if (!tud_cdc_connected()) { tud_cdc_read_flush(); return; }
+        cdcSessionStateChanged(true);
+    }
+    if (normalLed.pending) {
+        pollNormalLedPayload();
+        return;
+    }
+    // Reserve a complete FIFO for legacy multi-write replies (<256B).
+    // Backpressure leaves commands queued while the normal HID loop continues.
+    if (tud_cdc_write_available() < CFG_TUD_CDC_TX_BUFSIZE) return;
+
     // In config mode, Core0's handleCommand() owns the CDC channel (getchar/putchar via
     // stdio_cdc). Core1 must NOT touch tud_cdc_read/write here (would steal CMD_GET_STATUS),
     // AND must not run the standby timeout: game_connected must stay true so LampArray
@@ -637,7 +716,7 @@ void cdc_respond() {
             buf[off++] = g_tele.edgeAir[i];
             buf[off++] = g_tele.edgeDir[i];
         }
-        // CDC TX buffer is small (64B) - loop-write with tud_task() pumping
+        // The 528B reply exceeds the CDC TX FIFO; pump partial native writes.
         uint32_t sent = 0;
         uint32_t pumpStart = to_ms_since_boot(get_absolute_time());
         while (sent < off && (to_ms_since_boot(get_absolute_time()) - pumpStart) < 500) {
@@ -733,54 +812,13 @@ void cdc_respond() {
         g_tele.cdcTxBytes += 6;
     }
     if (cmd == CMD_SET_LED) {
-        uint8_t leds[96];
-        uint32_t got = 0;
-        // 96 bytes may arrive in multiple USB packets; loop until complete,
-        // pumping tud_task() so the USB stack keeps receiving.
-        // round51: bounded wait (500ms). A partial transfer (host close / unplug)
-        // used to wedge Core1 here forever while Core0 kept feeding the watchdog,
-        // freezing HID input until power cycle.
-        // round78: subtraction compare (wrap-safe); was a 49.7-day rollover hazard.
-        uint32_t ledStart = to_ms_since_boot(get_absolute_time());
-        while (got < 96) {
-            uint32_t r = tud_cdc_read(leds + got, 96 - got);
-            got += r;
-            if (got < 96) {
-                tud_task();
-                if (!tud_cdc_available()) {
-                    sleep_us(50);
-                }
-                if (to_ms_since_boot(get_absolute_time()) - ledStart >= 500) {
-                    return;  // stale payload bytes are dropped as unknown commands
-                }
-            }
-        }
-        if (g_lampCount < 31) {
-            RGB_LED.fill(0, 0, 0, g_lampCount, 31 - g_lampCount);
-        }
-        // 16 灯模式: DLL 仍按 31 颗发送(含 15 颗间隙灯)，偶数索引(0,2,...,30)
-        //           是 16 颗判定灯，stride=2 跳过间隙灯
-        // 31 灯模式: stride=1 线性读取
-        const uint8_t dll_stride = (g_lampCount == 16) ? 6 : 3;
-        uint8_t r, g, b;
-        for (int i = 0; i < g_lampCount; i++) {
-            b = leds[i * dll_stride + 0];
-            r = leds[i * dll_stride + 1];
-            g = leds[i * dll_stride + 2];
-            uint32_t R = (r * ControllerConfig.lightLimit) / 255;
-            uint32_t G = (g * ControllerConfig.lightLimit) / 255;
-            uint32_t B = (b * ControllerConfig.lightLimit) / 255;
-            r = R;
-            g = G;
-            b = B;
-            if (g_lampCount == 31 && (i & 1) && (ControllerConfig.cfg0 & CFG0_BIT_DARKER_GAP)) {
-                r >>= 2;
-                g >>= 2;
-                b >>= 2;
-            }
-            RGB_LED.setColor((g_lampCount - 1) - i, r, g, b);
-        }
-        RGB_LED.flush();
+        normalLed.received = 0;
+        normalLed.started = to_ms_since_boot(get_absolute_time());
+        normalLed.discard = false;
+        normalLed.startedWithDtr = tud_cdc_connected();
+        normalLed.pending = true;
+        pollNormalLedPayload();
+        return;
     }
     if (cmd == CMD_DETECT) {
         // round86: hardware identity probe in NORMAL mode. The config-mode
@@ -803,17 +841,14 @@ void cdc_respond() {
         uint8_t mprMask = 0;
         for (int i = 0; i < 3; i++) {
             tud_task();
-            watchdog_update();
             if (findI2CDevice(0, 0x5A + i)) mprMask |= (1 << i);
         }
         static const uint8_t mbrAddrs[6] = { 0x37, 0x40, 0x41, 0x42, 0x43, 0x44 };
         uint8_t mbrMask = 0;
         for (int i = 0; i < 6; i++) {
             tud_task();
-            watchdog_update();
             if (findI2CDevice(0, mbrAddrs[i])) mbrMask |= (1 << i);
         }
-        watchdog_update();
         bool muxPresent = findI2CDevice(1, 0x70);
         uint8_t hw = ControllerConfig.hwVer;
         uint8_t tofCount = (hw == 2 || hw == 4) ? 5 : 4;
@@ -841,6 +876,7 @@ void cdc_respond() {
         // watchdog feeding there (the CDC console in config mode lives on
         // Core0 by design; normal-mode 0xBB separately arms pending_flashing).
         pending_config_mode = true;
+        return;
     }
     if (cmd == CMD_FLASHING) {
         // round78b: 0xBB only ARMS a 10s confirm window and returns -- no
