@@ -7,7 +7,11 @@
 
 #ifndef __HW_CHECK_H__
 #define __HW_CHECK_H__
+#include <stdint.h>
 
 void checkHardwareState();
+bool hardwareConfigMismatch();
+extern bool hardwareMismatchAtBoot;
+extern uint8_t detectedMprMask, detectedMbrMask;
 
 #endif

@@ -14,6 +14,7 @@
 #include <hardware/timer.h>
 #include <hardware/watchdog.h>
 #include <cstring>
+#include <i2c_port.h>
 
 VL53L0X tof0(1, 0x29);
 VL53L0X tof1(1, 0x29);
@@ -42,6 +43,7 @@ TCA9539 iox0(1, 0x74);
 
 bool usingIR = false;
 bool useMuxScan = false;
+uint8_t g_tofPhysicalMask = 0;
 uint8_t g_tofReadyMask = 0;  // Only successfully initialized channels may be polled.
 uint8_t heightRange = 10;  // Air key segment overlap (mm), updated from config in initHwDevices
 
@@ -83,11 +85,7 @@ static inline void kalmanUpdate(Kalman1D& k, float meas) {
     k.p = (1.0f - K) * p_pred;
     k.lastMeas = meas;
 }
-static inline void kalmanPredict(Kalman1D& k) {
-    k.v *= 0.85f;  // velocity decay: uncertainty grows without measurement
-    k.x += k.v;
-    k.p += KALMAN_Q;
-}
+
 
 // ===== round49: Air key lock state machine =====
 enum AirKeyState : uint8_t { AKS_IDLE, AKS_ACTIVE, AKS_COOLDOWN };
@@ -97,6 +95,9 @@ struct AirKeyTracker {
     uint8_t cooldown;
 };
 static AirKeyTracker airKeyTracker[6] = {};
+static bool tofValid[5] = {};
+static uint32_t tofSampleMs[5] = {};
+static constexpr uint32_t TOF_FRESH_MS = 200;
 
 
 void initToFReset() {
@@ -117,6 +118,17 @@ void initToF() {
     initToFReset();
     resetToF();
     sleep_ms(2);
+    // Probe all possible channels before assigning addresses. A fifth sensor
+    // remains at 0x29 when the saved layout expects four channels.
+    g_tofPhysicalMask = 0;
+    for (uint8_t i = 0; i < 5; ++i) {
+        watchdog_update();
+        uint8_t reg = 0xc0, model = 0;
+        if (mux0.setChannel(i) == 1 &&
+            i2c_write_read(1, 0x29, &reg, 1, &model, 1) == 1 && model == 0xee) {
+            g_tofPhysicalMask |= 1u << i;
+        }
+    }
     VL53L0X* tofs[5] = { &tof0, &tof1, &tof2, &tof3, &tof4 };
     int sensorCount = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 5 : 4;
     // Phase 1: init each sensor through mux, assign unique I2C address
@@ -126,7 +138,7 @@ void initToF() {
         tofs[i]->setI2CAddressOnly(0x29);
         tofs[i]->setTimeout(200);
         if (!tofs[i]->forceInit()) continue;
-        tofs[i]->setMeasurementTimingBudget(12000);
+        // Keep the native default budget; the former 12ms request was rejected.
         tofs[i]->setAddress(0x30 + i);
         tofs[i]->startContinuous(0);
         g_tofReadyMask |= 1u << i;
@@ -156,7 +168,7 @@ void initToF() {
             tofs[i]->setI2CAddressOnly(0x29);
             tofs[i]->setTimeout(200);
             if (!tofs[i]->forceInit()) continue;
-            tofs[i]->setMeasurementTimingBudget(12000);
+            // Keep the native default budget; the former 12ms request was rejected.
             tofs[i]->startContinuous(0);
             g_tofReadyMask |= 1u << i;
             sleep_ms(5);
@@ -288,45 +300,6 @@ void initI2C() {
     initI2CBus(1, GPIO_I2C_1_SDA, GPIO_I2C_1_SCL, BR_I2C);
 }
 
-void program_cyc8mbr3116_with_address(uint8_t address, uint8_t* cfg) {
-    for (uint8_t i = 0; i < 128; i++) {
-        uint8_t buf[2] = { i, cfg[i] };
-        i2c_write(0, address, buf, 2, false);
-    }
-    uint8_t buf[2] = { 0x86, 0x02 };  // 给CTRL_CMD发送命令，检查CRC并保存，地址0x86，写入2
-    i2c_write(0, address, buf, 2, false);
-    sleep_ms(20);
-
-    buf[1] = 0xff;  // 软复位
-    i2c_write(0, address, buf, 2, false);
-    sleep_ms(20);
-}
-
-void initCY8CMBR3116() {
-    // program_cyc8mbr3116_with_address(0x40, cy8cmbr3116_cfg_0x40);
-    // program_cyc8mbr3116_with_address(0x41, cy8cmbr3116_cfg_0x41);
-    // program_cyc8mbr3116_with_address(0x42, cy8cmbr3116_cfg_0x42);
-
-    // gpio_init(GPIO_3116RST0);
-    // gpio_init(GPIO_3116RST1);
-
-    // gpio_set_dir(GPIO_3116RST0, true);
-    // gpio_set_dir(GPIO_3116RST1, true);
-
-    // gpio_pull_down(GPIO_3116RST0);
-    // gpio_pull_down(GPIO_3116RST1);
-
-    // gpio_set_drive_strength(GPIO_3116RST0,GPIO_DRIVE_STRENGTH_8MA);
-    // gpio_set_drive_strength(GPIO_3116RST1,GPIO_DRIVE_STRENGTH_8MA);
-
-    // gpio_put(GPIO_3116RST0, false);
-    // sleep_ms(10);
-    // gpio_put(GPIO_3116RST0, true);
-    // gpio_put(GPIO_3116RST1, false);
-    // sleep_ms(10);
-    // gpio_put(GPIO_3116RST1, true);
-}
-
 void detectIR() {
     if (iox0.isConnected()) {
         usingIR = true;
@@ -380,7 +353,7 @@ void initHwDevices() {
     }
     watchdog_update();
     if ((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3) {
-        initCY8CMBR3116();
+        // MBR3116 runs its existing native NVRAM configuration.
     } else {
         initMPR121();
     }
@@ -433,11 +406,11 @@ static bool mbrDistanceEnabledForFrame = false;
 static bool mbrDistanceResetForFrame = false;
 static bool mbrButtonValid[3] = {};
 static uint32_t mbrButtonStartMs[3] = {}, mbrButtonEndMs[3] = {};
-// Host policy for MPR and profile-off MBR read faults, not a contact-distance rule.
+// Host policy for profile-off transport faults, not a contact-distance rule.
 // Keep an already published ON through a short fault, without refreshing its
 // confirmation/stretch timers. Expire from the first failing read's start.
-static const uint32_t TOUCH_READ_FAULT_HOLD_MS = 50;
-struct TouchReadFaultState {
+static const uint32_t MBR_LEGACY_FAULT_HOLD_MS = 50;
+struct MbrLegacyFaultState {
     bool active = false;
     uint32_t startedMs = 0;
 };
@@ -528,7 +501,7 @@ static uint16_t readMbrButtons(uint8_t m, CY8CMBR3116* chip) {
     return mbrButtonValid[m] ? value : 0;
 }
 
-static bool touchReadFaultHold(TouchReadFaultState& state, bool fault, bool wasOn,
+static bool mbrLegacyFaultHold(MbrLegacyFaultState& state, bool fault, bool wasOn,
                                uint32_t readStartedMs, uint32_t now) {
     if (!fault) {
         state.active = false;
@@ -538,7 +511,7 @@ static bool touchReadFaultHold(TouchReadFaultState& state, bool fault, bool wasO
         state.active = true;
         state.startedMs = readStartedMs;
     }
-    return wasOn && (now - state.startedMs) < TOUCH_READ_FAULT_HOLD_MS;
+    return wasOn && (now - state.startedMs) < MBR_LEGACY_FAULT_HOLD_MS;
 }
 
 // All chip reads finish before masks are formed at one common host time. A
@@ -852,14 +825,14 @@ void updateTouch_v2() {
         static uint32_t lastConfirmed[2][16] = {0};
         static uint8_t dipGrace[2][16] = {0};
         static uint8_t stickyGrace[2][16] = {0};
-        static TouchReadFaultState legacyFaults[2][16];
+        static MbrLegacyFaultState legacyFaults[2][16];
         if (mbrDistanceResetForFrame) {
             std::memset(touchCount, 0, sizeof(touchCount));
             std::memset(lastConfirmed, 0, sizeof(lastConfirmed));
             std::memset(dipGrace, 0, sizeof(dipGrace));
             std::memset(stickyGrace, 0, sizeof(stickyGrace));
             for (uint8_t m = 0; m < 2; ++m)
-                for (uint8_t e = 0; e < 16; ++e) legacyFaults[m][e] = TouchReadFaultState{};
+                for (uint8_t e = 0; e < 16; ++e) legacyFaults[m][e] = MbrLegacyFaultState{};
         }
         uint16_t raw[2] = {t0, t1};
         uint16_t stretched[2] = {0, 0};
@@ -867,7 +840,7 @@ void updateTouch_v2() {
         for (uint8_t m = 0; m < 2; m++) {
             for (uint8_t e = 0; e < 16; e++) {
                 bool fault = !mbrDistanceEnabledForFrame && (legacyFaultMask[m] & (1u << e));
-                bool hold = touchReadFaultHold(legacyFaults[m][e], fault,
+                bool hold = mbrLegacyFaultHold(legacyFaults[m][e], fault,
                     (prevStretched[m] & (1u << e)) != 0, legacyReadStartedMs[m], now);
                 if (fault) {
                     if (hold) {
@@ -1012,21 +985,15 @@ void updateTouch_v2() {
 
 void updateTouch_v1() {
 
-    uint16_t t0 = 0, t1 = 0, t2 = 0;
-    bool mprStatusValid[3] = {};
-    uint32_t mprReadStartedMs[3] = {};
-    static const uint32_t MPR_MAX_READ_AGE_MS = 15;  // host evidence age, not physical latency
+    uint16_t t0 = 0, t1 = 0, t2 = 0;  // round50: init to 0 for I2C error safety
     if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
         t0 = readMbrButtons(0, &MBR3116A);
         t1 = readMbrButtons(1, &MBR3116B);
         t2 = readMbrButtons(2, &MBR3116C);
     } else {
-        MPR121* chips[3] = {&mpr0, &mpr1, &mpr2};
-        uint16_t* bits[3] = {&t0, &t1, &t2};
-        for (uint8_t m = 0; m < 3; ++m) {
-            mprReadStartedMs[m] = to_ms_since_boot(get_absolute_time());
-            mprStatusValid[m] = chips[m]->readTouchStatus(*bits[m]);
-        }
+        t0 = mpr0.touched();
+        t1 = mpr1.touched();
+        t2 = mpr2.touched();
     }
 
     // round45p: save pre-verification hardware touch snapshot for CMD_DEBUG_CHAIN
@@ -1095,86 +1062,110 @@ void updateTouch_v1() {
         // sw+4 (the confirmReq=1 tier boundary) preserves per-key tightened
         // thresholds -- the fast path never bypasses a user-raised gate.
         static const uint8_t MPR_FLICK_FAST_BASE = 50;
-        for (uint8_t m = 0; m < 3; ++m) {
-            for (uint8_t e = 0; e < 12; ++e) {
+        for (uint8_t m = 0; m < 3; m++) {
+            for (uint8_t e = 0; e < 12; e++) {
                 uint8_t base = electrodeBaseTouchTh(m, e);
                 uint8_t sw = (base != 0) ? base : ControllerConfig.th_touch;
                 if (sw < 4) sw = 4;
                 sw_th_k[m][e] = sw;
-                verify_th_k[m][e] = (sw > 1) ? (sw - 1) : 1;
+                verify_th_k[m][e] = (sw > 1) ? (sw - 1) : 1;  // round41: -1 LSB tolerance
             }
         }
-        // round90n: use the existing bounded read-fault contract. A missing
-        // status affects the whole chip; missing analog data affects that lane.
-        for (uint8_t m = 0; m < 3; ++m) {
-            legacyReadStartedMs[m] = mprReadStartedMs[m];
-            if (!mprStatusValid[m]) {
-                raw[m] = 0;
-                legacyFaultMask[m] = 0x0FFF;
-                continue;
-            }
-            for (uint8_t e = 0; e < 12; ++e) {
-                uint16_t bit = 1u << e;
-                if (raw[m] & bit) {
-                    bool wasOn = (prevStretched[m] & bit) != 0;
-                    if (verifiedCount[m][e] < 2 || !wasOn) {
-                        uint16_t filt = 0, base = 0;
-                        bool filtRetried = false, baseRetried = false;
-                        bool valid = mprs[m]->readFilteredData(e, filt, &filtRetried);
-                        if (valid) valid = mprs[m]->readBaselineData(e, base, &baseRetried);
-                        if (!valid) {
-                            raw[m] &= ~bit;
-                            legacyFaultMask[m] |= bit;
-                            continue;  // never count failed data toward confirmation
-                        }
-                        int16_t diff = (int16_t)base - (int16_t)filt;
-                        if (diff < static_cast<int16_t>(verify_th_k[m][e])) {
-                            raw[m] &= ~bit;
-                            verifiedCount[m][e] = 0;
-                            confirmReq[m][e] = CONFIRM_CYCLES;
-                            fastOk[m][e] = false;
-                            if (g_verifyFail[m * 12 + e] < 255) ++g_verifyFail[m * 12 + e];
-                        } else {
-                            bool retried = filtRetried || baseRetried;
-                            if (retried) fastOk[m][e] = false;
-                            if (verifiedCount[m][e] >= 2 && !retried) {
-                                // Keep healthy rapid-recontact cadence, after fresh evidence.
+      for (uint8_t m = 0; m < 3; m++) {
+            for (uint8_t e = 0; e < 12; e++) {
+                if (raw[m] & (1 << e)) {
+                    if (verifiedCount[m][e] < 2) {
+                        // New touch - verify with sensor data
+                        uint16_t filt = mprs[m]->filteredData(e);
+                       if (filt == 0) {
+                            // round47b-patch: I2C read error - re-read once before trusting.
+                            // Old code directly trusted hardware (verifiedCount++), which lets
+                            // a hardware false touch through if I2C fails 2 cycles in a row.
+                            // Now: re-read; if still 0, skip this electrode this cycle (don't
+                            // increment verifiedCount, don't clear raw - let next cycle retry).
+                            uint16_t filt2 = mprs[m]->filteredData(e);
+                            if (filt2 == 0) {
+                                // Failed evidence must not advance a new ON confirmation.
+                                raw[m] &= ~(1 << e);
+                                verifiedCount[m][e] = 0;
+                                fastOk[m][e] = false;
+                                confirmReq[m][e] = CONFIRM_CYCLES;
                             } else {
-                                bool neighborWasActive =
-                                    (e > 0 && (prevStretched[m] & (1u << (e - 1)))) ||
-                                    (e < 11 && (prevStretched[m] & (1u << (e + 1))));
+                                // First read was glitch, second OK - use filt2
+                                filt = filt2;
+                                uint16_t base = mprs[m]->baselineData(e);
+                                int16_t diff = (int16_t)base - (int16_t)filt;
+                            if (diff < static_cast<int16_t>(verify_th_k[m][e])) {
+                                    raw[m] &= ~(1 << e);
+                                    verifiedCount[m][e] = 0;
+                                    confirmReq[m][e] = CONFIRM_CYCLES;
+                                    fastOk[m][e] = false;
+                                    if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;
+                                } else {
+                                    // round47b-patch: intentionally no strong-signal fast-path
+                                    // (diff>=sw_th+6 skip). First read was 0 (I2C unstable),
+                                    // so require full 2-cycle verification.
+                                    verifiedCount[m][e]++;
+                                    if (diff >= (int16_t)(sw_th_k[m][e] + 4))      confirmReq[m][e] = 1;
+                                    else if (diff >= (int16_t)(sw_th_k[m][e] + 2)) confirmReq[m][e] = 2;
+                                    else                                        confirmReq[m][e] = 3;
+                                }
+                            }
+                       } else {
+                            uint16_t base = mprs[m]->baselineData(e);
+                            int16_t diff = (int16_t)base - (int16_t)filt;
+                               if (diff < static_cast<int16_t>(verify_th_k[m][e])) {
+                               raw[m] &= ~(1 << e);
+                               verifiedCount[m][e] = 0;
+                               confirmReq[m][e] = CONFIRM_CYCLES;
+                               fastOk[m][e] = false;
+                               if (g_verifyFail[m * 12 + e] < 255) g_verifyFail[m * 12 + e]++;  // round46: telemetry
+                           } else {
+                                // round45o: skip second verification for very strong signals (saves 1 cycle ~2ms for flick notes)
+                                // round45u: slide transition acceleration - if neighbor was active
+                                // in previous cycle, skip 2nd verification (slide, not noise)
+                                bool neighborWasActive = (e > 0 && (prevStretched[m] & (1 << (e-1)))) ||
+                                                          (e < 11 && (prevStretched[m] & (1 << (e+1))));
+                                // round80: strong flick fast path -- first-cycle output
+                                // for isolated firm taps (see MPR_FLICK_FAST_BASE). The
+                                // isolated +1 penalty is waived via fastOk in the confirm
+                                // loop, still guarded by the 40ms release-bounce window.
+                                // The sw+6/neighbor slide path below stays NON-exempt:
+                                // it fires on weak slide signals where the penalty is
+                                // the only noise filter.
                                 uint8_t fastTh = MPR_FLICK_FAST_BASE;
                                 if (sw_th_k[m][e] + 4 > fastTh) fastTh = sw_th_k[m][e] + 4;
-                                if (!retried && diff >= (int16_t)fastTh) {
+                                if (diff >= (int16_t)fastTh) {
                                     verifiedCount[m][e] = 2;
                                     confirmReq[m][e] = 1;
                                     fastOk[m][e] = true;
-                                } else if (!retried &&
-                                           (diff >= (int16_t)(sw_th_k[m][e] + 6) || neighborWasActive)) {
-                                    verifiedCount[m][e] = 2;
-                                    confirmReq[m][e] = 1;
+                                } else if (diff >= (int16_t)(sw_th_k[m][e] + 6) || neighborWasActive) {
+                                    verifiedCount[m][e] = 2;  // skip second I2C verification cycle
+                                    confirmReq[m][e] = 1;     // fastest confirmation
                                 } else {
-                                    if (verifiedCount[m][e] < 2) ++verifiedCount[m][e];
-                                    if (diff >= (int16_t)(sw_th_k[m][e] + 4)) confirmReq[m][e] = 1;
-                                    else if (diff >= (int16_t)(sw_th_k[m][e] + 2)) confirmReq[m][e] = 2;
-                                    else confirmReq[m][e] = 3;
+                                    verifiedCount[m][e]++;
+                                    if (diff >= (int16_t)(sw_th_k[m][e] + 4))      confirmReq[m][e] = 1;  // strong signal: fastest
+                                    else if (diff >= (int16_t)(sw_th_k[m][e] + 2)) confirmReq[m][e] = 2;  // medium
+                                    else                                         confirmReq[m][e] = 3;  // weak/edge: strict, anti-false-touch
                                 }
-                            }
+                           }
                         }
                     }
-                    // Already published ON keeps the accepted analog-read optimization.
-                } else if (lastTouchedMs[m][e] == 0 || (nowVer - lastTouchedMs[m][e]) > 50) {
-                    verifiedCount[m][e] = 0;
-                    confirmReq[m][e] = CONFIRM_CYCLES;
-                    fastOk[m][e] = false;
-                }
-            }
-        }
-        uint32_t checkedAt = to_ms_since_boot(get_absolute_time());
-        for (uint8_t m = 0; m < 3; ++m) {
-            if (!mprStatusValid[m] || checkedAt - mprReadStartedMs[m] > MPR_MAX_READ_AGE_MS) {
-                raw[m] = 0;
-                legacyFaultMask[m] = 0x0FFF;
+                   // else: sustained touch, already verified, skip I2C
+               } else {
+                   // round45r: preserve verification if recently touched (sticky dip recovery).
+                   // When touch returns from sticky dip, verifiedCount is still 2 -> skip re-verification.
+                   // This prevents miss when re-verification would fail due to weak signal or I2C timing mismatch.
+                     // 50ms window covers max sticky dip (18 cycles ~47ms at
+                     // 2.7ms/cycle), while fast re-taps (release <50ms ago)
+                     // skip re-verification for zero-latency re-trigger.
+                     if (lastTouchedMs[m][e] == 0 || (nowVer - lastTouchedMs[m][e]) > 50) {
+                       verifiedCount[m][e] = 0;
+                       confirmReq[m][e] = CONFIRM_CYCLES;
+                       fastOk[m][e] = false;
+                   }
+                   // else: keep verifiedCount, instant re-trigger when touch returns
+               }
             }
         }
         t0 = raw[0]; t1 = raw[1]; t2 = raw[2];
@@ -1370,22 +1361,22 @@ void updateTouch_v1() {
    static uint32_t lastConfirmed[3][12] = {0};
    static uint8_t  dipGrace[3][12] = {0};
    static uint8_t  stickyGrace[3][12] = {0};           // round45n: sticky-mode dip grace counter
-   static TouchReadFaultState legacyFaults[3][12];
+   static MbrLegacyFaultState legacyFaults[3][12];
     if (mbrDistanceResetForFrame) {
         std::memset(touchCount, 0, sizeof(touchCount));
         std::memset(lastConfirmed, 0, sizeof(lastConfirmed));
         std::memset(dipGrace, 0, sizeof(dipGrace));
         std::memset(stickyGrace, 0, sizeof(stickyGrace));
         for (uint8_t m = 0; m < 3; ++m)
-            for (uint8_t e = 0; e < 12; ++e) legacyFaults[m][e] = TouchReadFaultState{};
+            for (uint8_t e = 0; e < 12; ++e) legacyFaults[m][e] = MbrLegacyFaultState{};
     }
    uint16_t raw[3] = {t0, t1, t2};
    uint16_t stretched[3] = {0, 0, 0};
    uint32_t now = to_ms_since_boot(get_absolute_time());
    for (uint8_t m = 0; m < 3; m++) {
        for (uint8_t e = 0; e < 12; e++) {
-           bool fault = (!mbrDistanceEnabledForFrame) && (legacyFaultMask[m] & (1u << e));
-           bool hold = touchReadFaultHold(legacyFaults[m][e], fault,
+           bool fault = legacyMbr && (legacyFaultMask[m] & (1u << e));
+           bool hold = mbrLegacyFaultHold(legacyFaults[m][e], fault,
                (prevStretched[m] & (1u << e)) != 0, legacyReadStartedMs[m], now);
            if (fault) {
                if (hold) {
@@ -1597,13 +1588,15 @@ void updateAir() {
 
     // Phase 1: Read ToF + Kalman update
     bool anyUpdated = false;
+    const uint32_t sampleNow = to_ms_since_boot(get_absolute_time());
     bool gotNewData[5] = {};
     for (int i = 0; i < sensorCount; i++) {
         if (!(g_tofReadyMask & (1u << i))) continue;
         if (useMuxScan) mux0.setChannel(i);
         if (tofs[i]->readRangeContinuousMillimetersAsync(heightDataOriginal + i)) {
             if (heightDataOriginal[i] >= 8190) {
-                heightData[i] = 4095;  // I2C error sentinel
+                tofValid[i] = false;
+                kalman[i] = {0, 0, 200.0f, -1.0f};
             } else {
                 float meas = (float)((int16_t)heightDataOriginal[i] + ControllerConfig.heightOffset[i]);
                 if (kalman[i].p >= 199.0f) {
@@ -1616,6 +1609,8 @@ void updateAir() {
                     kalmanUpdate(kalman[i], meas);
                 }
                 gotNewData[i] = true;
+                tofValid[i] = true;
+                tofSampleMs[i] = sampleNow;
             }
             anyUpdated = true;
         }
@@ -1623,9 +1618,22 @@ void updateAir() {
     // Phase 2: Kalman predict (sensors without new data only) + update heightData for debug
     for (int i = 0; i < sensorCount; i++) {
         if (!gotNewData[i] && heightDataOriginal[i] < 8190) { kalman[i].x += kalman[i].v; kalman[i].v *= 0.85f; }
-        heightData[i] = (int16_t)kalman[i].x;
+        if (tofValid[i] && sampleNow - tofSampleMs[i] >= TOF_FRESH_MS) {
+            tofValid[i] = false;
+            kalman[i] = {0, 0, 200.0f, -1.0f};
+            anyUpdated = true;
+        }
+        heightData[i] = tofValid[i] ? (int16_t)kalman[i].x : 4095;
     }
-    if (!anyUpdated) return;
+    if (!anyUpdated) {
+        // A fault may be the last completion; expire the release pulse even
+        // if every peripheral then stops producing measurements.
+        for (int j = 0; j < 6; ++j) {
+            if (airKeyTracker[j].state != AKS_ACTIVE &&
+                sampleNow - airKeyTracker[j].lastActiveMs >= 10) airKeys[j] = false;
+        }
+        return;
+    }
 
     // Phase 3: Slider gating (from previous cycle's touchData)
     bool handOnSlider = false;
@@ -1644,14 +1652,12 @@ void updateAir() {
 
         // Check detection: any sensor in range (with lookahead for rising hand)
         bool inRange = false;
-        bool risingConfident = false;
-        for (int i = 0; i < sensorCount; i++) {
-            if (kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
+            for (int i = 0; i < sensorCount; i++) {
+            if (!tofValid[i] || kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
             float v = kalman[i].v;
             // Actual position in range (maintains ACTIVE, also triggers)
             if (kalman[i].x >= rangeLow && kalman[i].x <= rangeHigh) {
                 inRange = true;
-                if (v < -V_MIN) risingConfident = true;
             }
             // Lookahead position (early trigger when approaching from below)
             if (!handOnSlider && v < -V_MIN) {
@@ -1659,7 +1665,6 @@ void updateAir() {
                 float xAhead = kalman[i].x + v * la;
                 if (xAhead >= rangeLow && xAhead <= rangeHigh) {
                     inRange = true;
-                    risingConfident = true;
                 }
             }
         }
@@ -1678,7 +1683,7 @@ void updateAir() {
                 // Hysteresis: check wider range with actual position
                 bool inHyst = false;
                 for (int i = 0; i < sensorCount; i++) {
-                    if (kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
+                    if (!tofValid[i] || kalman[i].x <= 0 || kalman[i].x >= 4000) continue;
                     if (kalman[i].x >= rangeLow - EXIT_HYSTERESIS &&
                         kalman[i].x <= rangeHigh + EXIT_HYSTERESIS) {
                         inHyst = true; break;
@@ -1771,10 +1776,8 @@ void updateInputState() {
     }
     publishTouchState();
 
-    // round90m: native MPR121 baseline writes require Stop Mode (datasheet
-    // section 5.1). Remove periodic Run-mode correction; do not replace it
-    // with Stop/Run cycles, which pause every electrode and may reseed CL.
-    // Startup calibration remains a separate maintenance operation.
+    // MPR baselines are writable only in Stop mode. Native tracking owns
+    // runtime baselines; remove the ineffective Run-mode correction I2C load.
 
     // round46: Core0 loop cycle timing (diagnostic telemetry, Core1 reads via 0xC1)
     {

@@ -83,35 +83,37 @@ void MPR121::init(uint8_t touchThreshold, uint8_t releaseThreshold, bool autocon
     setThresholds(touchThreshold, releaseThreshold);
     writeRegister(MPR121_MHDR, 0x01);  // round4: revert to round1 (MHDR too large dragged baseline down during touch => stickier)
     writeRegister(MPR121_NHDR, 0x01);
-    // Preserve the accepted rising-filter setting. NCL is a sample count,
-    // not milliseconds; FDLT below slows tracking and does not freeze it.
-    writeRegister(MPR121_NCLR, 0x1F);
+    writeRegister(MPR121_NCLR, 0x1F);  // round47b: 14->31, 恢复 round34 已验证值. NCLR=14 使 idle 噪声尖峰
+    // 14ms 即可推高 baseline, NCLF=127 下降极慢构成棘轮 -> M2 芯片静置突发触发
+    // (round47 实测 20min 5 次 RAW: M2E0 x3/M2E3/M2E4). FDLT=0xFF 减慢触摸期
+    // baseline 跟踪, "释放后回升快"需求不存在, NCLR=31 抑制噪声推高且无副作用.
     writeRegister(MPR121_FDLR, 0x00);
 
     writeRegister(MPR121_MHDF, 0x01);
     // falling baseline tracking slowed: fix slow-swipe / light-press missed trigger
-    // Preserve the accepted falling-filter settings. See NXP AN3891 for
-    // sample-count and filter-delay semantics; neither is a wall-clock time.
+    // NCLF 1->63 (need 63 consecutive samples before baseline follows touch),
+    // NHDF 2->1 (smaller noise-step), FDLF 0->4 (small-delta delay)
     writeRegister(MPR121_NHDF, 0x01);
-    writeRegister(MPR121_NCLF, 0x7F);
+    writeRegister(MPR121_NCLF, 0x7F);  // round45k: 63->127 slower downward. round32 lowered to 63 to fix baseline-too-high (idle false touch), but 63 too fast: during touch filt drops, baseline tracks it down -> diff shrinks -> sudden release + cannot retrigger for seconds (baseline too low). 127 needs 127ms sustained low filt before baseline drops 1, so short/medium touches dont collapse baseline. Idle baseline drift now handled by software baseline correction (round45i) instead of aggressive NCLF.
     writeRegister(MPR121_FDLF, 0x04);
 
-    // Touched-state baseline filter: FDLT=255 slows tracking (AN3891),
-    // it does not disable tracking. Values stay unchanged in round90m.
-    writeRegister(MPR121_NHDT, 0x01);
-    writeRegister(MPR121_NCLT, 0x10);
-    writeRegister(MPR121_FDLT, 0xFF);
+    // round47: 触摸期(touched filter)baseline 跟踪放慢
+    // 此前 NHDT/NCLT/FDLT 全为 0x00,触摸期间 baseline 继续跟踪(NCLF 塌陷);
+    // NXP AN3891: FDLT=255 是最大滤波延迟，触摸期仍可慢速跟踪。
+    writeRegister(MPR121_NHDT, 0x01);  // round47: 0->1, 触摸期噪声半增量阈值
+    writeRegister(MPR121_NCLT, 0x10);  // round47: 0->16, 触摸期噪声计数限制
+    writeRegister(MPR121_FDLT, 0xFF);  // round47: 0->255, 触摸期最大滤波延迟，并非完全禁用跟踪
 
     writeRegister(MPR121_DEBOUNCE, 0);
     // CONFIG1: original 0x10 (FFI=6, CDC=16uA) - unchanged
     writeRegister(MPR121_CONFIG1, 0x10);
-    // SFI encoding 01 means 6 samples; ESI=1ms, nominal output period=6ms.
-    writeRegister(MPR121_CONFIG2, 0x28);  // CDT=0.5us, SFI=6, ESI=1ms
+    // phase2: SFI 4->2 (0x20->0x28). ESI kept at 1ms (0x29 caused delay/missed keys).
+    writeRegister(MPR121_CONFIG2, 0x28);  // CDT=0.5us, SFI=2, ESI=1ms
 
     setAutoconfig(autoconfig);
 
     // enable X electrodes = start MPR121
-    // CL=10: enable tracking and seed from the first electrode data's high 5 bits.
+    // CL Calibration Lock: B10 = 5 bits for baseline tracking
     // ELEPROX_EN  proximity: disabled
     // ELE_EN Electrode Enable:  amount of electrodes running (12)
     uint8_t ECR_SETTING = 0b10000000 + 12;
@@ -235,75 +237,18 @@ void MPR121::calibrateBaseline(bool force) {
         }
     }
 
-    // Stage 3: 8-sample burst, 2ms interval. Trimmed mean (drop min/max) for
-    // outlier resistance. Total ~16ms, well within <1s budget.
-    const uint8_t N = 8;
-    uint16_t samples[12][N];
-    for (uint8_t s = 0; s < N; s++) {
-        for (uint8_t i = 0; i < 12; i++) {
-            samples[i][s] = filteredData(i);
-        }
-        if (s < N - 1) sleep_ms(2);
-    }
-
-    // Stage 4: compute trimmed mean per electrode. Every electrode gets a
-    // best-effort baseline (trimmed mean drops min/max). Previously channels
-    // with jitter > 3 LSB were skipped (valid=false), leaving the power-on
-    // default baseline which permanently disabled touch on weak/noisy
-    // electrodes such as MPR2 ELE0 (slider cell 17). Now all electrodes seeded.
-    uint8_t bl[12];
-    bool valid[12] = {false};
-    for (uint8_t i = 0; i < 12; i++) {
-        uint16_t mn = 0xFFFF, mx = 0;
-        for (uint8_t s = 0; s < N; s++) {
-            if (samples[i][s] < mn) mn = samples[i][s];
-            if (samples[i][s] > mx) mx = samples[i][s];
-        }
-        uint32_t sum = 0;
-        for (uint8_t s = 0; s < N; s++) sum += samples[i][s];
-        sum -= mn; sum -= mx;  // trimmed: drop min and max
-        bl[i] = (sum / (N - 2)) >> 2;
-        // Subtract 1 LSB margin so baseline is slightly BELOW idle filtered data.
-        // This prevents false touches from baseline calibration noise (trimmed mean
-        // can be 1-2 LSB above true idle due to sample timing). With margin,
-        // idle diff = -1 (below threshold) instead of 0-2 (at threshold edge).
-        if (bl[i] > 1) bl[i] -= 1;  // round36: -2->-1, software verification handles false touches
-        valid[i] = true;
-    }
-
-    // Stage 5: legacy startup policy retained for a separate controlled change.
-    // NOTE: 0x30 addresses RETRY, not BVA (bits 3:2). The CL=11 resume below
-    // loads the first electrode data, so these manual writes do not establish
-    // a persistent manual seed. Do not infer the effective baseline from bl[].
-    uint8_t autoconfig0_backup = readRegister8(MPR121_AUTOCONFIG0);
-    writeRegister(MPR121_AUTOCONFIG0, autoconfig0_backup & ~0x30);
-
-    // 5.2 enter Stop Mode
-    uint8_t ecr_backup = readRegister8(MPR121_ECR);
-    uint8_t data[2];
-    data[0] = MPR121_ECR;
-    data[1] = 0x00;
-    i2c_write(port, addr, data, 2, false);
-
-    // 5.3 write baseline registers (Stop Mode, direct I2C)
-    for (uint8_t i = 0; i < 12; i++) {
-        if (!valid[i]) continue;
-        data[0] = MPR121_BASELINE_0 + i;
-        data[1] = bl[i];
-        i2c_write(port, addr, data, 2, false);
-    }
-
-    // 5.4 disable autoconfig entirely (ACE=0) - already in Stop mode, direct write.
-    // Periodic charge recalibration causes periodic false triggers. Frozen.
+    // NXP MPR121 Rev.4 section 5.11: CL=11 initializes from the first
+    // ten-bit electrode sample, then tracks normally. The former trimmed
+    // seed writes were overwritten by CL=11, so remove their unused reads.
+    uint8_t ecr = 0;
+    if (!readRegisters(MPR121_ECR, &ecr, 1)) return;
+    uint8_t data[2] = {MPR121_ECR, 0};
+    if (i2c_write(port, addr, data, 2, false) != 2) return;
     data[0] = MPR121_AUTOCONFIG0;
-    data[1] = 0x00;
+    data[1] = 0;
     i2c_write(port, addr, data, 2, false);
-
-    // 5.5 CL=11 enables tracking and seeds all 10 bits from the first
-    // electrode data (datasheet 5.11), not from the baseline registers.
-    // ECR = 0xCC: CL=11, ELEPROX=00, ELE_EN=12
     data[0] = MPR121_ECR;
-    data[1] = (ecr_backup & 0x0F) | 0xC0;  // CL=11, ELEPROX=00, ELE_EN preserved
+    data[1] = (ecr & 0x0f) | 0xc0;
     i2c_write(port, addr, data, 2, false);
 
     // Verify ECR was accepted (readback with retry).
@@ -326,9 +271,9 @@ void MPR121::calibrateBaseline(bool force) {
  *  @returns    the filtered reading as a 10 bit unsigned value
  */
 uint16_t MPR121::filteredData(uint8_t t) {
-    uint16_t value = 0;
-    readFilteredData(t, value);
-    return value;
+    if (t > 12)
+        return 0;
+    return readRegister16(MPR121_FILTDATA_0L + t * 2);
 }
 
 /*!
@@ -340,9 +285,10 @@ uint16_t MPR121::filteredData(uint8_t t) {
  *  @returns    the baseline data that was read
  */
 uint16_t MPR121::baselineData(uint8_t t) {
-    uint16_t value = 0;
-    readBaselineData(t, value);
-    return value;
+    if (t > 12)
+        return 0;
+    uint16_t bl = readRegister8(MPR121_BASELINE_0 + t);
+    return (bl << 2);
 }
 
 // round46b: bulk register read (single I2C transaction) - used by the fast
@@ -351,7 +297,6 @@ uint16_t MPR121::baselineData(uint8_t t) {
 // bulk read previously left uninitialized stack garbage in dst, which the
 // diff clamp turned into false diff=255 spikes (th_touch=257 calibration).
 bool MPR121::readRegisters(uint8_t reg, uint8_t* dst, uint8_t n) {
-    if (dst == nullptr || n == 0) return false;
     uint8_t data[1] = { reg };
     int ret = i2c_write_read(port, addr, data, 1, dst, n);
     if (ret != n) {
@@ -369,47 +314,18 @@ bool MPR121::readRegisters(uint8_t reg, uint8_t* dst, uint8_t n) {
  * device is currently deemed to be touched.
  */
 uint16_t MPR121::touched(void) {
-    uint16_t status = 0;
-    readTouchStatus(status);
-    return status;
-}
-
-bool MPR121::readRegisterChecked(uint8_t reg, uint8_t* dst, uint8_t n, bool* retried) {
-    if (retried) *retried = false;
-    if (readRegisters(reg, dst, n)) return true;
-    sleep_us(50);
-    if (retried) *retried = true;
-    return readRegisters(reg, dst, n);
-}
-
-bool MPR121::readTouchStatus(uint16_t& status) {
-    status = 0;
-    uint8_t buffer[2] = {};
-    if (!readRegisterChecked(MPR121_TOUCHSTATUS_L, buffer, 2)) return false;
-    status = ((uint16_t)buffer[0] | ((uint16_t)buffer[1] << 8)) & 0x0FFF;
-    return true;
-}
-
-bool MPR121::readFilteredData(uint8_t t, uint16_t& value, bool* retried) {
-    value = 0;
-    if (retried) *retried = false;
-    if (t > 12) return false;
-    uint8_t buffer[2] = {};
-    if (!readRegisterChecked(MPR121_FILTDATA_0L + t * 2, buffer, 2, retried)) return false;
-    uint16_t reading = (uint16_t)buffer[0] | ((uint16_t)buffer[1] << 8);
-    if (reading > 0x03FF) return false;  // native 10-bit output; reserved bits are not data
-    value = reading;
-    return true;
-}
-
-bool MPR121::readBaselineData(uint8_t t, uint16_t& value, bool* retried) {
-    value = 0;
-    if (retried) *retried = false;
-    if (t > 12) return false;
-    uint8_t buffer[1] = {};
-    if (!readRegisterChecked(MPR121_BASELINE_0 + t, buffer, 1, retried)) return false;
-    value = (uint16_t)buffer[0] << 2;  // only high 8 bits of the native baseline are readable
-    return true;
+    uint8_t reg = MPR121_TOUCHSTATUS_L;
+    uint8_t buffer[2] = {0, 0};
+    int ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
+    if (ret != 2) {
+        sleep_us(50);
+        ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
+        if (ret != 2) return 0;  // I2C error: safe default = no touch
+    }
+    uint16_t t = buffer[1];
+    t <<= 8;
+    t |= buffer[0];
+    return t & 0x0FFF;
 }
 
 /*!
@@ -418,9 +334,12 @@ bool MPR121::readBaselineData(uint8_t t, uint16_t& value, bool* retried) {
  *  @returns    the 8 bit value that was read.
  */
 uint8_t MPR121::readRegister8(uint8_t reg) {
-    uint8_t buffer[1] = {0};
-    readRegisterChecked(reg, buffer, 1);
-    return buffer[0];
+    uint8_t value = 0;
+    if (!readRegisters(reg, &value, 1)) {
+        sleep_us(50);
+        if (!readRegisters(reg, &value, 1)) return 0;
+    }
+    return value;
 }
 
 /*!
@@ -429,12 +348,12 @@ uint8_t MPR121::readRegister8(uint8_t reg) {
  *  @returns    the 16 bit value that was read.
  */
 uint16_t MPR121::readRegister16(uint8_t reg) {
-    uint8_t buffer[2] = {0, 0};
-    readRegisterChecked(reg, buffer, 2);
-    uint16_t val = buffer[1];
-    val <<= 8;
-    val |= buffer[0];
-    return val;
+    uint8_t data[2] = {};
+    if (!readRegisters(reg, data, 2)) {
+        sleep_us(50);
+        if (!readRegisters(reg, data, 2)) return 0;
+    }
+    return data[0] | (uint16_t(data[1]) << 8);
 }
 
 /*!
@@ -478,8 +397,8 @@ void MPR121::writeRegister(uint8_t reg, uint8_t value) {
         // ecr_reg.write(ecr_backup);
         data[0] = MPR121_ECR;
         data[1] = ecr_backup;
-        // Legacy CL=11 -> CL=10 policy retained. Both modes reload from the
-        // first electrode data on Stop/Run (all 10 bits vs the high 5 bits).
+        // Preserve the existing CL=11 -> CL=10 initialization policy.
+        // CL=10 also initializes from the first sample (upper five bits).
         if ((ecr_backup & 0xC0) == 0xC0) {
             data[1] = (ecr_backup & 0x0F) | 0x80;  // CL=10
         }

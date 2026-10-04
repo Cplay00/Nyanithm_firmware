@@ -1,5 +1,5 @@
-﻿#!/usr/bin/env pwsh
-param([string]$Variant = "hw_v1", [string]$BuildDir = "build")
+#!/usr/bin/env pwsh
+param([string]$Variant = "hw_v1", [string]$BuildDir = "build_release")
 $ErrorActionPreference = "Stop"
 $TC = "C:\Users\HP\.pico-sdk\toolchain\14_2_Rel1\bin"
 $HOSTCC = "C:\Program Files\LLVM\bin"
@@ -7,14 +7,18 @@ $NJ = "C:\Users\HP\AppData\Local\Programs\Python\Python312\Scripts"
 $PY = "C:\Users\HP\AppData\Local\Programs\Python\Python312\python.exe"
 $GM = "C:\Program Files\Git\mingw64\bin"
 $SDK = "D:\pico-sdk"
-$S = @{ "hw_v1" = "D:\Opencode,OCCM\Items\Nyanithm_Firmware\Nyanithm_firmware_hw_v1"; "cplay" = "D:\Opencode,OCCM\Items\Nyanithm_Firmware\Nyanithm_firmware_hw_v1_for_cplay" }
+$sourceRoot = Split-Path -Parent $PSScriptRoot
+$S = @{ "hw_v1" = $sourceRoot; "cplay" = Join-Path (Split-Path -Parent $sourceRoot) 'Nyanithm_firmware_hw_v1_for_cplay' }
 $J = @{ "hw_v1" = "D:\Nyanithm_build\fw_v1"; "cplay" = "D:\Nyanithm_build\fw_cplay" }
 if (-not $S.ContainsKey($Variant)) { Write-Error "Use hw_v1 or cplay"; exit 1 }
+if ($BuildDir -notmatch '^[A-Za-z0-9_-]+$') { throw 'BuildDir must be a single directory name' }
 $env:PICO_SDK_PATH = $SDK
 $env:PATH = "$GM;$HOSTCC;$TC;$NJ;$env:PATH"
 $env:CC = "$HOSTCC\clang.exe"
 $env:CXX = "$HOSTCC\clang++.exe"
 if (-not (Test-Path $J[$Variant])) { New-Item -ItemType Junction -Path $J[$Variant] -Target $S[$Variant] -Force | Out-Null }
+$junctionTarget = (Get-Item -LiteralPath $J[$Variant]).Target
+if ($junctionTarget -ne $S[$Variant]) { throw "Build junction points to a different source: $junctionTarget" }
 $B = "$($J[$Variant])\$BuildDir"
 if (-not (Test-Path "$B\build.ninja")) { New-Item -ItemType Directory -Path $B -Force | Out-Null; Push-Location $B; cmake -G Ninja -DCMAKE_BUILD_TYPE=Release $J[$Variant]; Pop-Location }
 Push-Location $B

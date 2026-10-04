@@ -77,7 +77,15 @@ extern "C" void mprReadEntry() {
         queue(-1); queue(2, 0x1fff); CHECK(device.touched() == 0xfff);
         CHECK(consumed == 2 && sleeps == 1);
     } else if (number == 22) {
-        queue(2, 0xffff); CHECK(device.filteredData(7) == 0);
+        queue(2, 0xffff);
+#ifdef CHECKED_MPR_READS
+        CHECK(device.filteredData(7) == 0);
+#else
+        // The deployed legacy primitive returns the complete native word;
+        // reserved-bit rejection belongs to the optional checked API. This
+        // transport test must not silently substitute the retired API contract.
+        CHECK(device.filteredData(7) == 0xffff);
+#endif
     } else {
         queue(2, 0x0255); CHECK(device.filteredData(12) == 0x255);
         queue(1, 0x0034); CHECK(device.baselineData(12) == 0xd0);

@@ -3,7 +3,7 @@
 Round50 MBR3116 Migration Theoretical Test
 ===========================================
 Simulates the touch processing pipeline for both MPR121 and MBR3116 paths,
-verifying behavior across 49 grouped scenarios. Production I/O fault tests
+verifying behavior across 44 grouped scenarios. Production I/O fault tests
 are separately executed by test_mbr_distance_pipeline.py.
 
 Tests:
@@ -139,20 +139,15 @@ class TouchPipeline:
         self.mbr_fault_mask = 0
 
     def _verify_mpr121(self, raw: int, hw_touch: int, diff_data: List[int],
-                       i2c_error: bool, prev_stretched: int,
-                       signal_valid: bool = True) -> Tuple[int, SimResult]:
+                       i2c_error: bool, prev_stretched: int) -> Tuple[int, SimResult]:
         """MPR121 verification path."""
         result = SimResult()
         nowVer = self.cycle_ms
 
         for e in range(self.num_elec):
             if raw & (1 << e):
-                if self.elec[e].verifiedCount < 2 or not (prev_stretched & (1 << e)):
+                if self.elec[e].verifiedCount < 2:
                     result.i2c_reads += 1
-                    if not signal_valid:
-                        raw &= ~(1 << e)
-                        self.mbr_fault_mask |= 1 << e  # required-evidence mask, also used for MPR
-                        continue
                     diff = diff_data[e] if not i2c_error else 0
                     # round64: per-electrode sw_th (0 = inherit global th_touch)
                     pk = self.per_key[e] if e < len(self.per_key) else 0
@@ -165,6 +160,12 @@ class TouchPipeline:
                         # Re-read
                         result.i2c_reads += 1
                         diff = diff_data[e]  # second read succeeds
+                        if diff == 0:
+                            raw &= ~(1 << e)
+                            self.elec[e].verifiedCount = 0
+                            self.elec[e].fastOk = False
+                            self.elec[e].confirmReq = CONFIRM_CYCLES
+                            continue
                         # No fast-path on re-read (mirror hw_devices.cpp glitch path)
                         if diff < verify_th:
                             raw &= ~(1 << e)
@@ -175,8 +176,7 @@ class TouchPipeline:
                                 self.g_verifyFail[e] += 1
                                 result.verify_fails += 1
                         else:
-                            self.elec[e].verifiedCount = min(2, self.elec[e].verifiedCount + 1)
-                            self.elec[e].fastOk = False
+                            self.elec[e].verifiedCount += 1
                             if diff >= sw_th + 4:
                                 self.elec[e].confirmReq = 1
                             elif diff >= sw_th + 2:
@@ -193,8 +193,6 @@ class TouchPipeline:
                         if self.g_verifyFail[e] < 255:
                             self.g_verifyFail[e] += 1
                             result.verify_fails += 1
-                    elif self.elec[e].verifiedCount >= 2:
-                        pass  # retain cadence only after fresh valid evidence
                     else:
                         neighbor = ((e > 0 and (prev_stretched & (1 << (e-1)))) or
                                    (e < self.num_elec - 1 and (prev_stretched & (1 << (e+1)))))
@@ -325,14 +323,14 @@ class TouchPipeline:
         return raw, result
 
     def _stretch(self, raw: int, prev_stretched: int) -> Tuple[int, SimResult]:
-        """Shared stretching, with bounded MPR / legacy-MBR evidence-fault holding."""
+        """Shared stretching, with bounded legacy-MBR evidence-fault holding."""
         result = SimResult()
         stretched = 0
         now = self.cycle_ms
 
         for e in range(self.num_elec):
             state = self.elec[e]
-            fault = (not self.strict_current and
+            fault = (self.is_mbr3116 and not self.strict_current and
                      bool(self.mbr_fault_mask & (1 << e)))
             if fault:
                 if not state.faultActive:
@@ -400,10 +398,7 @@ class TouchPipeline:
                       distance_sample_valid: bool = True,
                       difference_read_valid: bool = True,
                       mbr_button_valid: bool = True,
-                      button_read_age_ms: int = 0,
-                      mpr_status_valid: bool = True,
-                      mpr_signal_valid: bool = True,
-                      mpr_read_age_ms: int = 0) -> SimResult:
+                      button_read_age_ms: int = 0) -> SimResult:
         """Process one cycle: verify -> stretch -> output."""
         result = SimResult()
         prev_stretched = self.prevStretched
@@ -442,11 +437,7 @@ class TouchPipeline:
                 raw = 0
                 self.mbr_fault_mask = (1 << self.num_elec) - 1
         else:
-            raw, v_res = self._verify_mpr121(raw, hw_touch, diff_data, i2c_error,
-                                           prev_stretched, mpr_signal_valid)
-            if not mpr_status_valid or mpr_read_age_ms > 15:
-                raw = 0
-                self.mbr_fault_mask = (1 << self.num_elec) - 1
+            raw, v_res = self._verify_mpr121(raw, hw_touch, diff_data, i2c_error, prev_stretched)
         result.i2c_reads = v_res.i2c_reads
         result.verify_fails = v_res.verify_fails
         result.raw_out = raw
@@ -1287,42 +1278,12 @@ def run_tests():
     legacy.cycle_ms = 0x22
     tr.check("S44: unsigned wrap releases at 50ms",
              legacy.process_cycle(1, [255] * 16, mbr_button_valid=False).stretched_out == 0, "")
-    print("\n--- Scenarios 45-49: MPR required-evidence faults (round90n) ---")
-    mpr = TouchPipeline(num_elec=12, is_mbr3116=False)
-    for _ in range(8):
-        r = mpr.process_cycle(1, [60] * 12, mpr_signal_valid=False)
-    tr.check("S45: invalid analog cannot admit MPR ON", r.raw_out == 0 and r.stretched_out == 0, "")
-    tr.check("S45: transport fault does not count as weak signal", mpr.g_verifyFail[0] == 0, "")
-    mpr = TouchPipeline(num_elec=12, is_mbr3116=False)
-    mpr.process_cycle(1, [60] * 12)
-    mpr.process_cycle(0, [0] * 12)
-    mpr.advance_ms(6)
-    mpr.process_cycle(0, [0] * 12)
-    r = mpr.process_cycle(1, [60] * 12, mpr_signal_valid=False)
-    tr.check("S46: released output needs fresh analog", r.raw_out == 0 and r.stretched_out == 0, "")
-    mpr = TouchPipeline(num_elec=12, is_mbr3116=False)
-    for _ in range(20):
-        mpr.process_cycle(1, [60] * 12)
-    started = mpr.cycle_ms
-    r = mpr.process_cycle(0, [0] * 12, mpr_status_valid=False)
-    tr.check("S47: failed status holds prior ON only", r.stretched_out == 1 and r.raw_out == 0, "")
-    mpr.cycle_ms = started + 49
-    tr.check("S47: MPR fault holds at 49ms", mpr.process_cycle(0, [0] * 12, mpr_status_valid=False).stretched_out == 1, "")
-    mpr.cycle_ms = started + 50
-    tr.check("S47: MPR fault releases at 50ms", mpr.process_cycle(0, [0] * 12, mpr_status_valid=False).stretched_out == 0, "")
-    tr.check("S47: expiry clears all MPR verification", mpr.elec[0].verifiedCount == 0, "")
-    mpr = TouchPipeline(num_elec=12, is_mbr3116=False)
-    tr.check("S48: MPR host age 15ms admitted", mpr.process_cycle(1, [60] * 12, mpr_read_age_ms=15).stretched_out == 1, "")
-    mpr = TouchPipeline(num_elec=12, is_mbr3116=False)
-    tr.check("S48: MPR host age 16ms denied", mpr.process_cycle(1, [60] * 12, mpr_read_age_ms=16).stretched_out == 0, "")
-    mpr = TouchPipeline(num_elec=12, is_mbr3116=False)
-    mpr.process_cycle(1, [60] * 12)
-    mpr.cycle_ms = 0xfffffff0
-    mpr.process_cycle(0, [0] * 12, mpr_status_valid=False)
-    mpr.cycle_ms = 0x21
-    tr.check("S49: MPR wrap preserves 49ms hold", mpr.process_cycle(0, [0] * 12, mpr_status_valid=False).stretched_out == 1, "")
-    mpr.cycle_ms = 0x22
-    tr.check("S49: MPR wrap releases at 50ms", mpr.process_cycle(0, [0] * 12, mpr_status_valid=False).stretched_out == 0, "")
+    failed_mpr = TouchPipeline(12, False)
+    for frame in range(8):
+        r = failed_mpr.process_cycle(1, [0] * 12, i2c_error=True)
+        tr.check(f"S45: failed MPR evidence cannot create ON ({frame})", r.stretched_out == 0, "")
+    r = failed_mpr.process_cycle(1, [60] * 12)
+    tr.check("S45: fresh MPR evidence recovers", r.raw_out == 1, "")
     return tr
 
 

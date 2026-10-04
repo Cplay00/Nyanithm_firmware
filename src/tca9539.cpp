@@ -9,10 +9,9 @@
 #include <tca9539.h>
 
 uint8_t TCA9539::readReg(uint8_t reg) {
-    i2c_write(_i2c_bus, _i2c_address, &reg, 1, true);
-    uint8_t ret;
-    i2c_read(_i2c_bus, _i2c_address, &ret, 1, false);
-    return ret;
+    uint8_t value = 0;
+    if (i2c_write_read(_i2c_bus, _i2c_address, &reg, 1, &value, 1) != 1) return 0;
+    return value;
 }
 void TCA9539::writeReg(uint8_t reg, uint8_t value) {
     uint8_t buf[2] = { reg, value };
@@ -48,11 +47,6 @@ void TCA9539::setConfP1(uint8_t mask) {
     writeReg(0x07, mask);
 }
 bool TCA9539::isConnected() {
-    uint8_t buf = 0x00;
-    i2c_write(_i2c_bus, _i2c_address, &buf, 1, true);
-    uint8_t bytesRead = i2c_read(_i2c_bus, _i2c_address, &buf, 1, false);
-    if (bytesRead == 1) {
-        return true;
-    }
-    return false;
+    uint8_t reg = 0, value = 0;
+    return i2c_write_read(_i2c_bus, _i2c_address, &reg, 1, &value, 1) == 1;
 }

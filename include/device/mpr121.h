@@ -76,7 +76,6 @@ class MPR121 {
     uint8_t port;
     uint8_t addr;
     bool good = false;
-    bool readRegisterChecked(uint8_t reg, uint8_t* dst, uint8_t n, bool* retried = nullptr);
 
 public:
     MPR121(uint8_t _port, uint8_t i2c_addr);
@@ -87,11 +86,7 @@ public:
 
     uint16_t filteredData(uint8_t t);
     uint16_t baselineData(uint8_t t);
-    bool readRegisters(uint8_t reg, uint8_t* dst, uint8_t n);  // exact byte count; zero dst on failure
-    // round90n: valid zero is distinct from failure. At most one 50us retry.
-    bool readTouchStatus(uint16_t& status);
-    bool readFilteredData(uint8_t t, uint16_t& value, bool* retried = nullptr);
-    bool readBaselineData(uint8_t t, uint16_t& value, bool* retried = nullptr);
+    bool readRegisters(uint8_t reg, uint8_t* dst, uint8_t n);  // round46b: bulk read; round46i: returns success
 
     void setAutoconfig(bool autoconfig);
 

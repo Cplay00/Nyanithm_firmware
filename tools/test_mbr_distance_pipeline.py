@@ -185,29 +185,11 @@ class MPR121 {
 public:
     uint16_t hardwareBits = 0;
     uint16_t differences[12] = {0};
-    unsigned dataReads = 0, statusReads = 0;
-    bool statusFails = false, filteredFails = false, baselineFails = false, retried = false, glitchConsumed = false;
-    uint32_t statusDelayMs = 0, dataDelayMs = 0;
-    uint16_t touched() { uint16_t v = 0; readTouchStatus(v); return v; }
-    bool readTouchStatus(uint16_t& v) {
-        ++statusReads; fakeNow += statusDelayMs;
-        v = statusFails ? 0 : hardwareBits; return !statusFails;
-    }
-    uint16_t filteredData(uint8_t) {
-        ++dataReads; fakeNow += dataDelayMs;
-        if (retried && !glitchConsumed) { glitchConsumed = true; return 0; }
-        return filteredFails ? 0 : 800;
-    }
-    uint16_t baselineData(uint8_t e) { ++dataReads; return baselineFails ? 0 : 800 + differences[e]; }
-    bool readFilteredData(uint8_t e, uint16_t& v, bool* retry = nullptr) {
-        if (retry) *retry = retried;
-        (void)e; ++dataReads; fakeNow += dataDelayMs;
-        v = filteredFails ? 0 : 800; return !filteredFails;
-    }
-    bool readBaselineData(uint8_t e, uint16_t& v, bool* retry = nullptr) {
-        if (retry) *retry = retried;
-        v = baselineData(e); return !baselineFails;
-    }
+    unsigned dataReads = 0;
+    bool readFails = false;
+    uint16_t touched() { return hardwareBits; }
+    uint16_t filteredData(uint8_t) { ++dataReads; return readFails ? 0 : 1000; }
+    uint16_t baselineData(uint8_t electrode) { ++dataReads; return 1000 + differences[electrode]; }
 };
 controller_config ControllerConfig = {};
 CY8CMBR3116 MBR3116A, MBR3116B, MBR3116C, MBR3116D, MBR3116E;
@@ -566,6 +548,25 @@ static void runMpr(bool withProfile) {
     mprs[m]->hardwareBits = 0; frame(1); output(0, true);  // Existing sticky release.
     CHECK(mprs[m]->dataReads == 2);
 }
+static void runMprFault(unsigned scenario) {
+    initialize(false, false); ControllerConfig.cfg0 = 0;
+    MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
+    const unsigned m = V1_LANE_M[0], e = V1_LANE_E[0];
+    mprs[m]->differences[e] = 60;
+    mprs[m]->hardwareBits = 1u << e;
+    if (scenario == 1) {
+        const unsigned other = V1_LANE_E[1];
+        mprs[m]->differences[other] = 60;
+        mprs[m]->hardwareBits = 1u << other;
+        for (unsigned n = 0; n < 3; ++n) frame();
+        output(1, true); mprs[m]->hardwareBits |= 1u << e;
+    }
+    if (scenario == 2) { mprs[m]->differences[e] = 4; frame(); output(0, false); }
+    mprs[m]->readFails = true;
+    for (unsigned n = 0; n < 8; ++n) { frame(); output(0, false); }
+    mprs[m]->readFails = false; mprs[m]->differences[e] = 60;
+    frame(); output(0, true);
+}
 static void runLegacyFault(unsigned scenario, bool v2) {
     initialize(v2, false);
     unsigned lane = 0, m = laneChip(lane);
@@ -685,109 +686,6 @@ static void runLegacyFault(unsigned scenario, bool v2) {
     }
     CHECK(!mbrDistanceEnabledForFrame && g_mbrDistanceReadFailures == 0);
 }
-static MPR121& mprLane(unsigned lane) {
-    return V1_LANE_M[lane] == 0 ? mpr0 : (V1_LANE_M[lane] == 1 ? mpr1 : mpr2);
-}
-static void setMprLane(unsigned lane, uint16_t diff = 60, bool on = true) {
-    MPR121& d = mprLane(lane); unsigned e = V1_LANE_E[lane];
-    d.differences[e] = diff;
-    if (on) d.hardwareBits |= 1u << e; else d.hardwareBits &= ~(1u << e);
-}
-static void runMprFault(unsigned number) {
-    initialize(false, false); ControllerConfig.cfg0 = 0;
-    ControllerConfig.hwVer = 1 + (number & 1); ControllerConfig.th_touch = 13;
-    unsigned scenario = number / 2;
-    MPR121& d = mprLane(16); unsigned e = V1_LANE_E[16];
-    setMprLane(16);
-    switch (scenario) {
-    case 0:
-        d.filteredFails = true;
-        for (unsigned i = 0; i < 8; ++i) { frame(); output(16, false); }
-        CHECK(!(rawTouch[0] & (1u << e)));
-        CHECK(g_verifyFail[e] == 0); break;
-    case 1:
-        d.baselineFails = true;
-        for (unsigned i = 0; i < 8; ++i) { frame(); output(16, false); CHECK(!(rawTouch[0] & (1u << e))); }
-        CHECK(g_verifyFail[e] == 0); break;
-    case 2:
-        for (unsigned i = 0; i < 20; ++i) { frame(); output(16, true); }
-        d.statusFails = true; frame(0); output(16, true);
-        frame(49); output(16, true); frame(1); output(16, false); break;
-    case 3:
-        setMprLane(16, 15); frame(); output(16, false);
-        d.filteredFails = true; frame(); output(16, false); CHECK(rawTouch[0] == 0);
-        d.filteredFails = false;
-        frame(); output(16, false); frame(); output(16, false); frame(); output(16, true); break;
-    case 4:
-        frame(); output(16, true);
-        setMprLane(14); d.filteredFails = true;
-        frame(); output(16, true); output(14, false); CHECK(!(rawTouch[0] & (1u << 8))); break;
-    case 5:
-        frame(); output(16, true); CHECK(d.dataReads == 2);
-        for (unsigned i = 0; i < 60; ++i) { frame(); output(16, true); }
-        CHECK(d.dataReads == 2 && d.statusReads == 61); break;
-    case 6:
-        setMprLane(16, 12);
-        for (unsigned i = 0; i < 3; ++i) { frame(); output(16, false); }
-        frame(); output(16, true); break;
-    case 7:
-        for (unsigned lane = 14; lane <= 17; ++lane) setMprLane(lane);
-        frame(); for (unsigned lane = 14; lane <= 17; ++lane) output(lane, true); break;
-    case 8:
-        frame(); output(16, true); setMprLane(16, 0, false);
-        frame(6); output(16, false);
-        setMprLane(16); d.filteredFails = true;
-        frame(); output(16, false); CHECK(rawTouch[0] == 0); break;
-    case 9:
-        mpr1.statusDelayMs = 17; frame(); output(16, false); CHECK(rawTouch[0] == 0);
-        mpr1.statusDelayMs = 0; frame(); output(16, true); break;
-    case 10:
-        frame(); output(16, true); fakeNow = 0xfffffff0u;
-        d.statusFails = true; frame(0); output(16, true);
-        frame(49); output(16, true); frame(1); output(16, false); break;
-    case 11:
-        d.retried = true; frame(); output(16, false); frame(); output(16, true); break;
-    case 12:
-        frame(); output(16, true); d.statusFails = true; d.statusDelayMs = 51;
-        frame(); output(16, false); break;
-    case 13:
-        frame(); output(16, true); fakeNow = 0; d.statusFails = true;
-        frame(0); output(16, true); frame(49); output(16, true); frame(1); output(16, false);
-        frame(1); output(16, false); d.statusFails = false; d.filteredFails = true;
-        frame(); output(16, false); d.filteredFails = false; frame(); output(16, true); break;
-    case 14:
-        for (unsigned lane = 0; lane < 32; ++lane) { setMprLane(lane); frame(); output(lane, true); }
-        break;
-    case 15: {
-        for (unsigned i = 0; i < 20; ++i) { frame(); output(16, true); }
-        unsigned reads = d.dataReads;
-        setMprLane(16, 0, false); frame(1); output(16, true);
-        setMprLane(16, 1); frame(1); output(16, true); CHECK(d.dataReads == reads); break;
-    }
-    case 16:
-        ControllerConfig.thTouchKey[16] = 80;
-        for (unsigned i = 0; i < 4; ++i) { frame(); output(16, false); CHECK(rawTouch[0] == 0); }
-        ControllerConfig.thTouchKey[16] = 20; setMprLane(16, 19);
-        for (unsigned i = 0; i < 3; ++i) { frame(); output(16, false); }
-        frame(); output(16, true); break;
-    case 17:
-        ControllerConfig.th_touch = 0; ControllerConfig.thTouchKey[14] = 2;
-        setMprLane(16, 2); setMprLane(14, 2);
-        frame(); output(16, false); output(14, false); CHECK(rawTouch[0] == 0);
-        setMprLane(16, 3); setMprLane(14, 3);
-        for (unsigned i = 0; i < 3; ++i) { frame(); output(16, false); output(14, false); }
-        frame(); output(16, true); output(14, true); break;
-    case 18:
-        mpr1.statusDelayMs = 15; frame(); output(16, true);
-        setMprLane(14); mpr1.statusDelayMs = 16; frame(); output(16, true); output(14, false);
-        CHECK(rawTouch[0] == 0); break;
-    case 19:
-        d.dataDelayMs = 16; frame(); output(16, false); CHECK(rawTouch[0] == 0);
-        d.dataDelayMs = 0; frame(); output(16, true); break;
-    default: CHECK(false);
-    }
-    CHECK(!mbrDistanceEnabledForFrame && g_mbrDistanceReadFailures == 0);
-}
 extern "C" void mbrPipelineTestEntry() {
     const char* command = GetCommandLineA();
     unsigned number = 999;
@@ -801,7 +699,7 @@ extern "C" void mbrPipelineTestEntry() {
     if (number < 40) runScenario(number / 2, (number & 1) != 0);
     else if (number < 42) runMpr(number == 41);
     else if (number < 84) runLegacyFault((number - 42) / 2, (number & 1) != 0);
-    else if (number < 124) runMprFault(number - 84);
+    else if (number < 87) runMprFault(number - 84);
     else CHECK(false);
     writeText("PASS checks="); writeNumber(checks); writeText("\n");
     ExitProcess(0);
@@ -828,18 +726,7 @@ LEGACY_FAULT_SCENARIOS = [
     "recovered-wake-NACK", "torn-then-good-group", "persistent-torn-groups",
     "late-native-status", "long-first-fault-expires", "late-counts-no-deadline-renewal",
 ]
-MPR_FAULT_SCENARIOS = [
-    'failed-filter-new-ON', 'failed-baseline-is-not-threshold-rejection',
-    'status-fault-hold-49-release-50', 'pending-confirmation-fault-resets',
-    'neighbour-cannot-authorize-fault', 'healthy-flick-and-held-read-budget',
-    'healthy-weak-confirmation', 'four-fixed-lanes', 'actual-OFF-needs-fresh-evidence',
-    'later-chip-age-check', 'fault-clock-wrap', 'recovered-retry-conservative-tier',
-    'long-first-fault-expires', 'zero-start-and-expired-no-resurrection',
-    'all-32-mappings-slide', 'published-ON-dip-retains-read-budget',
-    'per-key-threshold-and-confirmation', 'global-and-per-key-floor',
-    'inclusive-status-age-15-reject-16', 'late-analog-does-not-authorize',
-]
-CASE_COUNT = 84 + 2 * len(MPR_FAULT_SCENARIOS)
+CASE_COUNT = 45 + 2 * len(LEGACY_FAULT_SCENARIOS)
 
 
 def main() -> int:
@@ -847,8 +734,6 @@ def main() -> int:
     parser.add_argument("--clang", type=Path, default=CLANG)
     parser.add_argument("--kernel32", type=Path, default=KERNEL32)
     parser.add_argument("--sdk", type=Path, default=Path(r"D:\pico-sdk"))
-    parser.add_argument("--source", type=Path, default=VARIANT / "src/hw_devices.cpp",
-                        help="Production scan source; allows frozen before/after replay")
     parser.add_argument("--output", type=Path, default=WORKSPACE / "_dev_tools" / "mbr_distance_pipeline_host")
     parser.add_argument("--case", type=int, help=f"Run just one numbered scenario (0..{CASE_COUNT - 1})")
     args = parser.parse_args()
@@ -859,7 +744,7 @@ def main() -> int:
     for dependency in (args.clang, args.kernel32):
         if not dependency.is_file():
             parser.error(f"Missing compiler dependency: {dependency}")
-    source_path = args.source.resolve()
+    source_path = VARIANT / "src" / "hw_devices.cpp"
     driver_path = VARIANT / "src" / "cy8cmbr3116.cpp"
     sdk_headers = args.sdk / "src/common/pico_base_headers/include"
     if not (sdk_headers / "pico/error.h").is_file():
@@ -886,8 +771,7 @@ def main() -> int:
         ("mbrDistanceReadSample", "static void mbrDistanceReadSample("),
         ("mbrDistanceRetrySample", "static void mbrDistanceRetrySample("),
         ("readMbrButtons", "static uint16_t readMbrButtons("),
-        ("touchReadFaultHold", "static bool touchReadFaultHold(" if "static bool touchReadFaultHold(" in source
-         else "static bool mbrLegacyFaultHold("),
+        ("mbrLegacyFaultHold", "static bool mbrLegacyFaultHold("),
         ("mbrDistanceAllowedMask", "static uint16_t mbrDistanceAllowedMask("),
         ("updateTouch_v2", "void updateTouch_v2()"),
         ("updateTouch_v1", "void updateTouch_v1()"),
@@ -924,7 +808,7 @@ def main() -> int:
         name = (("v2" if number & 1 else "v1") + ":" + SCENARIOS[number // 2]
                 if number < 40 else "MPR:" + ("signed-enabled-profile-ignored" if number == 41 else "legacy-zero-profile")
                 if number < 42 else ("v2" if number & 1 else "v1") + ":legacy-" + LEGACY_FAULT_SCENARIOS[(number - 42) // 2]
-                if number < 84 else f'MPR:hw{1 + (number & 1)}:' + MPR_FAULT_SCENARIOS[(number - 84) // 2])
+                if number < 84 else "MPR:evidence-failure-" + str(number - 84))
         result = subprocess.run([str(executable), f"--case={number}"], capture_output=True, text=True, timeout=15)
         match = re.search(r"PASS checks=(\d+)", result.stdout)
         passed = result.returncode == 0 and match is not None

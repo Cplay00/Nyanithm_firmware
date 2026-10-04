@@ -5,8 +5,6 @@
  * Copyright (c) 2026 Catium2006
  */
 
-/* VIBE CODING */
-
 #include <lamp_array.h>
 
 #include <controller_config.h>
@@ -35,6 +33,12 @@ static uint16_t s_selected_lamp = 0;
 static bool s_autonomous_mode = false;
 static bool s_dirty = false;
 static uint8_t s_rgb[kMaxLampCount][3];
+static bool startupLedOwned = true;
+
+void lamp_array_finish_startup() {
+    // Called by Core0 before publishing USB ownership to Core1.
+    startupLedOwned = false;
+}
 
 static uint16_t clamp_lamp_id(uint16_t lamp_id) {
     if (g_lampCount == 0) return 0;  // round51 defensive: never index into s_rgb
@@ -77,6 +81,7 @@ void lamp_array_init(void) {
 }
 
 void lamp_array_apply(void) {
+    if (startupLedOwned) return;
     static bool clearedOnDisable = false;  // round55: one-shot clear latch
     if (game_connected) {
         return;

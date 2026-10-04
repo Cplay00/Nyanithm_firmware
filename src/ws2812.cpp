@@ -14,7 +14,7 @@ WS2812::WS2812(PIO pio, uint sm, uint32_t pin, uint32_t count) {
     _sm = sm;
     _pin = pin;
     _count = count;
-    _buffer = new GRB24[_count];
+    _buffer = new GRB24[_count]{};
     uint offset = pio_add_program(_pio, &ws2812_program);
     pio_gpio_init(_pio, _pin);
     pio_sm_set_consecutive_pindirs(_pio, _sm, _pin, 1, true);
@@ -28,7 +28,7 @@ WS2812::WS2812(PIO pio, uint sm, uint32_t pin, uint32_t count) {
 }
 
 WS2812::~WS2812() {
-    delete _buffer;
+    delete[] _buffer;
 }
 
 void WS2812::sendGRB24(GRB24 raw) {
@@ -36,6 +36,7 @@ void WS2812::sendGRB24(GRB24 raw) {
 }
 
 void WS2812::setColor(uint32_t index, uint8_t r, uint8_t g, uint8_t b) {
+    if (index >= _count) return;
     _buffer[index] = (g << 16) | (r << 8) | b;
 }
 
@@ -46,10 +47,8 @@ void WS2812::fill(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void WS2812::fill(uint8_t r, uint8_t g, uint8_t b, uint32_t first, uint32_t count) {
-    uint last = first + count;
-    if (last > _count) {
-        last = _count;
-    }
+    if (first >= _count) return;
+    uint last = first + (count < _count - first ? count : _count - first);
     for (uint i = first; i < last; i++) {
         setColor(i, r, g, b);
     }

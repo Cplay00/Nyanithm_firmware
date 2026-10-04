@@ -18,7 +18,9 @@ HOST = r'''
 extern "C" { int _fltused = 0; }
 static controller_config ControllerConfig{};
 static bool usingIR, useMuxScan;
-static uint8_t g_tofReadyMask;
+static bool hardwareMismatchAtBoot;
+static uint8_t detectedMprMask, detectedMbrMask;
+static uint8_t g_tofReadyMask, g_tofPhysicalMask;
 static uint8_t g_lampCount = 31, heightRange = 10;
 static uint16_t heightDataOriginal[5] = {4095,4095,4095,4095,4095};
 static int16_t heightData[5] = {4094,4094,4094,4094,4094};
@@ -30,9 +32,13 @@ static unsigned polls[5], forceCalls[5], startCalls[5];
 static unsigned mprInitCalls, mprCalibrationCalls, mbrInitCalls;
 static uint8_t physicalAddress[5] = {0x29,0x29,0x29,0x29,0x29};
 static uint8_t presentMask = 15, initFailureMask, probeFailureMask;
-static uint8_t mprPresent = 7, mbrPresent = 7;
+static uint8_t mprPresent = 0, mbrPresent = 7;
+static unsigned idReads[5], wakeNacks;
+static bool idTimeout;
 static bool muxPresent = true, irPresent, addressFailure;
 static uint32_t forceDuration = 20, calibrationDuration = 30;
+static bool rangeCompletes = true;
+static uint16_t rangeValues[5] = {100,100,100,100,100};
 static const unsigned GPIO_TOF_RESET = 5, GPIO_PCA9545_RESET = 4;
 static const unsigned MPR121_AUTOCONFIG0 = 0x7b, BUTTON_PUSH = 2;
 static const bool HIGH = true, LOW = false;
@@ -58,14 +64,23 @@ static void gpio_put(unsigned pin, bool level) {
         for (unsigned i = 0; i < 5; ++i) physicalAddress[i] = 0x29;
     }
 }
+static unsigned redCycles, blackCycles;
+static uint32_t redAt[3], blackAt[2];
 struct FakeLed {
-    void fill(unsigned r, unsigned g, unsigned) {
-        if (r == 250 && g == 150) ++warningCycles;
-        if (r == 250 && g == 250) ++errorCycles;
+    void fill(unsigned r, unsigned g, unsigned b) {
+        if (r == 255 && g == 0 && b == 0) {
+            CHECK(redCycles < 3); redAt[redCycles++] = fakeNow;
+        }
+        if (r == 0 && g == 0 && b == 0 && redCycles > 0 && blackCycles < 2)
+            blackAt[blackCycles++] = fakeNow;
+    }
+    void fill(unsigned r, unsigned g, unsigned b, unsigned first, unsigned count) {
+        CHECK(r == 15 && g == 15 && b == 15 && first == 0 && count == g_lampCount);
     }
     void flush() {}
 };
 static FakeLed RGB_LED;
+static void tud_task() {}
 static bool getButtonState(unsigned) { return false; }
 class PCA954X {
 public:
@@ -104,7 +119,8 @@ public:
         CHECK(!(initFailureMask & (1u << id)));
         CHECK(address == physicalAddress[id]);
         if (useMuxScan) CHECK(muxChannel == id);
-        *range = 100; return true;
+        if (!rangeCompletes) return false;
+        *range = rangeValues[id]; return true;
     }
 };
 static VL53L0X tof0(0),tof1(1),tof2(2),tof3(3),tof4(4);
@@ -117,6 +133,13 @@ public:
     void calibrateBaseline() { ++mprCalibrationCalls; advance(calibrationDuration); }
 };
 static MPR121 mpr0,mpr1,mpr2;
+class CY8CMBR3116 {
+public:
+    uint8_t i2c_port = 0, DEVICE_I2C_ADDRESS;
+    constexpr explicit CY8CMBR3116(uint8_t addr): DEVICE_I2C_ADDRESS(addr) {}
+    uint8_t requestDataFromAddress(uint8_t,uint8_t,uint8_t*);
+};
+static CY8CMBR3116 MBR3116A(0x40),MBR3116B(0x41),MBR3116C(0x42),MBR3116D(0x43),MBR3116E(0x44);
 static uint8_t electrodeBaseTouchTh(unsigned,unsigned) { return 0; }
 static uint8_t electrodeBaseReleaseTh(unsigned,unsigned) { return 0; }
 static void buildLaneTable() {}
@@ -139,6 +162,23 @@ static bool findI2CDevice(uint8_t port,uint8_t address,uint32_t = 10) {
             (muxMask & (1u << i)) && physicalAddress[i] == address) return true;
     return false;
 }
+static int i2c_write_read(uint8_t port, uint8_t addr, uint8_t* reg, unsigned,
+                          uint8_t* dst, unsigned len) {
+    CHECK(port == 1 && addr == 0x29 && *reg == 0xc0 && len == 1);
+    advance(5);
+    if (!muxPresent || !(presentMask & (1u << muxChannel))) return -1;
+    *dst = 0xee; return 1;
+}
+static int i2c_write_stop_read(uint8_t port, uint8_t addr, uint8_t reg, uint8_t* dst, unsigned len) {
+    CHECK(port == 0 && addr >= 0x40 && addr <= 0x44 && reg == 0x8f && len == 3);
+    advance(60);
+    const unsigned chip = addr - 0x40;
+    ++idReads[chip];
+    if (idTimeout && chip == 0) return PICO_ERROR_TIMEOUT;
+    if (chip == 0 && idReads[chip] <= wakeNacks) return PICO_ERROR_GENERIC;
+    if (!(mbrPresent & (1u << (addr - 0x40)))) return -1;
+    dst[0] = 0x9a; dst[1] = 5; dst[2] = 0x0a; return 3;
+}
 '''
 
 CASES = r'''
@@ -149,7 +189,7 @@ extern "C" void bootRecoveryEntry() {
         while (command[++i] >= '0' && command[i] <= '9') number = number * 10 + command[i] - '0';
         break;
     }
-    CHECK(number < 17);
+    CHECK(number < 27);
     ControllerConfig.hwVer = 1; ControllerConfig.cfg0 = CFG0_BIT_MBR3116;
     ControllerConfig.th_touch = 6; ControllerConfig.th_release = 4;
     ControllerConfig.airMin = 200; ControllerConfig.airMax = 500;
@@ -160,20 +200,27 @@ extern "C" void bootRecoveryEntry() {
     if (number == 5) { forceDuration = 650; addressFailure = true; }
     if (number == 6) { ControllerConfig.cfg0 = 0; mprPresent = 0; }
     if (number == 7) { irPresent = true; muxPresent = false; }
-    if (number == 8) { ControllerConfig.hwVer = 3; ControllerConfig.cfg0 = 0; mbrPresent = 3; }
-    if (number == 9) { ControllerConfig.hwVer = 4; ControllerConfig.cfg0 = 0; mbrPresent = 3; presentMask = 31; }
+    if (number == 8) { ControllerConfig.hwVer = 3; ControllerConfig.cfg0 = 0; mbrPresent = 0x18; }
+    if (number == 9) { ControllerConfig.hwVer = 4; ControllerConfig.cfg0 = 0; mbrPresent = 0x18; presentMask = 31; }
     if (number == 10) { mbrPresent = 0; }
-    if (number == 11) { ControllerConfig.cfg0 = 0; calibrationDuration = 750; }
+    if (number == 11) { ControllerConfig.cfg0 = 0; calibrationDuration = 750; mprPresent = 7; mbrPresent = 0; }
     if (number == 12) { presentMask = 0; }
     if (number == 13) { ControllerConfig.hwVer = 2; presentMask = 31; mprPresent = 0; } // 32-inch MBR
-    if (number == 14) { ControllerConfig.cfg0 = 0; mbrPresent = 0; } // 27-inch MPR
+    if (number == 14) { ControllerConfig.cfg0 = 0; mbrPresent = 0; mprPresent = 7; } // 27-inch MPR
     if (number == 15) { ControllerConfig.hwVer = 2; ControllerConfig.cfg0 = 0; presentMask = 31; mprPresent = 0; } // wrong MPR selection on 32-inch MBR
-    if (number == 16) { mbrPresent = 0; } // wrong MBR selection on 27-inch MPR
+    if (number == 16) { mbrPresent = 0; mprPresent = 7; }
+    if (number == 17) { presentMask = 31; } // extra fifth sensor still at 0x29
+    if (number == 18) { ControllerConfig.hwVer = 3; } // wrong MBR address layout
+    if (number == 19) { ControllerConfig.cfg0 |= CFG0_BIT_FORCE16LEDS; mbrPresent = 0; ControllerConfig.lightLimit = 0; } // wrong MBR selection on 27-inch MPR
+    if (number == 23) wakeNacks = 2;
+    if (number == 24) wakeNacks = 3;
+    if (number == 25) idTimeout = true;
+    if (number == 26) wakeNacks = 9; // all three discovery probes fail
     initHwDevices();
     checkHardwareState();
     CHECK(wdtDelay == 2000 && maxFeedGap < 2000);
-    CHECK(mbrInitCalls == ((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3 ? 1u : 0u));
-    CHECK(mprInitCalls == (mbrInitCalls ? 0u : 3u));
+    const bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3;
+    CHECK(mprInitCalls == (useMbr ? 0u : 3u));
 #ifndef LEGACY_STARTUP
     if (number == 2) CHECK(useMuxScan && g_tofReadyMask == 15);
     if (number == 3 || number == 7 || number == 12) CHECK(g_tofReadyMask == 0);
@@ -184,10 +231,34 @@ extern "C" void bootRecoveryEntry() {
     if (number == 13 || number == 15) CHECK(!useMuxScan && g_tofReadyMask == 31);
     if (number == 14 || number == 16) CHECK(!useMuxScan && g_tofReadyMask == 15);
 #endif
-    if (number == 3) CHECK(errorCycles == 2);
-    if (number == 2 || number == 4 || number == 6 || number == 10 || number == 12 || number == 15 || number == 16) CHECK(warningCycles == 2);
-    if (number == 0 || number == 1 || number == 5 || number == 7 || number == 8 || number == 9 || number == 11 || number == 13 || number == 14)
-        CHECK(warningCycles == 0 && errorCycles == 0);
+    const bool expectedWarning = number == 2 || number == 3 || number == 4 ||
+        number == 6 || number == 10 || number == 12 || number == 15 || number == 16 ||
+        number == 17 || number == 18 || number == 19 || number == 25 || number == 26;
+    CHECK(redCycles == (expectedWarning ? 3u : 0u));
+    if (expectedWarning) {
+        CHECK(blackAt[0] - redAt[0] == 2000 && blackAt[1] - redAt[1] == 2000);
+        CHECK(redAt[1] - blackAt[0] == 500 && redAt[2] - blackAt[1] == 500);
+        CHECK(fakeNow - redAt[0] >= 7000 && fakeNow - redAt[0] <= 7020);
+    }
+    if (number == 23) CHECK(idReads[0] == 3);
+    if (number == 24) CHECK(idReads[0] == 4); // wake completes between startup probes
+    if (number == 25) CHECK(idReads[0] == 3); // one timeout per independent discovery probe
+    if (number == 26) CHECK(idReads[0] == 9);
+    if (number >= 20 && number <= 22) {
+        rangeValues[0] = 300;
+        updateAir();
+        bool on = false; for (unsigned j = 0; j < 6; ++j) on |= airKeys[j];
+        CHECK(on);
+        if (number == 20 || number == 21) rangeValues[0] = number == 20 ? 8190 : 8191;
+        if (number == 22) { rangeCompletes = false; advance(200); }
+        updateAir(); advance(11); updateAir();
+        for (unsigned j = 0; j < 6; ++j) CHECK(!airKeys[j]);
+        CHECK(heightData[0] == 4095);
+        rangeCompletes = true; rangeValues[0] = 300;
+        for (unsigned frame = 0; frame < 3; ++frame) updateAir();
+        on = false; for (unsigned j = 0; j < 6; ++j) on |= airKeys[j];
+        CHECK(on); // recovery can activate again after cooldown
+    }
     // Main-loop reachability and uninitialized-channel exclusion, beyond multiple WDT periods.
     for (unsigned frame = 0; frame < 1000; ++frame) {
         watchdog_update();
@@ -198,7 +269,7 @@ extern "C" void bootRecoveryEntry() {
     g_tofReadyMask = (ControllerConfig.hwVer == 2 || ControllerConfig.hwVer == 4) ? 31 : 15;
 #endif
     for (unsigned i = 0; i < 5; ++i)
-        CHECK(polls[i] == ((g_tofReadyMask & (1u << i)) && !usingIR ? 1000u : 0u));
+        CHECK(polls[i] == ((g_tofReadyMask & (1u << i)) && !usingIR ? (number >= 20 && number <= 22 ? 1006u : 1000u) : 0u));
     writeText("PASS checks="); writeNumber(checks); writeText("\n"); ExitProcess(0);
 }
 '''
@@ -211,15 +282,14 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     sources = {name: (args.source_root / 'src' / name).read_text(encoding='utf-8')
-               for name in ('hw_devices.cpp', 'hw_check.cpp', 'error_state.cpp')}
+               for name in ('hw_devices.cpp', 'hw_check.cpp', 'cy8cmbr3116.cpp')}
     pieces = []
     hashes = {}
     for name, signatures in (
-        ('error_state.cpp', ['void warn(', 'void error(']),
+        ('cy8cmbr3116.cpp', ['uint8_t CY8CMBR3116::requestDataFromAddress(']),
         ('hw_devices.cpp', ['void initToFReset()', 'void resetToF()', 'void initToF()',
                             'void initMPR121()', 'void initHwDevices()', 'void updateAir()']),
-        ('hw_check.cpp', ['void checkToF()', 'void check3116()', 'void checkMPR121()',
-                          'void checkHardwareState()']),
+        ('hw_check.cpp', ['static void startupWait(', 'bool hardwareConfigMismatch()', 'void checkHardwareState()']),
     ):
         for signature in signatures:
             piece, line = integration.extract_function(sources[name], signature)
@@ -244,7 +314,7 @@ def main():
     if compiled.returncode:
         raise SystemExit(compiled.stdout + compiled.stderr)
     results = []
-    for case in range(17):
+    for case in range(27):
         result = subprocess.run([str(executable), f'--case={case}'], capture_output=True, text=True, timeout=10)
         count = re.search(r'PASS checks=(\d+)', result.stdout)
         passed = result.returncode == 0 and count is not None
@@ -256,8 +326,8 @@ def main():
               'results': results, 'compile_command': command}
     (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     total = sum(r['passed'] for r in results)
-    print(f'Boot recovery: {total}/17 scenarios, {sum(r["checks"] for r in results)} checks')
-    return 0 if total == 17 else 1
+    print(f'Boot recovery: {total}/27 scenarios, {sum(r["checks"] for r in results)} checks')
+    return 0 if total == 27 else 1
 
 
 if __name__ == '__main__':

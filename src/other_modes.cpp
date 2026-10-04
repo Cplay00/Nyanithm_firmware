@@ -21,7 +21,8 @@ void start_4kMode() {
         updateInputState();
         updateTouchData4k();
         if (g_lampCount == 16) {
-            RGB_LED.fill(0x08, 0x08, 0x08);
+            RGB_LED.fill(0, 0, 0);
+            RGB_LED.fill(0x08, 0x08, 0x08, 0, 16);
             RGB_LED.setColor(3, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
             RGB_LED.setColor(7, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);
             RGB_LED.setColor(11, ControllerConfig.lightLimit, 0, ControllerConfig.lightLimit);

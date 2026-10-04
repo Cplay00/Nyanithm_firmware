@@ -1,4 +1,5 @@
-﻿/**
+#include <cstring>
+/**
  * Modified from pololu/vl53l0x-arduino
  * 
  * see license below
@@ -590,8 +591,8 @@ void VL53L0X::writeReg32Bit(uint8_t reg, uint32_t value) {
 
 // Read an 8-bit register
 uint8_t VL53L0X::readReg(uint8_t reg) {
-    uint8_t value;
-    if (i2c_write_read(port, address, &reg, 1, &value, 1) < 0) {
+    uint8_t value = 0;
+    if (i2c_write_read(port, address, &reg, 1, &value, 1) != 1) {
         return 0;  // I2C error: return 0 (filtered by range validation in updateAir)
     }
     return value;
@@ -600,7 +601,7 @@ uint8_t VL53L0X::readReg(uint8_t reg) {
 // Read a 16-bit register
 uint16_t VL53L0X::readReg16Bit(uint8_t reg) {
     uint8_t values[2];
-    if (i2c_write_read(port, address, &reg, 1, values, 2) < 0) {
+    if (i2c_write_read(port, address, &reg, 1, values, 2) != 2) {
         return 8190;  // I2C error sentinel (filtered by range validation in updateAir)
     }
     return (values[0] << 8) | values[1];
@@ -609,18 +610,22 @@ uint16_t VL53L0X::readReg16Bit(uint8_t reg) {
 // Read a 32-bit register
 uint32_t VL53L0X::readReg32Bit(uint8_t reg) {
     uint8_t values[4];
-    if (i2c_write_read(port, address, &reg, 1, values, 4) < 0) {
+    if (i2c_write_read(port, address, &reg, 1, values, 4) != 4) {
         return 0;  // I2C error
     }
-    return (values[0] << 24) | (values[1] << 16) | (values[2] << 8) | values[3];
+    return (uint32_t(values[0]) << 24) | (uint32_t(values[1]) << 16) |
+           (uint32_t(values[2]) << 8) | values[3];
 }
 
 void VL53L0X::writeMulti(uint8_t reg, uint8_t* src, uint8_t count) {
-    i2c_write(port, address, &reg, 1, false);
-    i2c_write(port, address, src, count, false);
+    // ST's register index and payload belong in the same write transaction.
+    uint8_t data[256];
+    data[0] = reg;
+    memcpy(data + 1, src, count);
+    i2c_write(port, address, data, size_t(count) + 1, false);
 }
 void VL53L0X::readMulti(uint8_t reg, uint8_t* dst, uint8_t count) {
-    i2c_write_read(port, address, &reg, 1, dst, count);
+    if (i2c_write_read(port, address, &reg, 1, dst, count) != count) memset(dst, 0, count);
 }
 
 // Set the return signal rate limit check value in units of MCPS (mega counts
