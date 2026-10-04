@@ -1,0 +1,39 @@
+{
+  "operation": "repair",
+  "completed": true,
+  "new_MBR_NVM_writes": false,
+  "chips": {
+    "0x5a": {
+      "sha256": "f6aa16894084ec2a0bab9a15b2aefbdb8497611ed14147dd94f4c5274d0d1833",
+      "stable_configuration_reads": true,
+      "crc_valid": null
+    },
+    "0x5b": {
+      "sha256": "6f50176bae3ae29f644b50176d1eb50f63c7602d10796658c22ec3e71b2a3e4f",
+      "stable_configuration_reads": true,
+      "crc_valid": null
+    },
+    "0x5c": {
+      "sha256": "f9eea165f5e74ecacb165366e766e9c931c88538f6e33d5ceac834ef8a335ccb",
+      "stable_configuration_reads": true,
+      "crc_valid": null
+    }
+  },
+  "version": "FW:1.6.6-beta15-bootfix API:0x10 HW:v1 Built:Oct  5 2026 02:20:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta15-bootfix;hw_v1;BID=round90s-universal",
+  "serial": "50443405C0B5A81C",
+  "port": "COM1",
+  "probe": "bc0700040501",
+  "physical_family": "MPR121",
+  "entry": "",
+  "config_trailer": "read...\nusing config in page 6",
+  "cfg0_before": 1,
+  "configuration_sha256": "af26d4f789968d5f725599206c0caa3bbe82724b1903339ce4859f7b1dec5760",
+  "configuration_hex": "880201010000000d0c119f013c00b1ffdaffd0ffefff0000ff0c000000000000000000000000000000000f0f00000000000f000f0000000000000000000000000000000000000000000000000000000000000000000000000000c800000000000000000000000000000000000000000000000000000000000000000000000057",
+  "selection_mismatch": false,
+  "changed_offsets": [],
+  "target_sha256": "af26d4f789968d5f725599206c0caa3bbe82724b1903339ce4859f7b1dec5760",
+  "saved_equal": true,
+  "command_log": "b4c6c6c6c6c6c6b4ce",
+  "ordinary_reboot_sent": true,
+  "serial_closed": true
+}

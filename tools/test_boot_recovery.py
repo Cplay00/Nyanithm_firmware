@@ -149,7 +149,7 @@ extern "C" void bootRecoveryEntry() {
         while (command[++i] >= '0' && command[i] <= '9') number = number * 10 + command[i] - '0';
         break;
     }
-    CHECK(number < 13);
+    CHECK(number < 17);
     ControllerConfig.hwVer = 1; ControllerConfig.cfg0 = CFG0_BIT_MBR3116;
     ControllerConfig.th_touch = 6; ControllerConfig.th_release = 4;
     ControllerConfig.airMin = 200; ControllerConfig.airMax = 500;
@@ -165,6 +165,10 @@ extern "C" void bootRecoveryEntry() {
     if (number == 10) { mbrPresent = 0; }
     if (number == 11) { ControllerConfig.cfg0 = 0; calibrationDuration = 750; }
     if (number == 12) { presentMask = 0; }
+    if (number == 13) { ControllerConfig.hwVer = 2; presentMask = 31; mprPresent = 0; } // 32-inch MBR
+    if (number == 14) { ControllerConfig.cfg0 = 0; mbrPresent = 0; } // 27-inch MPR
+    if (number == 15) { ControllerConfig.hwVer = 2; ControllerConfig.cfg0 = 0; presentMask = 31; mprPresent = 0; } // wrong MPR selection on 32-inch MBR
+    if (number == 16) { mbrPresent = 0; } // wrong MBR selection on 27-inch MPR
     initHwDevices();
     checkHardwareState();
     CHECK(wdtDelay == 2000 && maxFeedGap < 2000);
@@ -177,10 +181,12 @@ extern "C" void bootRecoveryEntry() {
     if (number == 5) CHECK(useMuxScan && g_tofReadyMask == 15 && resets == 2);
     if (number == 0 || number == 8) CHECK(!useMuxScan && g_tofReadyMask == 15);
     if (number == 1 || number == 9) CHECK(!useMuxScan && g_tofReadyMask == 31);
+    if (number == 13 || number == 15) CHECK(!useMuxScan && g_tofReadyMask == 31);
+    if (number == 14 || number == 16) CHECK(!useMuxScan && g_tofReadyMask == 15);
 #endif
     if (number == 3) CHECK(errorCycles == 2);
-    if (number == 2 || number == 4 || number == 6 || number == 10 || number == 12) CHECK(warningCycles == 2);
-    if (number == 0 || number == 1 || number == 5 || number == 7 || number == 8 || number == 9 || number == 11)
+    if (number == 2 || number == 4 || number == 6 || number == 10 || number == 12 || number == 15 || number == 16) CHECK(warningCycles == 2);
+    if (number == 0 || number == 1 || number == 5 || number == 7 || number == 8 || number == 9 || number == 11 || number == 13 || number == 14)
         CHECK(warningCycles == 0 && errorCycles == 0);
     // Main-loop reachability and uninitialized-channel exclusion, beyond multiple WDT periods.
     for (unsigned frame = 0; frame < 1000; ++frame) {
@@ -238,7 +244,7 @@ def main():
     if compiled.returncode:
         raise SystemExit(compiled.stdout + compiled.stderr)
     results = []
-    for case in range(13):
+    for case in range(17):
         result = subprocess.run([str(executable), f'--case={case}'], capture_output=True, text=True, timeout=10)
         count = re.search(r'PASS checks=(\d+)', result.stdout)
         passed = result.returncode == 0 and count is not None
@@ -250,8 +256,8 @@ def main():
               'results': results, 'compile_command': command}
     (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     total = sum(r['passed'] for r in results)
-    print(f'Boot recovery: {total}/13 scenarios, {sum(r["checks"] for r in results)} checks')
-    return 0 if total == 13 else 1
+    print(f'Boot recovery: {total}/17 scenarios, {sum(r["checks"] for r in results)} checks')
+    return 0 if total == 17 else 1
 
 
 if __name__ == '__main__':

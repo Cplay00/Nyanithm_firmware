@@ -1,0 +1,195 @@
+{
+  "kind": "exact startup/check/air C++ with fake peripherals and watchdog",
+  "source_root": "..\\_dev_tools\\round90s_universal_source",
+  "functions": {
+    "void warn(": {
+      "file": "error_state.cpp",
+      "line": 13,
+      "sha256": "cfb38ac74e80fb7b5a1ed5c8ce6bd09f49b3d7219b9d1d77a30c32e7064869e0"
+    },
+    "void error(": {
+      "file": "error_state.cpp",
+      "line": 33,
+      "sha256": "dff6c83115c11e2a786925bca3035e0a5a03c3430127abac844f7fe061aa7f6b"
+    },
+    "void initToFReset()": {
+      "file": "hw_devices.cpp",
+      "line": 102,
+      "sha256": "6de03d332e2d16cbcbf46f624c280a2455bd685117ad358dc6bd15e022daebe0"
+    },
+    "void resetToF()": {
+      "file": "hw_devices.cpp",
+      "line": 109,
+      "sha256": "2bc535610830b79e27338c4acbfec8475c67f279a59f0080d2db61e5e8772d4a"
+    },
+    "void initToF()": {
+      "file": "hw_devices.cpp",
+      "line": 115,
+      "sha256": "d11f38bc67a2ffaaa5688244d5218df84fd38da375fe1ef95e63275e409837b8"
+    },
+    "void initMPR121()": {
+      "file": "hw_devices.cpp",
+      "line": 229,
+      "sha256": "c15e5fecf669a6d705b068473251802336a2196428c3ad00705a21373d3f5043"
+    },
+    "void initHwDevices()": {
+      "file": "hw_devices.cpp",
+      "line": 360,
+      "sha256": "37964734f774df7c1f101e2a50eab0e9afc8d50c5e3c022fb209b0616a9e1a27"
+    },
+    "void updateAir()": {
+      "file": "hw_devices.cpp",
+      "line": 1609,
+      "sha256": "a5cc47352f7d0bbb02209bf97cde658301a4be910066d3fc9a44ceb0cabba265"
+    },
+    "void checkToF()": {
+      "file": "hw_check.cpp",
+      "line": 19,
+      "sha256": "2dc040db9ebfdaa3a3242a83b3fd0dcec7607367c4c2e7671c28f979880d6b2f"
+    },
+    "void check3116()": {
+      "file": "hw_check.cpp",
+      "line": 54,
+      "sha256": "6f92b94aa93d0465515f4a5b28a21b67d5306442f519a9b7322cc88979a175f5"
+    },
+    "void checkMPR121()": {
+      "file": "hw_check.cpp",
+      "line": 66,
+      "sha256": "9503387052247443e6b8befe49e74951c957c7c212dc8c5cb144248a4fa7de38"
+    },
+    "void checkHardwareState()": {
+      "file": "hw_check.cpp",
+      "line": 77,
+      "sha256": "2329c3a980548c05b556c36d1123879cb779540ba2500887faaf375da3edf359"
+    }
+  },
+  "results": [
+    {
+      "case": 0,
+      "passed": true,
+      "checks": 13062,
+      "output": "PASS checks=13062\n"
+    },
+    {
+      "case": 1,
+      "passed": true,
+      "checks": 16072,
+      "output": "PASS checks=16072\n"
+    },
+    {
+      "case": 2,
+      "passed": true,
+      "checks": 21110,
+      "output": "PASS checks=21110\n"
+    },
+    {
+      "case": 3,
+      "passed": true,
+      "checks": 1035,
+      "output": "PASS checks=1035\n"
+    },
+    {
+      "case": 4,
+      "passed": true,
+      "checks": 16089,
+      "output": "PASS checks=16089\n"
+    },
+    {
+      "case": 5,
+      "passed": true,
+      "checks": 21096,
+      "output": "PASS checks=21096\n"
+    },
+    {
+      "case": 6,
+      "passed": true,
+      "checks": 13114,
+      "output": "PASS checks=13114\n"
+    },
+    {
+      "case": 7,
+      "passed": true,
+      "checks": 1016,
+      "output": "PASS checks=1016\n"
+    },
+    {
+      "case": 8,
+      "passed": true,
+      "checks": 13061,
+      "output": "PASS checks=13061\n"
+    },
+    {
+      "case": 9,
+      "passed": true,
+      "checks": 16071,
+      "output": "PASS checks=16071\n"
+    },
+    {
+      "case": 10,
+      "passed": true,
+      "checks": 13065,
+      "output": "PASS checks=13065\n"
+    },
+    {
+      "case": 11,
+      "passed": true,
+      "checks": 13110,
+      "output": "PASS checks=13110\n"
+    },
+    {
+      "case": 12,
+      "passed": true,
+      "checks": 1055,
+      "output": "PASS checks=1055\n"
+    },
+    {
+      "case": 13,
+      "passed": true,
+      "checks": 16072,
+      "output": "PASS checks=16072\n"
+    },
+    {
+      "case": 14,
+      "passed": true,
+      "checks": 13111,
+      "output": "PASS checks=13111\n"
+    },
+    {
+      "case": 15,
+      "passed": true,
+      "checks": 16125,
+      "output": "PASS checks=16125\n"
+    },
+    {
+      "case": 16,
+      "passed": true,
+      "checks": 13066,
+      "output": "PASS checks=13066\n"
+    }
+  ],
+  "compile_command": [
+    "C:\\Program Files\\LLVM\\bin\\clang++.exe",
+    "-std=c++11",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-unused-function",
+    "-Wno-unused-variable",
+    "-Wno-unused-but-set-variable",
+    "-Wno-missing-braces",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fuse-ld=lld",
+    "-nostdlib",
+    "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\share",
+    "-ID:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\include\\software",
+    "-ID:/pico-sdk/src/common/pico_base_headers/include",
+    "..\\_dev_tools\\round90s_universal_boot_host\\boot_recovery.cpp",
+    "-Wl,/entry:bootRecoveryEntry",
+    "-Wl,/subsystem:console",
+    "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+    "-o",
+    "..\\_dev_tools\\round90s_universal_boot_host\\boot_recovery.exe"
+  ]
+}

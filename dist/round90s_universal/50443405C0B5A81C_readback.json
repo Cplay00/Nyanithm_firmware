@@ -1,0 +1,44 @@
+{
+  "operation": "readback",
+  "completed": true,
+  "new_MBR_NVM_writes": false,
+  "chips": {
+    "0x5a": {
+      "sha256": "1afbd34466f018c1cc593f07760ec67ac389e54148f0d5e71a4afc938018c763",
+      "config1": 16,
+      "config2": 40,
+      "debounce": 17,
+      "ecr": 204
+    },
+    "0x5b": {
+      "sha256": "f5f20982890f531ae8e9ed256a148ba916d9ea27a94f6417de896d7df266e4e5",
+      "config1": 16,
+      "config2": 40,
+      "debounce": 17,
+      "ecr": 204
+    },
+    "0x5c": {
+      "sha256": "dcdc91fd09935f05c314956aeffd6953c3e7210f8ca660c03548be0873e51353",
+      "config1": 16,
+      "config2": 40,
+      "debounce": 17,
+      "ecr": 204
+    }
+  },
+  "version": "FW:1.6.6-beta15-bootfix API:0x10 HW:v1 Built:Oct  5 2026 02:20:00 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.6-beta15-bootfix;hw_v1;BID=round90s-universal",
+  "serial": "50443405C0B5A81C",
+  "port": "COM1",
+  "probe": "bc0700040501",
+  "physical_family": "MPR121",
+  "entry": "",
+  "config_trailer": "read...\nusing config in page 6",
+  "cfg0_before": 1,
+  "configuration_sha256": "af26d4f789968d5f725599206c0caa3bbe82724b1903339ce4859f7b1dec5760",
+  "configuration_hex": "880201010000000d0c119f013c00b1ffdaffd0ffefff0000ff0c000000000000000000000000000000000f0f00000000000f000f0000000000000000000000000000000000000000000000000000000000000000000000000000c800000000000000000000000000000000000000000000000000000000000000000000000057",
+  "configuration_equal": true,
+  "status": "get status...\nNyanithm build Oct  5 2026 02:20:00\nhwVer: 1\noriginal ToF distance (or error code):\n    tof0 = 1152 tof1 = 1136 tof2 = 1158  tof3 = 1119\nusing config in page 6",
+  "measured_probe": "bc0700040101",
+  "command_log": "b4c6c6c6b8bcce",
+  "ordinary_reboot_sent": true,
+  "serial_closed": true
+}

@@ -1,0 +1,9 @@
+{
+  "full_flash_dump_available": false,
+  "same_image_authorized_for_both": true,
+  "copy_returned": true,
+  "time": "2026-10-05T02:25:00.2659439+08:00",
+  "sha256": "A87037D8F68AEA9212395EA1D00C6A5AD5BA0C10A3170BF7FB568EBA530DF8FD",
+  "target": "E:/",
+  "info": "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n"
+}

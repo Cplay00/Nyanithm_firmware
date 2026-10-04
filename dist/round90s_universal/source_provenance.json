@@ -1,0 +1,12 @@
+{
+  "branch": "round90s_universal_bootfix",
+  "source_commit": "514a2b9c90dc78dd7e9accf09190fa2350273cab",
+  "firmware_source_commit": "f7d7c7c31f657c9e7ccf1a5893b6c7a2c3c5ab29",
+  "archive": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\_dev_archive\\round90s_universal_before_20261005\\universal_committed_source.zip",
+  "archive_sha256": "2fdc8f5d3e392e7a04102a09d817060ffe4456e77ab194e9539738bd68f475e8",
+  "archive_crc_verified": true,
+  "four_compiled_source_files_equal_archive": true,
+  "same_uf2_hash_installed_on_both": "a87037d8f68aea9212395ea1d00c6a5ad5ba0c10a3170bf7fb568eba530df8fd",
+  "review": "firmware and host read-only review passed",
+  "no_remote_push": true
+}
