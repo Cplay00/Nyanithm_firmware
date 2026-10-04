@@ -39,6 +39,8 @@ extern PCA954X mux0;
 
 extern WS2812 RGB_LED;
 extern uint8_t g_lampCount;
+extern bool usingIR;
+extern uint8_t g_tofReadyMask;
 
 void initHwDevices();
 void updateInputState();

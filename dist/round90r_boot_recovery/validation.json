@@ -1,0 +1,70 @@
+{
+  "recovery_165": {
+    "bytes": 175104,
+    "blocks": 342,
+    "sha256": "28b1a95443e4310cad95266287dce47779bb00c29c65b79259a498b532f52e0f",
+    "family": "0xe48bff56",
+    "start": "0x10000000",
+    "end_exclusive": "0x10015600",
+    "config_sector_excluded": true,
+    "identity": "NYANFW1;1.6.5-bootfix;hw_v1;BID=round90r-1.6.5",
+    "file": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\dist\\round90r_boot_recovery\\Nyanithm_27_MBR_1.6.5_bootfix_round90r.uf2",
+    "touch_pipeline_unchanged": {
+      "void updateTouch_v1()": "7c9a67a5d07b23579e3dfcfa3f6934c46f841232505eb7183ea0487070ddc6b3",
+      "void updateTouch_v2()": "ed21e3d32bb3b70ea63d1a13a0dffdee0c87bf93e0071b7df48aa025a008088a"
+    },
+    "shared_wire_layout_unchanged": true,
+    "baseline_commit": "415e0957f303ed69e11715bae25fd634abe0c229",
+    "changed_paths": [
+      "include/device/hw_devices.h",
+      "include/share/nyanithm_shared.h",
+      "src/hw_check.cpp",
+      "src/hw_devices.cpp"
+    ]
+  },
+  "recovery_beta1": {
+    "bytes": 187904,
+    "blocks": 367,
+    "sha256": "a47c3a43aa5443b323b6bf2d435d1ae88e8dc7ea087af120ddc43243195c9c01",
+    "family": "0xe48bff56",
+    "start": "0x10000000",
+    "end_exclusive": "0x10016f00",
+    "config_sector_excluded": true,
+    "identity": "NYANFW1;1.6.6-beta1-bootfix;hw_v1;BID=round90r-recovery",
+    "file": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\dist\\round90r_boot_recovery\\Nyanithm_beta1_bootfix_round90r.uf2",
+    "touch_pipeline_unchanged": {
+      "void updateTouch_v1()": "fa7bfea5d825d217ba92b36807bb1c2ec5282269514e2abb887936ed643f20bb",
+      "void updateTouch_v2()": "19d67e17fa2b55d61ac7b37f2ae5b27bf19872c8fb91f36aff313c20f9c368d3"
+    },
+    "shared_wire_layout_unchanged": true,
+    "baseline_commit": "d2cafa05f741c43e9a7df6cc38b24dcd7a2ee416",
+    "changed_paths": [
+      "include/device/hw_devices.h",
+      "include/share/nyanithm_shared.h",
+      "src/hw_check.cpp",
+      "src/hw_devices.cpp"
+    ]
+  },
+  "maintenance_beta14": {
+    "bytes": 202752,
+    "blocks": 396,
+    "sha256": "3f8b61c051a0314d5177bcb265332c64f2fd9905eb6143f77984be13572d1c19",
+    "family": "0xe48bff56",
+    "start": "0x10000000",
+    "end_exclusive": "0x10018c00",
+    "config_sector_excluded": true,
+    "identity": "NYANFW1;1.6.6-beta14;hw_v1;BID=round90r",
+    "file": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\dist\\round90r_boot_recovery\\Nyanithm_beta14_round90r_not_deployed.uf2",
+    "touch_pipeline_unchanged": {
+      "void updateTouch_v1()": "97d1fa66e0183155f283d1c93e11c3e6d327b3cd4544a7e11c7379ffbf6be1e8",
+      "void updateTouch_v2()": "80b5aa035b4eee9571c3ec3126ea1f70227752915cd2fbac6d92a4a847f9243f"
+    },
+    "baseline_commit": "2dcfc96a4ee704357cf6d87b2281dc77d6ea0c71",
+    "changed_paths": [
+      "include/device/hw_devices.h",
+      "include/share/nyanithm_shared.h",
+      "src/hw_check.cpp",
+      "src/hw_devices.cpp"
+    ]
+  }
+}

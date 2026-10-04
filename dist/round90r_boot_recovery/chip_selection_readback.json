@@ -1,0 +1,21 @@
+{
+  "completed": true,
+  "chip_tables_equal": {
+    "0x40": true,
+    "0x41": true,
+    "0x42": true
+  },
+  "persistent_writes": false,
+  "version": "FW:1.6.5-bootfix API:0x10 HW:v1 Built:Oct  5 2026 00:44:45 SDK:2.2.0 VAR:hw_v1 NYANFW1;1.6.5-bootfix;hw_v1;BID=round90r-1.6.5",
+  "entry": "",
+  "trailer": "read...\nusing config in page 3",
+  "configuration_sha256": "2ad25a3bfdae106dfa6cd85a96888a4b6d3d523909a7f1252cc494bf1299b1e0",
+  "configuration_equal": true,
+  "hw_ver": 1,
+  "cfg0": 3,
+  "status": "get status...\nNyanithm build Oct  5 2026 00:44:45\nhwVer: 1\noriginal ToF distance (or error code):\n    tof0 = 75 tof1 = 56 tof2 = 76  tof3 = 20\nusing config in page 3",
+  "config_mode_measured_probe": "bc000e040101",
+  "command_log": "b4c6c6c6b8bcce",
+  "ordinary_reboot_sent": true,
+  "serial_closed": true
+}

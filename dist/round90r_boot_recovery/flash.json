@@ -1,0 +1,11 @@
+{
+  "time": "2026-10-05T00:51:08.8043506+08:00",
+  "firmware": "D:\\Opencode,OCCM\\Items\\Nyanithm_Firmware\\Nyanithm_firmware_hw_v1\\dist\\round90r_boot_recovery\\Nyanithm_27_MBR_1.6.5_bootfix_round90r.uf2",
+  "sha256": "28B1A95443E4310CAD95266287DCE47779BB00C29C65B79259A498B532F52E0F",
+  "target": "E:\\",
+  "bootsel_id": "E0C9125B0D9B",
+  "user_confirmed": true,
+  "flash_dump_available": false,
+  "config_sector_excluded": true,
+  "copy_returned": true
+}
