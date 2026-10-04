@@ -1,0 +1,29 @@
+{
+  "schema": "touch-signal-margin-v1",
+  "origin": "user-observation",
+  "user_report_20261005": {
+    "comparison": "同一套件中 MBR 明显触发，MPR 几乎不触发",
+    "MPR121_hover_pose": "手掌，距表面估计3mm",
+    "reported_peak_diff_range": [12, 16],
+    "reported_scale": "未确认是原生差值还是页面报送值",
+    "physical_contact_timestamps": false,
+    "current_connected_device": "未核验"
+  },
+  "strata": [
+    {
+      "chip": "MPR121",
+      "board_id": null,
+      "firmware": null,
+      "config_sha256": null,
+      "lane": null,
+      "scale": null,
+      "quality": null,
+      "idle_max": null,
+      "hover_max": null,
+      "contact_onset_min": null,
+      "contact_hold_min": null,
+      "released_max": null,
+      "drift_margin_counts": null
+    }
+  ]
+}
