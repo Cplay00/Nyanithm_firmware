@@ -2,18 +2,12 @@
 
 Nyanithm 触摸控制器固件 -- hw_v1 通用版本
 
-当前正式版：**1.6.6**（V1 系列通用固件，`round90y-v1-release`）。USB 产品与 CDC 接口名称为 `Nyanithm Controller V1`。升级说明、硬件配置提示和审修资料保存在仅本地的 `docs/`，不纳入版本控制。
-
-构建与测试工具 `tools/`、维护指引 `AGENTS.md` 以及 `favicon.*` 图标也仅保留在本地，不纳入版本控制。
-
-2026-10-05 起，唯一维护分支为 `hw_v1`，对应远端 `hw_v1_compatible`，主工作树为 `Nyanithm_firmware_hw_v1/`。原主树与通用版合并，保留已部署 beta16 的固件实现、主树最新控制面板及两侧资料。通用版临时分支在验证后移除。构建使用本目录 `tools/build_firmware.ps1 -Variant hw_v1`。合并记录及历史验证资料保留在本地 `docs/`。
-
 ## Contributors
 
-| 角色 | 贡献者 | GitHub |
-|------|--------|--------|
-| 原开发者 | Catium2006 | [https://github.com/Catium2006](https://github.com/Catium2006) |
-| 再维护者 | Cplay00 | [https://github.com/Cplay00](https://github.com/Cplay00) |
+| 角色 | 贡献者 |
+|------|--------|
+| 原开发者 | [Catium2006](https://github.com/Catium2006) |
+| 再维护者 | [Cplay00](https://github.com/Cplay00) |
 
 本固件由 [Catium2006](https://github.com/Catium2006) 原创开发，[Cplay00](https://github.com/Cplay00) 负责 hw_v1 硬件版本的兼容性维护。
 
