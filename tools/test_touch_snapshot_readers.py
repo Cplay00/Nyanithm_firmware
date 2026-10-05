@@ -213,7 +213,10 @@ void beginCase() {
     inputState = {};
     prevInputState = {};
     prevAirState = 0;
-    latencyFrameMs = 0;
+    inputDelayHead = inputDelayCount = 0;
+    inputDelayMs = 0xff;
+    inputDelayFormat = 0xff;
+    lastObservedInput = {};
     g_tele = {};
     g_mbrDistanceReadFailures = 0;
     g_loopMinUs = g_loopMaxUs = g_loopSumUs = g_loopCount = 0;
@@ -535,6 +538,66 @@ int main() {
     assert(cdcBytes.empty() && g_tele.cdcTxBytes == 0 && clockCalls < 10);
     pass("C8 full TX FIFO returns without blocking HID");
 
+    for (unsigned delay : {1u, 15u, 255u}) {
+        beginCase(); ControllerConfig.cfg3 = delay;
+        uint8_t slider[32]{}, pressure[32]{};
+        clockUs = 100000; acceptInputFrame(slider, pressure, 0);
+        slider[0] = 128;
+        clockUs = 200000; acceptInputFrame(slider, pressure, 1);
+        assert(inputState.slider[0] == 0 && inputState.air == 0);
+        unsigned bounded = std::min(delay, 15u);
+        clockUs = (200 + bounded - 1) * 1000; acceptInputFrame(slider, pressure, 1);
+        assert(inputState.slider[0] == 0);
+        clockUs = (200 + bounded) * 1000; acceptInputFrame(slider, pressure, 1);
+        assert(inputState.slider[0] == 128 && inputState.air == 1);
+        pass("cfg3 delays first edge after idle, including 15ms clamp");
+    }
+    beginCase(); ControllerConfig.cfg3 = 15;
+    uint8_t slider[32]{}, pressure[32]{};
+    clockUs = 100000; acceptInputFrame(slider, pressure, 0);
+    slider[0] = 128; clockUs = 200000; acceptInputFrame(slider, pressure, 1);
+    slider[0] = 0; clockUs = 201000; acceptInputFrame(slider, pressure, 0);
+    assert(inputState.slider[0] == 0);
+    clockUs = 230000; acceptInputFrame(slider, pressure, 0);
+    assert(inputState.slider[0] == 128 && inputState.air == 1);
+    clockUs = 231000; acceptInputFrame(slider, pressure, 0);
+    assert(inputState.slider[0] == 0 && inputState.air == 0);
+    pass("delayed short pulse serves ON and OFF in order even when both matured");
+
+    beginCase(); ControllerConfig.cfg3 = 15;
+    slider[0] = 128;
+    clockUs = uint64_t(UINT32_MAX - 7) * 1000; acceptInputFrame(slider, pressure, 1);
+    clockUs = uint64_t(UINT32_MAX) * 1000; acceptInputFrame(slider, pressure, 1);
+    assert(inputState.slider[0] == 0);
+    clockUs = uint64_t(UINT32_MAX) * 1000 + 8000; acceptInputFrame(slider, pressure, 1);
+    assert(inputState.slider[0] == 128);
+    pass("delayed edge matures correctly across unsigned millisecond wrap");
+
+    beginCase(); ControllerConfig.cfg3 = 15; rawReportLevel = 2; pressure[0] = 99;
+    clockUs = 100000; acceptInputFrame(slider, pressure, 0);
+    assert(inputDelayCount == 1);
+    rawReportLevel = 0; slider[0] = 0;
+    clockUs = 120000; acceptInputFrame(slider, pressure, 0);
+    assert(inputState.slider[0] == 0 && inputDelayCount == 0);
+    pass("RAW format change cannot replay old pressure as binary touch");
+
+    beginCase(); ControllerConfig.cfg3 = 15;
+    for (unsigned i = 0; i < 80; ++i) {
+        clockCalls = 0; slider[0] = i & 1 ? 128 : 0;
+        clockUs = 100000; acceptInputFrame(slider, pressure, 0);
+        assert(inputDelayCount <= INPUT_DELAY_CAPACITY && inputState.slider[0] == 0);
+    }
+    clockCalls = 0; clockUs = 115000; acceptInputFrame(slider, pressure, 0);
+    assert(inputState.slider[0] == 128);
+    pass("queue saturation stays bounded and never bypasses minimum delay");
+
+    beginCase(); ControllerConfig.cfg3 = 15;
+    readGetInput();
+    assert(cdcBytes.size() == 33 && cdcBytes[32] == 0 && prevAirState == 0);
+    ControllerConfig.cfg3 = 0; cdcBytes.clear(); readGetInput();
+    assert(cdcBytes[32] == publishedTouchState.air && prevAirState == cdcBytes[32]);
+    pass("delayed air telemetry matches served frame; cfg3=0 restores immediate state");
+
     std::cout << passed << '/' << passed << " production-reader scenarios passed\n";
 }
 """
@@ -572,6 +635,7 @@ def main():
         "void publishTouchState() {" + extract_body(hardware, "static void publishTouchState()") + "}\n",
         globals_code,
         "bool rawModeActive() {" + extract_body(source, "bool rawModeActive()") + "}\n",
+        "static void acceptInputFrame(const uint8_t* slider, const uint8_t* pressure, uint8_t air) {" + extract_body(source, "static void acceptInputFrame(") + "}\n",
         "void hid_task_chuni_input() {" + extract_body(source, "void hid_task_chuni_input()") + "}\n",
         "void readGetInput() {" + extract_body(source, "if (cmd == CMD_GET_INPUT)") + "}\n",
         "void readDebugChain() {" + extract_body(source, "if (cmd == CMD_DEBUG_CHAIN)") + "}\n",

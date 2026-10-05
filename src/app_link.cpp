@@ -77,38 +77,96 @@ void getStatus() {
 // watchdog and the board rebooted under the host. Same mechanism as
 // setConfig(): tud_cdc_read() plus an explicit tud_task() pump and
 // watchdog_update() every iteration, bounded by a total deadline.
-static bool readCdcPayload(uint8_t* buf, int len, uint32_t timeout_ms) {
+// Accessed only by the current TinyUSB owner; Core0 takes over after Core1
+// acknowledges parking. A timed-out payload must retain its stream boundary.
+static uint32_t configPayloadRemaining = 0, configSessionEpoch = 0;
+static bool configPayloadReading = false, configPayloadQuarantined = false;
+static bool configSessionDtr = false;
+
+void resetConfigCdcSession() {
+    ++configSessionEpoch;
+    configSessionDtr = false;
+    configPayloadRemaining = 0;
+    configPayloadQuarantined = false;
+    tud_cdc_read_flush();
+}
+
+void configCdcSessionStateChanged(bool dtr) {
+    if (dtr == configSessionDtr) return;
+    configSessionDtr = dtr;
+    ++configSessionEpoch;
+    if (configPayloadReading || configPayloadRemaining || configPayloadQuarantined) {
+        configPayloadRemaining = 0;
+        configPayloadQuarantined = !dtr;
+        tud_cdc_read_flush();
+    }
+}
+
+static bool discardConfigPayload() {
+    if (!tud_mounted()) {
+        configPayloadRemaining = 0;
+        configPayloadQuarantined = false;
+        tud_cdc_read_flush();
+        return true;
+    }
+    if (configPayloadQuarantined) {
+        tud_cdc_read_flush();
+        return true;
+    }
+    if (!configPayloadRemaining) return false;
+    uint8_t discard[32];
+    const uint32_t length = configPayloadRemaining < sizeof(discard)
+        ? configPayloadRemaining : sizeof(discard);
+    configPayloadRemaining -= tud_cdc_read(discard, length);
+    return true;
+}
+
+bool readCdcPayload(uint8_t* buf, int len, uint32_t timeout_ms) {
     uint32_t totalStart = to_ms_since_boot(get_absolute_time());
+    const uint32_t session = configSessionEpoch;
     int count = 0;
+    configPayloadReading = true;
     while (count < len) {
         tud_task();
         watchdog_update();
-        if (tud_cdc_available()) {
-            int n = tud_cdc_read(&buf[count], (uint32_t)(len - count));
-            if (n > 0) count += n;
-        } else if (to_ms_since_boot(get_absolute_time()) - totalStart > timeout_ms) {
+        if (!tud_mounted() || session != configSessionEpoch) {
+            configPayloadReading = false;
+            flashingArmed = false;
+            return false;  // never join payloads from two host sessions
+        }
+        if (to_ms_since_boot(get_absolute_time()) - totalStart > timeout_ms) {
+            configPayloadRemaining = len - count;
+            configPayloadReading = false;
+            flashingArmed = false;
             printf("read timeout at byte %d of %d. payload aborted.\n", count, len);
             return false;
         }
+        if (tud_cdc_available()) {
+            int n = tud_cdc_read(&buf[count], (uint32_t)(len - count));
+            if (n > 0) count += n;
+        }
     }
+    configPayloadReading = false;
     return true;
 }
 
 // Shared bounded sender for binary configuration/debug replies.
 static bool writeCdcPayload(const uint8_t* data, uint32_t length) {
     uint32_t sent = 0;
+    const uint32_t session = configSessionEpoch;
     const uint32_t started = to_ms_since_boot(get_absolute_time());
-    while (sent < length && tud_cdc_connected() &&
+    while (sent < length && tud_mounted() && session == configSessionEpoch &&
            to_ms_since_boot(get_absolute_time()) - started < 250) {
         tud_task();
         watchdog_update();
+        if (!tud_mounted() || session != configSessionEpoch) break;
         sent += tud_cdc_write(data + sent, length - sent);
         tud_cdc_write_flush();
         if (sent < length) sleep_ms(1);
     }
     tud_task();
     tud_cdc_write_flush();
-    return sent == length;
+    return sent == length && tud_mounted() && session == configSessionEpoch;
 }
 
 void handleCommand() {
@@ -123,6 +181,14 @@ void handleCommand() {
     static uint16_t cfgCmdLogWr = 0;
     static uint16_t cfgCmdLogTotal = 0;
     while (true) {
+        tud_task();
+        watchdog_update();
+        if (discardConfigPayload()) {
+            updateInputState();
+            sleep_ms(1);
+            if (to_ms_since_boot(get_absolute_time()) - lastCmdMs > 60000) reboot();
+            continue;
+        }
         while (tud_cdc_available() == 0) {
             // round51: Core0 owns tud_task() in config mode -- pump the USB
             // stack while waiting so CDC RX is serviced (fixes round46c-style
@@ -187,25 +253,17 @@ void handleCommand() {
             // round78c: post-mortem dump for silent flashing outcomes. Binary:
             // [0xCD][code][rc][gap u32 LE]. Normal mode has the same handler.
             uint32_t g = flashDiagGapMs;
-            putchar(CMD_FLASH_DIAG);
-            putchar(flashDiagCode);
-            putchar(flashDiagRc);
-            putchar(g & 0xFF);
-            putchar((g >> 8) & 0xFF);
-            putchar((g >> 16) & 0xFF);
-            putchar((g >> 24) & 0xFF);
-            stdio_flush();
+            const uint8_t reply[7] = {CMD_FLASH_DIAG, flashDiagCode, flashDiagRc,
+                (uint8_t)g, (uint8_t)(g >> 8), (uint8_t)(g >> 16), (uint8_t)(g >> 24)};
+            writeCdcPayload(reply, sizeof(reply));
         } else if (cmd == CMD_DEV_DETECT) {
-            putchar(CMD_DEV_DETECT);
+            const uint8_t reply = CMD_DEV_DETECT;
+            writeCdcPayload(&reply, 1);
         } else if (cmd == CMD_CFG_READ) {
             readConfig();
-            uint8_t* ptr = (uint8_t*)&ControllerConfig;
-            for (int i = 0; i < sizeof(controller_config); i++) {
-                putchar(*ptr);
-                ptr++;
+            if (writeCdcPayload((const uint8_t*)&ControllerConfig, sizeof(ControllerConfig))) {
+                printf("read...\nusing config in page %d\n", getConfigPage());
             }
-            printf("read...\n");
-            printf("using config in page %d\n", getConfigPage());
         } else if (cmd == CMD_CFG_ERASE) {
             printf("erase...\n");
             eraseConfigSector();
@@ -343,22 +401,17 @@ void handleCommand() {
                     for (int ch = 0; ch < 5; ch++) {
                         tud_task();
                         watchdog_update();
-                        mux.setChannel(ch);
-                        if (findI2CDevice(1, 0x29)) tofCount++;
+                        if (mux.setChannel(ch) == 1 && findI2CDevice(1, 0x29)) tofCount++;
                     }
                 }
             }
             watchdog_update();
-            putchar(CMD_DETECT);
-            putchar(mprMask);
-            putchar(mbrMask);
-            putchar(tofCount);
-            putchar(flags);
-            putchar(ControllerConfig.hwVer);
+            const uint8_t reply[6] = {CMD_DETECT, mprMask, mbrMask, tofCount,
+                                      flags, ControllerConfig.hwVer};
+            writeCdcPayload(reply, sizeof(reply));
             // round63: 探测帧是纯二进制、无换行结尾。stdio_cdc 按驱动逐次
             // flush,但为稳妥,显式刷出,确保单发 0xBC(面板保存前存活性探测用
             // 0xB8 不依赖此,但任何独立发送 0xBC 的宿主都能立即收到完整帧)。
-            stdio_flush();
         } else if (cmd == CMD_CFG_KEEPALIVE) {
             // round57: 配置模式心跳。面板每 30s 发送一次,仅重置 60s 自动退出
             // 计时器(lastCmdMs 已在 getchar() 后更新),不回显任何字节,避免
@@ -424,11 +477,13 @@ void handleCommand() {
             // round46g: dump config-mode command log: [1B len][len bytes oldest->newest]
             uint16_t n = (cfgCmdLogTotal < 256) ? cfgCmdLogTotal : 256;
             if (n > 255) n = 255;
-            putchar((uint8_t)n);
+            uint8_t reply[256];
+            reply[0] = (uint8_t)n;
             uint16_t start = cfgCmdLogWr - n;
             for (uint16_t i = 0; i < n; i++) {
-                putchar(cfgCmdLog[(start + i) & 0xFF]);
+                reply[i + 1] = cfgCmdLog[(start + i) & 0xFF];
             }
+            writeCdcPayload(reply, n + 1);
         } else {
             printf("unknown command...\n");
         }

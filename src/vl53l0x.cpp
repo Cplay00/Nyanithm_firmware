@@ -74,6 +74,7 @@ void VL53L0X::setAddress(uint8_t new_addr) {
 // If io_2v8 (optional) is true or not given, the sensor is configured for 2V8
 // mode.
 bool VL53L0X::init(bool io_2v8) {
+    interrupt_clear_pending = false;
     // check model ID register (value specified in datasheet)
     if (readReg(IDENTIFICATION_MODEL_ID) != 0xEE) {
         // printf("read 0x%02x in DENTIFICATION_MODEL_ID, should be 0xee\n", readReg(IDENTIFICATION_MODEL_ID));
@@ -1026,6 +1027,17 @@ uint16_t VL53L0X::readRangeContinuousMillimeters() {
 /**
  */
 bool VL53L0X::readRangeContinuousMillimetersAsync(uint16_t* range) {
+    uint8_t clear[2] = {SYSTEM_INTERRUPT_CLEAR, 0x01};
+    if (interrupt_clear_pending) {
+        // The previous range was never acknowledged. Clear that old latch
+        // before accepting another completion; do not report it as new data.
+        if (i2c_write(port, address, clear, sizeof(clear), false) == 2) {
+            interrupt_clear_pending = false;
+            startTimeout();
+        }
+        *range = 8190;
+        return true;
+    }
     if ((readReg(RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
         if (checkTimeoutExpired()) {
             did_timeout = true;
@@ -1040,7 +1052,11 @@ bool VL53L0X::readRangeContinuousMillimetersAsync(uint16_t* range) {
     // fractional ranging is not enabled
     *range = readReg16Bit(RESULT_RANGE_STATUS + 10);
 
-    writeReg(SYSTEM_INTERRUPT_CLEAR, 0x01);
+    if (i2c_write(port, address, clear, sizeof(clear), false) != 2) {
+        interrupt_clear_pending = true;
+        *range = 8190;
+        return true;
+    }
 
     startTimeout();  // reset timeout window for next measurement cycle
     return true;

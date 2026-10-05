@@ -38,6 +38,9 @@ static bool idTimeout;
 static bool muxPresent = true, irPresent, addressFailure;
 static uint32_t forceDuration = 20, calibrationDuration = 30;
 static bool rangeCompletes = true;
+static bool mprInitializationGood = true;
+static bool checkThresholdWrites;
+static unsigned thresholdWrites;
 static uint16_t rangeValues[5] = {100,100,100,100,100};
 static const unsigned GPIO_TOF_RESET = 5, GPIO_PCA9545_RESET = 4;
 static const unsigned MPR121_AUTOCONFIG0 = 0x7b, BUTTON_PUSH = 2;
@@ -126,9 +129,19 @@ public:
 static VL53L0X tof0(0),tof1(1),tof2(2),tof3(3),tof4(4);
 class MPR121 {
 public:
+    bool ready() { return mprInitializationGood; }
     bool init(unsigned,unsigned,bool) { ++mprInitCalls; advance(10); return true; }
     void writeRegister(unsigned,unsigned) { advance(1); }
-    void setThresholdsForElectrode(unsigned,unsigned,unsigned) { advance(1); }
+    void setThresholdsForElectrode(unsigned e,unsigned touch,unsigned release) {
+        if (checkThresholdWrites) {
+            CHECK(e < 12);
+            const unsigned m = thresholdWrites / 12;
+            const bool overridden = ControllerConfig.thTouchKey[0] && m == 1 && e == 11;
+            CHECK(touch == (overridden ? 5u : 6u));
+            CHECK(release == (overridden ? 2u : 4u));
+        }
+        ++thresholdWrites; advance(1);
+    }
     void setDebounce(unsigned,unsigned) { advance(1); }
     void calibrateBaseline() { ++mprCalibrationCalls; advance(calibrationDuration); }
 };
@@ -140,9 +153,6 @@ public:
     uint8_t requestDataFromAddress(uint8_t,uint8_t,uint8_t*);
 };
 static CY8CMBR3116 MBR3116A(0x40),MBR3116B(0x41),MBR3116C(0x42),MBR3116D(0x43),MBR3116E(0x44);
-static uint8_t electrodeBaseTouchTh(unsigned,unsigned) { return 0; }
-static uint8_t electrodeBaseReleaseTh(unsigned,unsigned) { return 0; }
-static void buildLaneTable() {}
 static void initI2C() {}
 static void detectIR() { usingIR = irPresent; }
 static void initIR() { advance(2); }
@@ -189,7 +199,7 @@ extern "C" void bootRecoveryEntry() {
         while (command[++i] >= '0' && command[i] <= '9') number = number * 10 + command[i] - '0';
         break;
     }
-    CHECK(number < 27);
+    CHECK(number < 30);
     ControllerConfig.hwVer = 1; ControllerConfig.cfg0 = CFG0_BIT_MBR3116;
     ControllerConfig.th_touch = 6; ControllerConfig.th_release = 4;
     ControllerConfig.airMin = 200; ControllerConfig.airMax = 500;
@@ -216,11 +226,17 @@ extern "C" void bootRecoveryEntry() {
     if (number == 24) wakeNacks = 3;
     if (number == 25) idTimeout = true;
     if (number == 26) wakeNacks = 9; // all three discovery probes fail
+    if (number == 27) { ControllerConfig.cfg0 = 0; mprPresent = 7; mbrPresent = 0; mprInitializationGood = false; }
+    if (number >= 28) {
+        ControllerConfig.cfg0 = 0; mprPresent = 7; mbrPresent = 0; checkThresholdWrites = true;
+        if (number == 29) { ControllerConfig.thTouchKey[0] = 5; ControllerConfig.thReleaseKey[0] = 2; }
+    }
     initHwDevices();
     checkHardwareState();
     CHECK(wdtDelay == 2000 && maxFeedGap < 2000);
     const bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3;
     CHECK(mprInitCalls == (useMbr ? 0u : 3u));
+    if (number >= 28) CHECK(thresholdWrites == 36);
 #ifndef LEGACY_STARTUP
     if (number == 2) CHECK(useMuxScan && g_tofReadyMask == 15);
     if (number == 3 || number == 7 || number == 12) CHECK(g_tofReadyMask == 0);
@@ -233,7 +249,7 @@ extern "C" void bootRecoveryEntry() {
 #endif
     const bool expectedWarning = number == 2 || number == 3 || number == 4 ||
         number == 6 || number == 10 || number == 12 || number == 15 || number == 16 ||
-        number == 17 || number == 18 || number == 19 || number == 25 || number == 26;
+        number == 17 || number == 18 || number == 19 || number == 25 || number == 26 || number == 27;
     CHECK(redCycles == (expectedWarning ? 3u : 0u));
     if (expectedWarning) {
         CHECK(blackAt[0] - redAt[0] == 2000 && blackAt[1] - redAt[1] == 2000);
@@ -284,6 +300,8 @@ def main():
     sources = {name: (args.source_root / 'src' / name).read_text(encoding='utf-8')
                for name in ('hw_devices.cpp', 'hw_check.cpp', 'cy8cmbr3116.cpp')}
     pieces = []
+    lane_helpers, _ = integration.extract_block(sources['hw_devices.cpp'], 'static const uint8_t V1_LANE_M', 'void initMPR121()')
+    pieces.append(lane_helpers)
     hashes = {}
     for name, signatures in (
         ('cy8cmbr3116.cpp', ['uint8_t CY8CMBR3116::requestDataFromAddress(']),
@@ -314,7 +332,7 @@ def main():
     if compiled.returncode:
         raise SystemExit(compiled.stdout + compiled.stderr)
     results = []
-    for case in range(27):
+    for case in range(30):
         result = subprocess.run([str(executable), f'--case={case}'], capture_output=True, text=True, timeout=10)
         count = re.search(r'PASS checks=(\d+)', result.stdout)
         passed = result.returncode == 0 and count is not None
@@ -326,8 +344,8 @@ def main():
               'results': results, 'compile_command': command}
     (args.output / 'results.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     total = sum(r['passed'] for r in results)
-    print(f'Boot recovery: {total}/27 scenarios, {sum(r["checks"] for r in results)} checks')
-    return 0 if total == 27 else 1
+    print(f'Boot recovery: {total}/30 scenarios, {sum(r["checks"] for r in results)} checks')
+    return 0 if total == 30 else 1
 
 
 if __name__ == '__main__':

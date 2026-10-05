@@ -39,6 +39,7 @@
 #include <hardware/watchdog.h>
 
 #include <chuni_io.h>
+#include <app_link.h>
 #include <controller_config.h>
 #include <hw_devices.h>
 #include <mbr_history.h>
@@ -153,7 +154,20 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
 
 void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
     (void)rts;
-    if (itf == 0) cdcSessionStateChanged(dtr);
+    if (itf == 0) {
+        configCdcSessionStateChanged(dtr);
+        cdcSessionStateChanged(dtr);
+    }
+}
+
+void tud_mount_cb() {
+    resetConfigCdcSession();
+    resetCdcSession();
+}
+
+void tud_umount_cb() {
+    resetConfigCdcSession();
+    resetCdcSession();
 }
 
 // PICO_CONFIG: PICO_STDIO_USB_STDOUT_TIMEOUT_US, Number of microseconds to be blocked trying to write USB output before assuming the host has disappeared and discarding data, default=500000,

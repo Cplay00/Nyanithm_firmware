@@ -38,6 +38,9 @@
 #define USB_VID 0xCafe
 #define USB_BCD 0x0200
 
+// String indexes are shared by the device and interface descriptors.
+enum { STRID_LANGID = 0, STRID_MANUFACTURER, STRID_PRODUCT, STRID_SERIAL, STRID_HID_KBD_INTERFACE, STRID_HID_LAMP_INTERFACE, STRID_CDC_INTERFACE };
+
 //--------------------------------------------------------------------+
 // Device Descriptors
 //--------------------------------------------------------------------+
@@ -344,7 +347,7 @@ uint8_t const desc_fs_configuration[] = {
     TUD_HID_DESCRIPTOR(ITF_NUM_HID_LAMP, 5, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report_lamp), EPNUM_HID_LAMP, CFG_TUD_HID_EP_BUFSIZE, 5),
 
     // 1st CDC: Interface number, string index, EP notification address and size, EP data address (out, in) and size.
-    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_0, 0, EPNUM_CDC_0_NOTIF, 8, EPNUM_CDC_0_OUT, EPNUM_CDC_0_IN, 64),
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_0, STRID_CDC_INTERFACE, EPNUM_CDC_0_NOTIF, 8, EPNUM_CDC_0_OUT, EPNUM_CDC_0_IN, 64),
 };
 
 // Invoked when received GET CONFIGURATION DESCRIPTOR
@@ -360,18 +363,15 @@ uint8_t const* tud_descriptor_configuration_cb(uint8_t index) {
 // String Descriptors
 //--------------------------------------------------------------------+
 
-// String Descriptor Index
-enum { STRID_LANGID = 0, STRID_MANUFACTURER, STRID_PRODUCT, STRID_SERIAL, STRID_HID_KBD_INTERFACE, STRID_HID_LAMP_INTERFACE, STRID_CDC_INTERFACE };
-
 // array of pointer to string descriptors
 char const* string_desc_arr[] = {
     (const char[]){ 0x09, 0x04 },  // 0: is supported language is English (0x0409)
     "Catium",                      // 1: Manufacturer
-    "Nyanithm Controller",          // 2: Product
+    "Nyanithm Controller V1",       // 2: Product
     NULL,                          // 3: Serials will use unique ID if possible
     "Nyanithm HID Keyboard",        // 4: HID Keyboard Interface
     "Nyanithm HID LampArray",       // 5: HID LampArray Interface
-    "Nyanithm CDC",                 // 6: CDC Interface
+    "Nyanithm Controller V1",       // 6: CDC Interface
 };
 
 static uint16_t _desc_str[32 + 1];

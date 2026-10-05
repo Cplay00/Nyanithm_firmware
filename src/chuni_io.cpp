@@ -146,7 +146,12 @@ struct NyanithmTelemetry {
 
 static NyanithmInput prevInputState;
 static uint8_t prevAirState = 0;
-static uint32_t latencyFrameMs = 0;  // round55: arrival timestamp of the frame currently held back (cfg3 latency)
+struct InputDelayFrame { NyanithmInput state; uint32_t observedMs; };
+static constexpr uint8_t INPUT_DELAY_CAPACITY = 32;
+static InputDelayFrame inputDelay[INPUT_DELAY_CAPACITY];
+static NyanithmInput lastObservedInput{};
+static uint8_t inputDelayHead = 0, inputDelayCount = 0, inputDelayMs = 0xff;
+static uint8_t inputDelayFormat = 0xff;
 
 // round47b-patch: maindev_loop() removed (dead code, replaced by cdc_respond on Core1).
 // It read touchData32 without seqlock and was never called after the round46
@@ -184,20 +189,82 @@ bool rawModeActive() {
     return rawReportLevel != 0 || gameRawEnabled;
 }
 
+static void acceptInputFrame(const uint8_t* slider, const uint8_t* pressure, uint8_t air) {
+    const uint8_t format = rawReportLevel | (gameRawEnabled ? 4 : 0) |
+        (((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3) ? 8 : 0);
+    if (inputDelayFormat != format) {
+        inputDelayHead = inputDelayCount = 0;
+        inputDelayMs = 0xff;
+        inputDelayFormat = format;
+        inputState = {};
+    }
+    NyanithmInput next;
+    memcpy(next.slider, slider, sizeof(next.slider));
+    next.air = air;
+    if (rawModeActive()) {
+        const bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3;
+        for (uint8_t i = 0; i < 32; ++i) {
+            if (rawReportLevel == 2) next.slider[i] = pressure[i];
+            else if (!slider[i]) next.slider[i] = 0;
+            else if (!gameRawEnabled) next.slider[i] = 128;
+            else {
+                uint16_t value = useMbr ? pressure[i] : uint16_t(pressure[i]) * 2;
+                if (value > 255) value = 255;
+                next.slider[i] = value ? value : 1;
+            }
+        }
+    }
+    const uint8_t delay = ControllerConfig.cfg3 > INPUT_LATENCY_MAX_MS
+        ? INPUT_LATENCY_MAX_MS : ControllerConfig.cfg3;
+    if (delay != inputDelayMs) {
+        inputDelayHead = inputDelayCount = 0;
+        lastObservedInput = inputState;
+        inputDelayMs = delay;
+    }
+    if (!delay) { inputState = next; lastObservedInput = next; return; }
+    const uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (memcmp(&next, &lastObservedInput, sizeof(next)) != 0 && inputDelayCount < INPUT_DELAY_CAPACITY) {
+        const uint8_t index = (inputDelayHead + inputDelayCount) % INPUT_DELAY_CAPACITY;
+        inputDelay[index] = {next, now};
+        ++inputDelayCount;
+        lastObservedInput = next;
+    }
+    // Serve one observed edge at a time so a short press followed by release
+    // survives the delay. A full queue never permits an immature state early.
+    if (inputDelayCount && now - inputDelay[inputDelayHead].observedMs >= delay) {
+        inputState = inputDelay[inputDelayHead].state;
+        inputDelayHead = (inputDelayHead + 1) % INPUT_DELAY_CAPACITY;
+        --inputDelayCount;
+    }
+}
+
 // A timed-out RGB payload is still data, even if a byte equals B3/BB/A5.
 // Preserve its boundary across iterations; a disconnect resets the session.
 static struct {
     uint8_t data[96];
     uint32_t received, started;
-    bool pending, discard, startedWithDtr;
+    uint8_t length = 96;
+    bool pending, discard, startedWithDtr, raw;
 } normalLed{};
 static bool discardUntilDtr = false;
 
+void resetCdcSession() {
+    normalLed = {};
+    discardUntilDtr = false;
+    flashingArmed = false;
+    rawReportLevel = 0;
+    inputDelayHead = inputDelayCount = 0;
+    inputDelayMs = 0xff;
+    inputDelayFormat = 0xff;
+    inputState = {};
+    tud_cdc_read_flush();
+}
+
 void cdcSessionStateChanged(bool dtr) {
-    if (!dtr && normalLed.pending && normalLed.startedWithDtr) {
+    if (normalLed.pending && dtr != normalLed.startedWithDtr) {
         normalLed = {};
         tud_cdc_read_flush();
-        discardUntilDtr = true;
+        discardUntilDtr = !dtr;
     } else if (dtr && discardUntilDtr) {
         tud_cdc_read_flush();
         discardUntilDtr = false;
@@ -214,14 +281,29 @@ static void pollNormalLedPayload() {
         cdcSessionStateChanged(false);
         return;
     }
-    if (to_ms_since_boot(get_absolute_time()) - normalLed.started >= 500) {
+    if (to_ms_since_boot(get_absolute_time()) - normalLed.started >= (normalLed.raw ? 100u : 500u)) {
         normalLed.discard = true;
     }
     normalLed.received += tud_cdc_read(normalLed.data + normalLed.received,
-                                     sizeof(normalLed.data) - normalLed.received);
-    if (normalLed.received != sizeof(normalLed.data)) return;
+                                     normalLed.length - normalLed.received);
+    if (normalLed.received != normalLed.length) return;
     normalLed.pending = false;
     if (normalLed.discard) return;
+    if (normalLed.raw) {
+        const uint8_t value = normalLed.data[0];
+        if (value <= 2 && value != rawReportLevel) {
+            rawReportLevel = value;
+            inputDelayHead = inputDelayCount = 0;
+            inputDelayMs = inputDelayFormat = 0xff;
+            inputState = {};
+        }
+        const uint8_t level = rawReportLevel ? rawReportLevel : (gameRawEnabled ? 1 : 0);
+        const uint8_t reply[6] = {'R', 'A', 'W', '=', (uint8_t)('0' + level), '\n'};
+        tud_cdc_write(reply, sizeof(reply));
+        tud_cdc_write_flush();
+        g_tele.cdcTxBytes += sizeof(reply);
+        return;
+    }
         if (g_lampCount < 31) {
             RGB_LED.fill(0, 0, 0, g_lampCount, 31 - g_lampCount);
         }
@@ -390,16 +472,10 @@ void cdc_respond() {
         // DLL is never blocked more than 5ms; it gets the last state instead.
         uint32_t g;
         uint8_t air = 0;
-        // round66: pressure snapshot + touch bits copied in the SAME seqlock
-        // scope; declared at function scope so the raw-mode substitution below
-        // (after the loop) can read them.
+        // Pressure, slider and air must belong to one completed snapshot.
         uint8_t tmpSlider[32];
         uint8_t tmpPressure[32];
-        // round73: 仅当本轮真正提交了新帧(seqlock 成功且未被 cfg3 持帧)才做
-        // raw 压力替换。超时路径若照旧替换,tmpPressure 可能是奇偶栅栏切换中途
-        // 的新旧混合快照,违背"超时保留 last-good"约定;持帧路径重替换也会让
-        // 已服务状态被同轮新采样覆盖。两种情况都应原样保持上一服务帧。
-        bool frameFresh = false;
+        // Map/enqueue only a coherent snapshot; timeout retains the served frame.
         uint32_t spinStart = to_ms_since_boot(get_absolute_time());
         while (true) {
             do { g = touchStateGen; } while ((g & 1) && (to_ms_since_boot(get_absolute_time()) - spinStart) < 1);
@@ -415,72 +491,12 @@ void cdc_respond() {
                 // frame until nowMs >= frameFirstSeenMs + latencyMs, so state
                 // younger than the configured delay is never served. Poll rate
                 // is unaffected (busy callers spin at their own cadence).
-                uint32_t nowMs = to_ms_since_boot(get_absolute_time());
-                uint32_t latencyMs = ControllerConfig.cfg3 > INPUT_LATENCY_MAX_MS
-                                         ? INPUT_LATENCY_MAX_MS
-                                         : ControllerConfig.cfg3;
-                bool changed = memcmp(inputState.slider, tmpSlider, 32) != 0 || inputState.air != air;
-                if (changed) {
-                    if (nowMs - latencyFrameMs < latencyMs) break;  // too fresh - keep serving previous frame
-                    latencyFrameMs = nowMs;
-                }
-                memcpy(inputState.slider, tmpSlider, 32);
-                inputState.air = air;
-                frameFresh = true;
+                acceptInputFrame(tmpSlider, tmpPressure, air);
                 break;
             }
             if (to_ms_since_boot(get_absolute_time()) - spinStart >= 1) { air = inputState.air; break; }  // round47b-patch: timeout - sync air to last good value for telemetry consistency
         }
-        // inputState already committed on success; on timeout it retains last good value
-
-        // round66/68/69: raw pressure substitution - tmpPressure was copied in
-        // the same seqlock scope as touchData32. Panel mode (rawReportLevel):
-        // all lanes report pressure. Game mode (cfg2 bit1 baseline):
-        // pressed lanes report linear-normalized pressure (0-255 scale), released
-        // lanes 0. Both off keeps the 0/128 frame byte-identical to 1.5.x.
-        // round73: 追加 frameFresh 门控(见上)。
-        // round80: MPR121 pressure is contact-area proportional (user-measured:
-        // finger 30-50, palm ~130) and never reaches 255 natively -- report x2
-        // (clamp 255) in BOTH panel real-pressure and game raw modes so the
-        // reported scale stays linear up to the game cap. The old game-mode x4
-        // saturated even medium touches and destroyed the area linearity.
-        // MBR3116 DIFFERENCE_COUNT is natively 0-255 -- untouched. Scaling
-        // happens only at this reporting layer; pressureSnap / 0xC2 debug
-        // still carry raw values.
-        // round84/86: 0xC5 level 语义:
-        // level 2 = 原始结果 (Raw Sensor): 直报传感器物理读数 (含未触碰底噪), 不受按键判定门控;
-        // level 1 = 模拟结果 (Game Simulation): 严格以设备在游戏中的实际输入结果为准!
-        //           经过设备内全部管线 (阈值/消抖/拉伸/邻居豁免) 判定为未触发的键恒为 0;
-        //           判定为触发的键: 若配置开启了真实压力映射 (gameRawEnabled) 则上报压力 p,
-        //           未开启真实压力映射则上报游戏标准二值判定 128。
-        if (rawModeActive() && frameFresh) {
-            bool useMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) ||
-                          ControllerConfig.hwVer >= 3;  // same rule as sanitizeConfig
-            if (rawReportLevel == 2) {
-                // level 2: 原始结果 -- 物理层读数直出 (用于观测底噪/悬停/校准)
-                for (int i = 0; i < 32; i++) {
-                    inputState.slider[i] = (uint8_t)tmpPressure[i];
-                }
-            } else {
-                // level 1 (模拟结果) 与 level 0 (游戏模式): 真实游戏判定呈现
-                for (int i = 0; i < 32; i++) {
-                    uint8_t pressed = tmpSlider[i] ? 1 : 0;
-                    if (!pressed) {
-                        inputState.slider[i] = 0;
-                    } else if (gameRawEnabled) {
-                        uint16_t v = tmpPressure[i];
-                        if (!useMbr) {
-                            v <<= 1;
-                            if (v > 255) v = 255;
-                        }
-                        uint8_t p = (uint8_t)v;
-                        inputState.slider[i] = (p > 0 ? p : 1);
-                    } else {
-                        inputState.slider[i] = 128;
-                    }
-                }
-            }
-        }
+        air = inputState.air;  // telemetry follows the frame actually served
 
         // round46: telemetry - record response edges + counters
         if (g_tele.servedCount > 0) {
@@ -785,34 +801,17 @@ void cdc_respond() {
         g_tele.cdcTxBytes += 6;
     }
     if (cmd == CMD_SET_RAW_REPORT) {
-        // round66: set the raw pressure report switch. Host sends 1 byte.
-        // round68: 0x00 reverts to the cfg2 bit1 game-raw baseline (not a hard
-        // binary mode) so a panel session on a game-raw-enabled device does not
-        // permanently flip the device back to binary.
-        // round84: payload is a level: 0=off, 1=simulated report (x2), 2=raw
-        // report (unscaled). Unknown values keep the current state (a legacy
-        // host that only ever sends 0/1 is unaffected).
-        uint8_t v = 0;
-        // round78: subtraction compare (wrap-safe); was a 49.7-day rollover hazard.
-        uint32_t rawStart = to_ms_since_boot(get_absolute_time());
-        while (tud_cdc_available() == 0 && to_ms_since_boot(get_absolute_time()) - rawStart < 100) {
-            tud_task();
-            sleep_us(100);
-        }
-        if (tud_cdc_read(&v, 1) == 1) {
-            if (v == 0) rawReportLevel = 0;
-            else if (v == 1 || v == 2) rawReportLevel = v;
-        }
-        char resp[8];
-        uint8_t lvl = rawReportLevel ? rawReportLevel : (gameRawEnabled ? 1 : 0);
-        resp[0] = 'R'; resp[1] = 'A'; resp[2] = 'W'; resp[3] = '=';
-        resp[4] = (char)('0' + lvl); resp[5] = '\n'; resp[6] = 0;
-        tud_cdc_write((const uint8_t*)resp, 6);
-        tud_cdc_write_flush();
-        g_tele.cdcTxBytes += 6;
+        normalLed = {};
+        normalLed.raw = true;
+        normalLed.length = 1;
+        normalLed.started = to_ms_since_boot(get_absolute_time());
+        normalLed.startedWithDtr = tud_cdc_connected();
+        normalLed.pending = true;
+        pollNormalLedPayload();
+        return;
     }
     if (cmd == CMD_SET_LED) {
-        normalLed.received = 0;
+        normalLed = {};
         normalLed.started = to_ms_since_boot(get_absolute_time());
         normalLed.discard = false;
         normalLed.startedWithDtr = tud_cdc_connected();

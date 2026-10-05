@@ -38,6 +38,7 @@ extern volatile uint32_t flashDiagGapMs;
 // so CDC responses are no longer blocked by Core0's updateInputState() scan.
 void cdc_respond();
 void cdcSessionStateChanged(bool dtr);
+void resetCdcSession();
 
 
 

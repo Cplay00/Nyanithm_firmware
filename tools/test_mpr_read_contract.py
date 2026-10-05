@@ -108,7 +108,9 @@ def main():
     signatures = ['MPR121::MPR121(', 'uint16_t MPR121::filteredData(', 'uint16_t MPR121::baselineData(',
                   'bool MPR121::readRegisters(', 'uint16_t MPR121::touched(',
                   'uint8_t MPR121::readRegister8(', 'uint16_t MPR121::readRegister16(']
-    checked = 'readTouchStatus' in header
+    checked = 'readRegisterChecked' in header
+    if not checked and 'readTouchStatus' in header:
+        signatures += ['bool MPR121::readTouchStatus(']
     if checked:
         signatures += ['bool MPR121::readRegisterChecked(', 'bool MPR121::readTouchStatus(',
                        'bool MPR121::readFilteredData(', 'bool MPR121::readBaselineData(']

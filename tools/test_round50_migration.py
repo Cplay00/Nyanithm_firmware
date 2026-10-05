@@ -330,7 +330,7 @@ class TouchPipeline:
 
         for e in range(self.num_elec):
             state = self.elec[e]
-            fault = (self.is_mbr3116 and not self.strict_current and
+            fault = (not self.strict_current and
                      bool(self.mbr_fault_mask & (1 << e)))
             if fault:
                 if not state.faultActive:
@@ -398,7 +398,8 @@ class TouchPipeline:
                       distance_sample_valid: bool = True,
                       difference_read_valid: bool = True,
                       mbr_button_valid: bool = True,
-                      button_read_age_ms: int = 0) -> SimResult:
+                      button_read_age_ms: int = 0,
+                      mpr_button_valid: bool = True) -> SimResult:
         """Process one cycle: verify -> stretch -> output."""
         result = SimResult()
         prev_stretched = self.prevStretched
@@ -436,6 +437,9 @@ class TouchPipeline:
             if not strict and (not mbr_button_valid or button_read_age_ms > MBR_NATIVE_MAX_AGE_MS):
                 raw = 0
                 self.mbr_fault_mask = (1 << self.num_elec) - 1
+        elif not mpr_button_valid:
+            raw, v_res = 0, SimResult()
+            self.mbr_fault_mask = (1 << self.num_elec) - 1
         else:
             raw, v_res = self._verify_mpr121(raw, hw_touch, diff_data, i2c_error, prev_stretched)
         result.i2c_reads = v_res.i2c_reads
@@ -1284,6 +1288,24 @@ def run_tests():
         tr.check(f"S45: failed MPR evidence cannot create ON ({frame})", r.stretched_out == 0, "")
     r = failed_mpr.process_cycle(1, [60] * 12)
     tr.check("S45: fresh MPR evidence recovers", r.raw_out == 1, "")
+    for started in (100, 0xFFFFFFF0):
+        mpr = TouchPipeline(12, False)
+        mpr.process_cycle(1, [60] * 12)
+        mpr.cycle_ms = started
+        r = mpr.process_cycle(1, [60] * 12, mpr_button_valid=False)
+        tr.check("S46: failed MPR status briefly holds admitted ON", r.stretched_out == 1, "")
+        mpr.cycle_ms = (started + 49) & 0xFFFFFFFF
+        tr.check("S46: MPR status fault held at 49ms", mpr.process_cycle(
+            1, [60] * 12, mpr_button_valid=False).stretched_out == 1, "")
+        mpr.cycle_ms = (started + 50) & 0xFFFFFFFF
+        tr.check("S46: MPR status fault releases at 50ms", mpr.process_cycle(
+            1, [60] * 12, mpr_button_valid=False).stretched_out == 0, "")
+        tr.check("S46: MPR recovers only on fresh status", mpr.process_cycle(
+            1, [60] * 12).stretched_out == 1, "")
+    mpr = TouchPipeline(12, False)
+    for _ in range(20):
+        r = mpr.process_cycle(1, [60] * 12, mpr_button_valid=False)
+        tr.check("S47: failed MPR status cannot create a new ON", r.stretched_out == 0, "")
     return tr
 
 

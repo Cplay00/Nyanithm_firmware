@@ -11,6 +11,9 @@
 #include <tusb.h>
 
 void handleCommand();
+bool readCdcPayload(uint8_t* buffer, int length, uint32_t timeoutMs);
+void configCdcSessionStateChanged(bool dtr);
+void resetConfigCdcSession();
 extern bool hid_working ;
 
 

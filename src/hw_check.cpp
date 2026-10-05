@@ -51,7 +51,7 @@ bool hardwareConfigMismatch() {
     const bool useMbr = v2 || (ControllerConfig.cfg0 & CFG0_BIT_MBR3116);
     const bool touchMismatch = useMbr
         ? (mprMask != 0 || mbrMask != (v2 ? 0x18 : 0x07))
-        : (mprMask != 0x07 || mbrMask != 0);
+        : (mprMask != 0x07 || mbrMask != 0 || !mpr0.ready() || !mpr1.ready() || !mpr2.ready());
     const uint8_t expectedTof = (ControllerConfig.hwVer == 2 ||
                                  ControllerConfig.hwVer == 4) ? 0x1f : 0x0f;
     // IR is auto-selected, not a saved configuration bit. WS2812 has no readback.

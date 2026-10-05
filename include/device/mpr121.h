@@ -94,6 +94,7 @@ public:
     uint16_t readRegister16(uint8_t reg);
     void writeRegister(uint8_t reg, uint8_t value);
     uint16_t touched(void);
+    bool readTouchStatus(uint16_t* value);
 
     void setThresholds(uint8_t touch, uint8_t release);
 

@@ -8,7 +8,7 @@ import subprocess
 import test_mbr_distance_pipeline as host
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT.parent / '_dev_tools/round90v_audit_host'
+OUT = ROOT.parent / '_dev_tools/round90y_audit_host'
 
 STUBS = r'''
 static controller_config ControllerConfig{}, defaultConfig{};
@@ -51,6 +51,13 @@ static void watchdog_update() { ++watchdogFeeds; }
 static void sleep_ms(unsigned n) { fakeNow += n; }
 static bool connected = true, txDrains = true;
 static bool mounted = true, discardUntilDtr = false;
+static uint32_t configSessionEpoch = 0;
+static uint8_t inputDelayHead, inputDelayCount, inputDelayMs, inputDelayFormat;
+static struct { uint8_t slider[32], air; } inputState;
+static uint8_t rawReportLevel;
+static bool gameRawEnabled;
+static bool flashingArmed;
+static struct { unsigned cdcTxBytes; } g_tele;
 static uint32_t txSpace = 32, txTotal;
 static uint8_t rx[128]{};
 static uint32_t rxCount, rxPos;
@@ -93,6 +100,7 @@ public:
     uint8_t readRegister8(uint8_t);
     uint16_t readRegister16(uint8_t);
     uint16_t touched();
+    bool readTouchStatus(uint16_t*);
 };
 class VL53L0X {
 public:
@@ -146,7 +154,7 @@ extern "C" void auditEntry() {
     for (unsigned i=0; command[i]; ++i) if (command[i]=='=') {
         n=0; while(command[++i]>='0' && command[i]<='9') n=n*10+command[i]-'0'; break;
     }
-    CHECK(n<17); initializeConfig();
+    CHECK(n<21); initializeConfig(); normalLed = {};
     if (n<6) {
         if (n==0) { readConfigSafe(nullptr); CHECK(currentPage==0 && programCount==1); }
         else {
@@ -224,6 +232,26 @@ extern "C" void auditEntry() {
         CHECK(!discardUntilDtr && rxPos==97);
         rx[97]=0xb1; rxCount=98; uint8_t command=0;
         CHECK(tud_cdc_read(&command,1)==1 && command==0xb1);
+    } else if (n==17 || n==18) {
+        normalLed.pending=true; normalLed.raw=true; normalLed.length=1;
+        normalLed.started=fakeNow; normalLed.startedWithDtr=true;
+        pollNormalLedPayload(); CHECK(normalLed.pending && txTotal==0);
+        if(n==18) fakeNow+=101;
+        rx[0]=n==17 ? 2 : 0xb3; rxCount=1; pollNormalLedPayload();
+        CHECK(!normalLed.pending && rxPos==1);
+        CHECK(rawReportLevel==(n==17 ? 2 : 0) && txTotal==(n==17 ? 6u : 0u));
+    } else if (n==19) {
+        normalLed.pending=true; normalLed.startedWithDtr=false; normalLed.started=fakeNow;
+        rxCount=64; pollNormalLedPayload(); CHECK(normalLed.pending);
+        connected=true; cdcSessionStateChanged(true);
+        CHECK(!normalLed.pending && !discardUntilDtr && rxPos==rxCount);
+    } else if (n==20) {
+        normalLed.pending=true; normalLed.raw=true; normalLed.length=1;
+        normalLed.started=fakeNow; rawReportLevel=2;
+        inputDelayCount=3; inputDelayFormat=2; rxCount=1;
+        resetCdcSession();
+        CHECK(!normalLed.pending && normalLed.length==96 && !normalLed.raw);
+        CHECK(rawReportLevel==0 && inputDelayCount==0 && inputDelayFormat==0xff && rxPos==rxCount);
     } else {
         semStuck=true; acquireUSBForCore0(); CHECK(false);
     }
@@ -238,13 +266,14 @@ def main():
         'controller_config.cpp': ['static bool validateConfigQuiet(', 'static void sanitizeConfig(',
                                   'static void recomputeXorSum(', 'void saveConfigSafe(', 'void readConfigSafe('],
         'mpr121.cpp': ['bool MPR121::readRegisters(', 'uint16_t MPR121::touched(',
+                      'bool MPR121::readTouchStatus(',
                       'uint8_t MPR121::readRegister8(', 'uint16_t MPR121::readRegister16('],
         'vl53l0x.cpp': ['uint8_t VL53L0X::readReg(', 'uint16_t VL53L0X::readReg16Bit(',
                        'uint32_t VL53L0X::readReg32Bit(', 'void VL53L0X::writeMulti(', 'void VL53L0X::readMulti('],
         'cy8cmbr3116.cpp': ['uint8_t CY8CMBR3116::requestData(', 'uint8_t CY8CMBR3116::requestDataFromAddress('],
         'tca9539.cpp': ['uint8_t TCA9539::readReg(', 'bool TCA9539::isConnected()'],
         'app_link.cpp': ['static bool writeCdcPayload('],
-        'chuni_io.cpp': ['void cdcSessionStateChanged(', 'static void pollNormalLedPayload('],
+        'chuni_io.cpp': ['void resetCdcSession(', 'void cdcSessionStateChanged(', 'static void pollNormalLedPayload('],
         'lamp_array.cpp': ['void lamp_array_finish_startup()', 'void lamp_array_apply('],
         'usb_device.cpp': ['void acquireUSBForCore0()'],
     }.items():
@@ -269,7 +298,7 @@ def main():
     compiled = subprocess.run(command, capture_output=True, text=True, timeout=60)
     if compiled.returncode: raise SystemExit(compiled.stdout + compiled.stderr)
     results = []
-    for n in range(17):
+    for n in range(21):
         r = subprocess.run([str(exe), f'--case={n}'], capture_output=True, text=True, timeout=10)
         match = re.search(r'PASS checks=(\d+)', r.stdout)
         passed = r.returncode == 0 and match is not None
@@ -277,7 +306,7 @@ def main():
         print(('PASS' if passed else 'FAIL') + f' {n}: ' + r.stdout.strip())
     (OUT / 'results.json').write_text(json.dumps({'functions': hashes, 'results': results}, indent=2)+'\n', encoding='utf-8')
     total = sum(r['passed'] for r in results)
-    print(f'Firmware audit: {total}/17 scenarios, {sum(r["checks"] for r in results)} checks')
-    return 0 if total == 17 else 1
+    print(f'Firmware audit: {total}/21 scenarios, {sum(r["checks"] for r in results)} checks')
+    return 0 if total == 21 else 1
 
 if __name__ == '__main__': raise SystemExit(main())

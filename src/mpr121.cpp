@@ -58,6 +58,7 @@ MPR121::MPR121(uint8_t _port, uint8_t i2c_addr) {
 }
 
 void MPR121::init(uint8_t touchThreshold, uint8_t releaseThreshold, bool autoconfig) {
+    good = true;
     writeRegister(MPR121_SOFTRESET, 0x63);
 
     sleep_ms(1);
@@ -118,7 +119,6 @@ void MPR121::init(uint8_t touchThreshold, uint8_t releaseThreshold, bool autocon
     // ELE_EN Electrode Enable:  amount of electrodes running (12)
     uint8_t ECR_SETTING = 0b10000000 + 12;
     writeRegister(MPR121_ECR, ECR_SETTING);  // start with above ECR setting
-    good = true;
 }
 
 /*!
@@ -231,9 +231,12 @@ void MPR121::calibrateBaseline(bool force) {
     // Stage 2: wait for untouched window (1 retry, max 100ms). Skipped if force=true
     // (sticky-key recovery path: touched()!=1 is stuck, must recalibrate anyway).
     if (!force) {
-        if (touched() != 0) {
+        uint16_t status = 0;
+        if (!readTouchStatus(&status)) { good = false; return; }
+        if (status != 0) {
             sleep_ms(100);
-            if (touched() != 0) return;
+            if (!readTouchStatus(&status)) { good = false; return; }
+            if (status != 0) return;
         }
     }
 
@@ -241,24 +244,23 @@ void MPR121::calibrateBaseline(bool force) {
     // ten-bit electrode sample, then tracks normally. The former trimmed
     // seed writes were overwritten by CL=11, so remove their unused reads.
     uint8_t ecr = 0;
-    if (!readRegisters(MPR121_ECR, &ecr, 1)) return;
+    if (!readRegisters(MPR121_ECR, &ecr, 1)) { good = false; return; }
     uint8_t data[2] = {MPR121_ECR, 0};
-    if (i2c_write(port, addr, data, 2, false) != 2) return;
+    if (i2c_write(port, addr, data, 2, false) != 2) { good = false; return; }
     data[0] = MPR121_AUTOCONFIG0;
     data[1] = 0;
-    i2c_write(port, addr, data, 2, false);
+    if (i2c_write(port, addr, data, 2, false) != 2) good = false;
     data[0] = MPR121_ECR;
     data[1] = (ecr & 0x0f) | 0xc0;
-    i2c_write(port, addr, data, 2, false);
-
-    // Verify ECR was accepted (readback with retry).
-    sleep_ms(1);
-    for (uint8_t retry = 0; retry < 3; retry++) {
-        uint8_t ecr_now = readRegister8(MPR121_ECR);
-        if (ecr_now == data[1]) break;  // verified
+    // Restore Run Mode through bounded writes and checked readback. A chip
+    // left in Stop Mode must not be declared ready merely because it ACKs.
+    for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+        const bool written = i2c_write(port, addr, data, 2, false) == 2;
         sleep_ms(1);
-        i2c_write(port, addr, data, 2, false);
+        uint8_t accepted = 0;
+        if (written && readRegisters(MPR121_ECR, &accepted, 1) && accepted == data[1]) return;
     }
+    good = false;
 }
 
 /*!
@@ -314,18 +316,25 @@ bool MPR121::readRegisters(uint8_t reg, uint8_t* dst, uint8_t n) {
  * device is currently deemed to be touched.
  */
 uint16_t MPR121::touched(void) {
+    uint16_t value = 0;
+    readTouchStatus(&value);
+    return value;
+}
+
+bool MPR121::readTouchStatus(uint16_t* value) {
     uint8_t reg = MPR121_TOUCHSTATUS_L;
     uint8_t buffer[2] = {0, 0};
     int ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
     if (ret != 2) {
         sleep_us(50);
         ret = i2c_write_read(port, addr, &reg, 1, buffer, 2);
-        if (ret != 2) return 0;  // I2C error: safe default = no touch
+        if (ret != 2) { *value = 0; return false; }
     }
     uint16_t t = buffer[1];
     t <<= 8;
     t |= buffer[0];
-    return t & 0x0FFF;
+    *value = t & 0x0FFF;
+    return true;
 }
 
 /*!
@@ -370,27 +379,32 @@ void MPR121::writeRegister(uint8_t reg, uint8_t value) {
 
     // uint8_t ecr_backup = ecr_reg.read();
 
-    uint8_t ecr_backup = readRegister8(MPR121_ECR);
-
     if ((reg == MPR121_ECR) || ((0x73 <= reg) && (reg <= 0x7A))) {
         stop_required = false;
     }
 
     uint8_t data[2] = { 0x00, 0x00 };
+    uint8_t ecr_backup = 0;
 
     if (stop_required) {
+        // A failed read is not ECR=0. Never stop a running chip unless its
+        // native electrode enable/calibration state can be restored.
+        if (!readRegisters(MPR121_ECR, &ecr_backup, 1)) {
+            sleep_us(50);
+            if (!readRegisters(MPR121_ECR, &ecr_backup, 1)) { good = false; return; }
+        }
         // clear this register to set stop mode
         // ecr_reg.write(0x00);
         data[0] = MPR121_ECR;
         data[1] = 0x00;
-        i2c_write(port, addr, data, 2, false);
+        if (i2c_write(port, addr, data, 2, false) != 2) { good = false; return; }
     }
 
     // Adafruit_BusIO_Register the_reg = Adafruit_BusIO_Register(i2c_dev, reg, 1);
     // the_reg.write(value);
     data[0] = reg;
     data[1] = value;
-    i2c_write(port, addr, data, 2, false);
+    if (i2c_write(port, addr, data, 2, false) != 2) good = false;
 
     if (stop_required) {
         // write back the previous set ECR settings
@@ -402,6 +416,11 @@ void MPR121::writeRegister(uint8_t reg, uint8_t value) {
         if ((ecr_backup & 0xC0) == 0xC0) {
             data[1] = (ecr_backup & 0x0F) | 0x80;  // CL=10
         }
-        i2c_write(port, addr, data, 2, false);
+        bool resumed = false;
+        for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+            if (i2c_write(port, addr, data, 2, false) == 2) { resumed = true; break; }
+            sleep_us(50);
+        }
+        if (!resumed) good = false;
     }
 }

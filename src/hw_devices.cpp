@@ -261,17 +261,15 @@ void initMPR121() {
     // round46j: use ConfigApp values as-is - no forced minimums, no
     // per-electrode special-casing. ALL electrodes get the unified
     // th_touch/th_release that ConfigApp applied.
-    uint8_t th_t = ControllerConfig.th_touch;
-    uint8_t th_r = ControllerConfig.th_release;
     // round64: per-electrode thresholds driven by config (lane table lookup,
     // 0 = inherit global). Touch + release both written per electrode.
     for (uint8_t m = 0; m < 3; m++) {
         watchdog_update();
         for (uint8_t e = 0; e < 12; e++) {
-            uint8_t base = electrodeBaseTouchTh(m, e);
-            uint8_t baseR = electrodeBaseReleaseTh(m, e);
-            uint8_t eth = (base > th_t) ? base : th_t;
-            uint8_t erh = (baseR > th_r) ? baseR : th_r;
+            uint8_t eth = electrodeBaseTouchTh(m, e);
+            uint8_t erh = electrodeBaseReleaseTh(m, e);
+            if (!eth) eth = ControllerConfig.th_touch;
+            if (!erh) erh = ControllerConfig.th_release;
             if (m == 0) mpr0.setThresholdsForElectrode(e, eth, erh);
             else if (m == 1) mpr1.setThresholdsForElectrode(e, eth, erh);
             else mpr2.setThresholdsForElectrode(e, eth, erh);
@@ -594,7 +592,7 @@ static void updatePressureSnap() {
     uint32_t nowMs = to_ms_since_boot(get_absolute_time());
     if (nowMs - pressureSnapLastMs < PRESSURE_SNAP_INTERVAL_MS) return;
     pressureSnapLastMs = nowMs;
-    if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
+    if ((ControllerConfig.cfg0 & CFG0_BIT_MBR3116) || ControllerConfig.hwVer >= 3) {
         mbrReadPressureSnap();
     } else {
         mprReadPressureSnap();
@@ -986,14 +984,19 @@ void updateTouch_v2() {
 void updateTouch_v1() {
 
     uint16_t t0 = 0, t1 = 0, t2 = 0;  // round50: init to 0 for I2C error safety
+    bool mprButtonValid[3] = {true, true, true};
+    uint32_t mprButtonStartMs[3] = {};
     if (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) {
         t0 = readMbrButtons(0, &MBR3116A);
         t1 = readMbrButtons(1, &MBR3116B);
         t2 = readMbrButtons(2, &MBR3116C);
     } else {
-        t0 = mpr0.touched();
-        t1 = mpr1.touched();
-        t2 = mpr2.touched();
+        mprButtonStartMs[0] = to_ms_since_boot(get_absolute_time());
+        mprButtonValid[0] = mpr0.readTouchStatus(&t0);
+        mprButtonStartMs[1] = to_ms_since_boot(get_absolute_time());
+        mprButtonValid[1] = mpr1.readTouchStatus(&t1);
+        mprButtonStartMs[2] = to_ms_since_boot(get_absolute_time());
+        mprButtonValid[2] = mpr2.readTouchStatus(&t2);
     }
 
     // round45p: save pre-verification hardware touch snapshot for CMD_DEBUG_CHAIN
@@ -1045,7 +1048,12 @@ void updateTouch_v1() {
    uint32_t nowVer = to_ms_since_boot(get_absolute_time());  // round45r: sticky dip verification preservation
    const bool legacyMbr = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116) && !mbrDistanceEnabledForFrame;
    uint16_t legacyFaultMask[3] = {0, 0, 0};
-   uint32_t legacyReadStartedMs[3] = {mbrButtonStartMs[0], mbrButtonStartMs[1], mbrButtonStartMs[2]};
+   uint32_t legacyReadStartedMs[3];
+   for (uint8_t m = 0; m < 3; ++m) {
+       legacyReadStartedMs[m] = (ControllerConfig.cfg0 & CFG0_BIT_MBR3116)
+           ? mbrButtonStartMs[m] : mprButtonStartMs[m];
+       if (!mprButtonValid[m]) legacyFaultMask[m] = 0x0fff;
+   }
    if (!(ControllerConfig.cfg0 & CFG0_BIT_MBR3116)) {
         uint16_t raw[3] = {t0, t1, t2};
         MPR121* mprs[3] = {&mpr0, &mpr1, &mpr2};
@@ -1072,6 +1080,7 @@ void updateTouch_v1() {
             }
         }
       for (uint8_t m = 0; m < 3; m++) {
+            if (!mprButtonValid[m]) continue;
             for (uint8_t e = 0; e < 12; e++) {
                 if (raw[m] & (1 << e)) {
                     if (verifiedCount[m][e] < 2) {
@@ -1375,7 +1384,7 @@ void updateTouch_v1() {
    uint32_t now = to_ms_since_boot(get_absolute_time());
    for (uint8_t m = 0; m < 3; m++) {
        for (uint8_t e = 0; e < 12; e++) {
-           bool fault = legacyMbr && (legacyFaultMask[m] & (1u << e));
+           bool fault = (legacyFaultMask[m] & (1u << e)) != 0;
            bool hold = mbrLegacyFaultHold(legacyFaults[m][e], fault,
                (prevStretched[m] & (1u << e)) != 0, legacyReadStartedMs[m], now);
            if (fault) {
@@ -1592,7 +1601,7 @@ void updateAir() {
     bool gotNewData[5] = {};
     for (int i = 0; i < sensorCount; i++) {
         if (!(g_tofReadyMask & (1u << i))) continue;
-        if (useMuxScan) mux0.setChannel(i);
+        if (useMuxScan && mux0.setChannel(i) != 1) continue;
         if (tofs[i]->readRangeContinuousMillimetersAsync(heightDataOriginal + i)) {
             if (heightDataOriginal[i] >= 8190) {
                 tofValid[i] = false;
@@ -1615,10 +1624,12 @@ void updateAir() {
             anyUpdated = true;
         }
     }
+    // Validate against the time after all I/O, not the scan-start timestamp.
+    const uint32_t checkedAt = to_ms_since_boot(get_absolute_time());
     // Phase 2: Kalman predict (sensors without new data only) + update heightData for debug
     for (int i = 0; i < sensorCount; i++) {
         if (!gotNewData[i] && heightDataOriginal[i] < 8190) { kalman[i].x += kalman[i].v; kalman[i].v *= 0.85f; }
-        if (tofValid[i] && sampleNow - tofSampleMs[i] >= TOF_FRESH_MS) {
+        if (tofValid[i] && checkedAt - tofSampleMs[i] >= TOF_FRESH_MS) {
             tofValid[i] = false;
             kalman[i] = {0, 0, 200.0f, -1.0f};
             anyUpdated = true;
@@ -1630,7 +1641,7 @@ void updateAir() {
         // if every peripheral then stops producing measurements.
         for (int j = 0; j < 6; ++j) {
             if (airKeyTracker[j].state != AKS_ACTIVE &&
-                sampleNow - airKeyTracker[j].lastActiveMs >= 10) airKeys[j] = false;
+                checkedAt - airKeyTracker[j].lastActiveMs >= 10) airKeys[j] = false;
         }
         return;
     }

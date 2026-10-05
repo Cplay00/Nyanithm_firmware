@@ -30,6 +30,7 @@ std::vector<Read> reads;
 std::vector<uint8_t> transmitted;
 std::string errors;
 uint32_t clockMs, watchdogPumps, usbPumps, writeCalls;
+uint32_t configSessionEpoch = 0;
 uint8_t payload;
 bool payloadOk, connected, mbrOk;
 int failCall, failResult, mbrReads;
@@ -58,6 +59,7 @@ void tud_task() { ++usbPumps; }
 void sleep_ms(uint32_t t) { clockMs += t; }
 void tud_cdc_write_flush() {}
 bool tud_cdc_connected() { return connected && transmitted.size() < disconnectAfter; }
+bool tud_mounted() { return connected && transmitted.size() < disconnectAfter; }
 uint32_t tud_cdc_write(const uint8_t* src, uint32_t size) {
     ++writeCalls;
     uint32_t n = std::min(size, txChunk);
