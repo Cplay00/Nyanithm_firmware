@@ -19,3 +19,4 @@ _to_delete/
 .playwright-cli/
 tools/
 /docs/
+/favicon.*
