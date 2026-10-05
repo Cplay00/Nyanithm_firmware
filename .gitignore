@@ -18,3 +18,4 @@ _to_delete/
 .mimosa/
 .playwright-cli/
 tools/
+/docs/

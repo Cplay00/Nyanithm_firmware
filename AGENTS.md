@@ -7,5 +7,7 @@ branch is merged here; maintain the V1 universal 1.6.6 release engine, main pane
 icons and combined documentation. beta16 is a historical rollback baseline.
 Historical compatibility folders are archives;
 do not synchronize them. Build from `tools/build_firmware.ps1 -Variant hw_v1`.
+`docs/` is a local-only archive, ignored by Git. Preserve its files locally;
+do not force-add it. Local `hw_v1` tracks `origin/hw_v1_compatible`.
 Back up code, materials, ignored files and Git history before another consolidation.
 Commit locally; do not push. See `docs/round90x_主工作树合并记录.md` for the merge.

@@ -2,9 +2,9 @@
 
 Nyanithm 触摸控制器固件 -- hw_v1 通用版本
 
-当前正式版：**1.6.6**（V1 系列通用固件，`round90y-v1-release`）。USB 产品与 CDC 接口名称为 `Nyanithm Controller V1`。升级内容和硬件配置提示见 [1.6.5 → 1.6.6 更新说明](docs/1.6.5-1.6.6_更新说明.md)。
+当前正式版：**1.6.6**（V1 系列通用固件，`round90y-v1-release`）。USB 产品与 CDC 接口名称为 `Nyanithm Controller V1`。升级说明、硬件配置提示和审修资料保存在仅本地的 `docs/`，不纳入版本控制。
 
-2026-10-05 起，唯一维护分支为 `hw_v1`，主工作树为 `Nyanithm_firmware_hw_v1/`。原主树与通用版合并，保留已部署 beta16 的固件实现、主树最新控制面板及两侧资料。通用版临时分支在验证后移除。构建使用本目录 `tools/build_firmware.ps1 -Variant hw_v1`。合并记录见 [主工作树合并记录](docs/round90x_主工作树合并记录.md)；beta16 的审修和安装证据见 [通用版审修报告](docs/round90v_通用版审查与启动提示.md)。
+2026-10-05 起，唯一维护分支为 `hw_v1`，对应远端 `hw_v1_compatible`，主工作树为 `Nyanithm_firmware_hw_v1/`。原主树与通用版合并，保留已部署 beta16 的固件实现、主树最新控制面板及两侧资料。通用版临时分支在验证后移除。构建使用本目录 `tools/build_firmware.ps1 -Variant hw_v1`。合并记录及历史验证资料保留在本地 `docs/`。
 
 ## Contributors
 
